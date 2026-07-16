@@ -1,0 +1,27 @@
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { width: 390px; min-height: 480px; margin: 0; color: #e8edf5; background: #0b1019; }
+main { padding: 16px; }
+header { display: flex; align-items: center; justify-content: space-between; }
+h1 { margin: 0; font-size: 19px; } header p { margin: 3px 0 0; color: #7f8da3; font-size: 11px; }
+header span { padding: 4px 8px; border-radius: 999px; color: #5ee7a4; background: #123a30; font-size: 10px; font-weight: 800; }
+.balances { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 15px 0; }
+.balances div { padding: 12px; border: 1px solid #263143; border-radius: 12px; background: #111925; }
+small { color: #7f8da3; font-size: 10px; } .balances b { display: block; margin-top: 5px; font-size: 18px; }
+nav { display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; border-radius: 9px; background: #111925; }
+button { min-height: 34px; border: 1px solid #2b374a; border-radius: 8px; color: #cbd5e1; background: #172131; cursor: pointer; }
+nav button { border: 0; background: transparent; } nav button.active { color: #f8fafc; background: #263348; }
+.tab { display: none; padding-top: 13px; } .tab.active { display: block; }
+.list { display: grid; gap: 8px; max-height: 330px; overflow: auto; }
+.item { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 11px; border: 1px solid #263143; border-radius: 10px; background: #101722; }
+.item b,.item small { display: block; } .item small { margin-top: 3px; }
+.right { text-align: right; } .positive { color: #5ee7a4; } .negative { color: #fb7185; }
+.empty { padding: 35px 10px; color: #66758b; text-align: center; }
+label { display: grid; grid-template-columns: 1fr 130px; align-items: center; gap: 10px; margin-bottom: 9px; color: #a9b5c6; }
+input { width: 100%; height: 35px; padding: 0 9px; border: 1px solid #2b374a; border-radius: 8px; color: #eef2f7; background: #111925; outline: none; }
+input:focus { border-color: #45d6ba; }
+.primary { width: 100%; margin-top: 3px; border: 0; color: #06130f; background: linear-gradient(135deg,#34d399,#2dd4bf); font-weight: 800; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
+.danger { color: #fecdd3; border-color: #7f3342; background: #3b1c25; }
+.notice { color: #6f7d90; font-size: 10px; line-height: 1.5; }
+footer { margin-top: 12px; color: #65748a; text-align: center; font-size: 10px; }
