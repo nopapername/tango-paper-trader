@@ -69,6 +69,7 @@
     const quickBuyConfigChanged = previousSettings && (
       previousSettings.enabled !== runtime.settings.enabled ||
       previousSettings.showListQuickBuy !== runtime.settings.showListQuickBuy ||
+      previousSettings.language !== runtime.settings.language ||
       Number(previousSettings.buyPresets?.[0]) !== Number(runtime.settings.buyPresets?.[0])
     );
     if (!runtime.settings.enabled || !runtime.state.initialized || !runtime.settings.showListQuickBuy || quickBuyConfigChanged) Tango.GMGN.clearQuickBuy();
@@ -101,7 +102,7 @@
       runtime.lastQuoteWriteAt = Date.now();
       await Tango.Store.saveState(runtime.state);
     }
-    if (runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1);
+    if (runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1, t('paper'));
     else Tango.GMGN.clearQuickBuy();
     if (previousAddress !== runtime.current?.token?.address || runtime.current) queueRender();
   }
@@ -191,6 +192,9 @@
     }
     context.quote.solPriceUsd = Number(context.quote.solPriceUsd || solResponse?.price || runtime.solPriceUsd || 1);
     context.quote.observedAt = Date.now();
+    if (!(Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0)) {
+      return showToast(t('quoteLoading'), 'error');
+    }
     await buy(context.amountSol, context);
   }
 
@@ -357,20 +361,64 @@
 
   function renderBar(summary) {
     const collapsed = runtime.settings.barCollapsed;
-    return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)}" style="${floatingStyle(runtime.settings.barPosition)}">
+    return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)} ${collapsed ? 'collapsed' : ''}" style="${floatingStyle(runtime.settings.barPosition)}">
       <span class="tango-drag-grip" data-bar-drag title="${t('dragToMove')}">⠿</span>
       <div class="tango-bar-main" data-action="toggle-drawer">
         ${collapsed ? `<strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong>` : `
-          <div class="tango-stat"><strong>${accountMoney(summary.equitySol)}</strong><span>${t('balance')}</span></div>
+          <div class="tango-stat"><strong>${accountMoney(summary.cashBalanceSol)}</strong><span>${t('balance')}</span></div>
           <div class="tango-bar-divider"></div>
-          <div class="tango-stat"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>
+          <div class="tango-stat optional"><strong>${accountMoney(summary.equitySol)}</strong><span>${t('equity')}</span></div>
           <div class="tango-bar-divider"></div>
-          <div class="tango-stat optional"><strong class="${pnlClass(summary.todayPnlSol)}">${accountMoney(summary.todayPnlSol, true)}</strong><span>${t('todayPnl')}</span></div>
-          <div class="tango-bar-divider"></div>
-          <div class="tango-stat"><strong>${summary.positionCount}</strong><span>${t('positions')}</span></div>`}
+          <div class="tango-stat"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>`}
+        <span class="tango-bar-hint">${t('clickForPositions')} · ${summary.positionCount}</span>
       </div>
       <button class="tango-icon-button" data-action="collapse-bar">${collapsed ? '＋' : '－'}</button>
     </div>`;
+  }
+
+  function clearHeaderAccountSummary() {
+    const node = document.querySelector('#tango-header-account-summary');
+    node?.parentElement?.classList.remove('tango-wallet-summary-anchor');
+    node?.remove();
+  }
+
+  function ensureHeaderAccountSummaryStyle() {
+    if (document.querySelector('#tango-header-account-summary-style')) return;
+    const style = document.createElement('style');
+    style.id = 'tango-header-account-summary-style';
+    style.textContent = `
+      [data-testid="wallet-connected"].tango-wallet-summary-anchor { overflow: visible !important; position: relative !important; }
+      #tango-header-account-summary {
+        align-items: center; background: rgba(12,13,18,.96); border: 1px solid rgba(155,124,255,.34);
+        border-radius: 5px; color: #aeb1bd; display: flex; font: 600 9px/18px Inter,ui-sans-serif,system-ui,sans-serif;
+        gap: 6px; padding: 1px 6px; pointer-events: none; position: absolute; right: 0;
+        top: calc(100% + 2px); white-space: nowrap; width: max-content; z-index: 80;
+      }
+      #tango-header-account-summary strong { color: #f4f1ff; font-weight: 800; }
+      #tango-header-account-summary i { background: rgba(255,255,255,.12); height: 10px; width: 1px; }
+      #tango-header-account-summary .tango-header-paper-badge { color: #bcaaff; font-size: 8px; font-weight: 800; letter-spacing: .04em; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function renderHeaderAccountSummary(summary) {
+    const wallet = document.querySelector('[data-testid="wallet-connected"]');
+    if (!wallet || !summary) {
+      clearHeaderAccountSummary();
+      return;
+    }
+    ensureHeaderAccountSummaryStyle();
+    let node = document.querySelector('#tango-header-account-summary');
+    if (!node) {
+      node = document.createElement('div');
+      node.id = 'tango-header-account-summary';
+    }
+    if (node.parentElement !== wallet) wallet.appendChild(node);
+    wallet.classList.add('tango-wallet-summary-anchor');
+    const cash = Tango.Format.sol(summary.cashBalanceSol, language());
+    const equity = Tango.Format.sol(summary.equitySol, language());
+    const markup = `<span class="tango-header-paper-badge">${esc(t('paper'))}</span><span>${esc(t('paperBalance'))} <strong>${esc(cash)}</strong></span><i></i><span>${esc(t('totalAssets'))} <strong>${esc(equity)}</strong></span>`;
+    if (node.innerHTML !== markup) node.innerHTML = markup;
   }
 
   function renderPresetGrid(side, values) {
@@ -487,22 +535,24 @@
     const position = currentPosition();
     const currentPrice = Number(runtime.current.quote.priceUsd || 0);
     const currentMarketCap = Number(runtime.current.quote.marketCapUsd || 0);
-    const priceAtMarketCap = (marketCap, fallback = 0) => currentPrice > 0 && currentMarketCap > 0
-      ? currentPrice * Number(marketCap) / currentMarketCap
-      : Number(fallback || 0);
+    const priceAtMarketCap = (marketCap, recordedPrice = 0) => Number(recordedPrice) > 0
+      ? Number(recordedPrice)
+      : currentPrice > 0 && currentMarketCap > 0
+        ? currentPrice * Number(marketCap) / currentMarketCap
+        : 0;
     const markers = [];
     const entryMarketCap = Number(position?.averageEntryMarketCap || tokenTrades.find((trade) => trade.side === 'BUY')?.marketCapUsd || 0);
     if (entryMarketCap > 0) markers.push({
       side: 'BUY', marketCap: entryMarketCap,
-      price: priceAtMarketCap(entryMarketCap, position?.averageEntryPriceUsd), label: t('buy')
+      price: priceAtMarketCap(entryMarketCap, position?.averageEntryPriceUsd), label: t('paperBuy')
     });
-    tokenTrades.filter((trade) => trade.side === 'SELL').slice(0, 4).forEach((trade) => {
+    tokenTrades.filter((trade) => trade.side === 'SELL').slice(-4).forEach((trade) => {
       markers.push({
         side: 'SELL', marketCap: Number(trade.marketCapUsd),
-        price: priceAtMarketCap(trade.marketCapUsd, trade.observedPriceUsd), label: t('sell')
+        price: priceAtMarketCap(trade.marketCapUsd, trade.observedPriceUsd), label: t('paperSell')
       });
     });
-    return { currentPrice, currentMarketCap, markers };
+    return { tokenAddress: address, currentPrice, currentMarketCap, markers };
   }
 
   function syncChartMarkers() {
@@ -525,9 +575,11 @@
     if (!runtime.state || !runtime.settings) return;
     if (!runtime.settings.enabled || !runtime.state.initialized) {
       shell.innerHTML = '';
+      clearHeaderAccountSummary();
       return;
     }
     const summary = Tango.Engine.portfolioSummary(runtime.state);
+    renderHeaderAccountSummary(summary);
     shell.innerHTML = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     bindEvents();
     syncChartMarkers();
@@ -625,12 +677,14 @@
         runtime.lastUrl = location.href;
         tickQuote();
       }
-      clearTimeout(mutationTimer);
+      if (mutationTimer) return;
       mutationTimer = setTimeout(() => {
-        if (runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1);
+        mutationTimer = null;
+        if (runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1, t('paper'));
         else Tango.GMGN.clearQuickBuy();
+        if (runtime.settings?.enabled && runtime.state?.initialized) renderHeaderAccountSummary(Tango.Engine.portfolioSummary(runtime.state));
         if (document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe')) syncChartMarkers();
-      }, 250);
+      }, 160);
     });
     runtime.observer.observe(document.body, { childList: true, subtree: true });
     Tango.Store.subscribe(refresh);

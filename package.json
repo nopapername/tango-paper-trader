@@ -1,6 +1,6 @@
 {
   "name": "tango-paper-trader",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "Bilingual GMGN paper trading Chrome extension",
   "scripts": {

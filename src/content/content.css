@@ -34,14 +34,14 @@
 
 .tango-bar {
   align-items: center;
-  border-radius: 18px;
+  border-radius: 16px;
   bottom: 18px;
   display: flex;
-  gap: 12px;
+  gap: 8px;
   left: 50%;
-  min-height: 82px;
-  min-width: 610px;
-  padding: 11px 14px;
+  min-height: 68px;
+  min-width: 468px;
+  padding: 8px 10px;
   position: fixed;
   transform: translateX(-50%);
   user-select: none;
@@ -49,15 +49,19 @@
 }
 
 .tango-bar.top { bottom: auto; top: 18px; }
-.tango-bar-main { align-items: center; cursor: pointer; display: flex; flex: 1; gap: 19px; justify-content: center; padding: 5px 10px; }
+.tango-bar.collapsed { min-height: 54px; min-width: 220px; }
+.tango-bar-main { align-items: flex-start; cursor: pointer; display: flex; flex: 1; gap: 12px; justify-content: center; padding: 3px 6px 19px; position: relative; }
+.tango-bar-main:hover .tango-bar-hint { color: #d9ceff; }
 .tango-drag-grip { color: var(--muted); cursor: move; font-size: 17px; line-height: 1; padding: 10px 3px; touch-action: none; }
 .tango-brand { align-items: center; display: flex; font-weight: 800; gap: 7px; letter-spacing: .04em; }
 .tango-dot { background: var(--brand); border-radius: 50%; box-shadow: 0 0 14px var(--brand); height: 8px; width: 8px; }
 .tango-paper-badge { background: rgba(155,124,255,.16); border: 1px solid rgba(155,124,255,.4); border-radius: 5px; color: #c7b8ff; font-size: 9px; padding: 2px 5px; }
-.tango-stat { display: grid; gap: 4px; min-width: 108px; text-align: center; }
-.tango-stat span { color: var(--muted); font-size: 10px; letter-spacing: .06em; order: 2; text-transform: uppercase; }
-.tango-stat strong { font-size: 18px; font-weight: 800; order: 1; }
-.tango-bar-divider { background: var(--line); height: 46px; width: 1px; }
+.tango-stat { display: grid; gap: 2px; min-width: 90px; text-align: center; }
+.tango-stat span { color: var(--muted); font-size: 9px; letter-spacing: .05em; order: 2; text-transform: uppercase; }
+.tango-stat strong { font-size: 15px; font-weight: 800; order: 1; }
+.tango-bar-divider { background: var(--line); height: 34px; width: 1px; }
+.tango-bar-hint { bottom: 0; color: #b9a7ff; font-size: 10px; font-weight: 700; left: 50%; letter-spacing: .02em; position: absolute; transform: translateX(-50%); }
+.tango-bar-hint::before { content: '▴ '; }
 .tango-up { color: var(--green) !important; }
 .tango-down { color: var(--red) !important; }
 .tango-flat { color: var(--text) !important; }

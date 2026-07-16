@@ -12,6 +12,7 @@
   let nextCanvasId = 1;
   let markerState = null;
   let overlay = null;
+  let lastScaleMode = null;
 
   function parseNumber(text) {
     const source = String(text || '').trim();
@@ -52,7 +53,7 @@
     if (!(clientX > innerWidth - 180) || clientY < 35 || clientY > innerHeight - 55) return;
     const id = canvasId(canvas);
     const records = labelsByCanvas.get(id) || new Map();
-    records.set(`${String(text)}:${Math.round(clientY)}`, {
+    records.set(String(text), {
       text: String(text), value, y: clientY, x: clientX, id, updatedAt: Date.now()
     });
     if (records.size > 100) {
@@ -102,7 +103,7 @@
     const groups = [...labelsByCanvas.values()].map((records) => [...records.values()])
       .map((points) => {
         const deduped = new Map();
-        points.filter((point) => Date.now() - point.updatedAt < 30_000).forEach((point) => deduped.set(Math.round(point.y), point));
+        points.filter((point) => Date.now() - point.updatedAt < 6_000).forEach((point) => deduped.set(Math.round(point.y), point));
         return [...deduped.values()].sort((a, b) => a.y - b.y);
       }).filter((points) => points.length >= 2);
     const modes = [];
@@ -110,7 +111,7 @@
     if (Number(markerState.currentMarketCap) > 0) {
       [1, 1e3, 1e6, 1e9].forEach((factor) => modes.push({ type: 'MARKET_CAP', factor, current: Number(markerState.currentMarketCap) / factor }));
     }
-    let best = null;
+    const candidates = [];
     groups.forEach((points) => modes.forEach((mode) => {
       const nearest = Math.min(...points.map((point) => Math.abs(Math.log(point.value / mode.current))));
       const linear = linearFit(points, false);
@@ -118,9 +119,16 @@
       const fit = !linear ? logarithmic : !logarithmic ? linear : linear.error <= logarithmic.error ? linear : logarithmic;
       if (!fit) return;
       const score = nearest + Math.min(2, fit.error / Math.max(80, innerHeight));
-      if (!best || score < best.score) best = { ...mode, points, fit, score };
+      candidates.push({ ...mode, points, fit, score });
     }));
-    return best && best.score < 1.6 ? best : null;
+    const best = candidates.sort((a, b) => a.score - b.score)[0];
+    if (!best || best.score >= 1.6) return null;
+    const previous = lastScaleMode && candidates.find((candidate) =>
+      candidate.type === lastScaleMode.type && candidate.factor === lastScaleMode.factor && candidate.score < 1.6
+    );
+    const selected = previous && previous.score <= best.score + 0.28 ? previous : best;
+    lastScaleMode = { type: selected.type, factor: selected.factor };
+    return selected;
   }
 
   function compactUsd(value) {
@@ -181,7 +189,9 @@
 
   window.addEventListener('message', (event) => {
     if (event.data?.source !== 'TANGO_PAPER_PARENT' || event.data?.type !== 'CHART_MARKERS') return;
-    markerState = event.data.payload || null;
+    const nextState = event.data.payload || null;
+    if (markerState?.tokenAddress !== nextState?.tokenAddress) lastScaleMode = null;
+    markerState = nextState;
     renderMarkers();
   });
   window.addEventListener('resize', renderMarkers, { passive: true });

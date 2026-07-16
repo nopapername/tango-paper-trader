@@ -3,7 +3,7 @@
 
   const messages = {
     en: {
-      paper: 'PAPER', balance: 'Balance', equity: 'Total Equity', todayPnl: 'Today PnL',
+      paper: 'PAPER', paperBuy: 'Paper Buy', paperSell: 'Paper Sell', balance: 'Balance', equity: 'Total Equity', todayPnl: 'Today PnL',
       totalPnl: 'Total PnL', positions: 'Positions', history: 'History', settings: 'Settings',
       buy: 'Buy', sell: 'Sell', simulateBuy: 'SIMULATE BUY', simulateSell: 'SIMULATE SELL',
       price: 'Price', marketCap: 'Market Cap', liquidity: 'Liquidity', updated: 'Updated',
@@ -30,7 +30,7 @@
       share: 'Share', downloadPng: 'Download PNG', copyImage: 'Copy image', simulatedTrade: 'SIMULATED TRADE · NO REAL FUNDS',
       gmgnOnly: 'Open a GMGN Solana token page to paper trade.', auto: 'Auto', chinese: '简体中文', english: 'English',
       safe: 'Safe', advanced: 'Advanced', closed: 'Closed', totalBuy: 'Total Buy', totalSell: 'Total Sell',
-      totalProfit: 'Total Profit', paperBalance: 'Paper Balance', breakeven: 'Recover Cost',
+      totalProfit: 'Total Profit', paperBalance: 'Paper Balance', totalAssets: 'Total Assets', breakeven: 'Recover Cost',
       breakevenUnavailable: 'Current value cannot recover the remaining cost', pressEnter: 'Press Enter',
       editPresets: 'Edit presets', savePresets: 'Save presets', presetsSaved: 'Presets saved',
       invalidPresets: 'Enter 8 valid preset values',
@@ -40,11 +40,12 @@
       sound: 'Trade sounds', setupInPopup: 'Open the Tango extension popup to finish setup.',
       accountSettings: 'Language & paper principal', resetWithBalance: 'Reset with this balance',
       resetBalanceConfirm: 'Reset the paper account and delete all trades?', openDashboardFailed: 'Could not open the dashboard',
-      dragToMove: 'Drag to move', openToken: 'Open token on GMGN',
+      dragToMove: 'Drag to move', openToken: 'Open token on GMGN', clickForPositions: 'Click to view positions',
+      quoteLoading: 'Quote is updating. Please try again.',
       lastKnownPrice: 'This page cannot read the token’s live GMGN price. A sell will use the most recently recorded price.'
     },
     'zh-CN': {
-      paper: '模拟盘', balance: '虚拟余额', equity: '账户净值', todayPnl: '今日盈亏',
+      paper: '模拟盘', paperBuy: '虚拟买入', paperSell: '虚拟卖出', balance: '虚拟余额', equity: '账户净值', todayPnl: '今日盈亏',
       totalPnl: '总盈亏', positions: '持仓', history: '历史', settings: '设置',
       buy: '买入', sell: '卖出', simulateBuy: '模拟买入', simulateSell: '模拟卖出',
       price: '价格', marketCap: '市值', liquidity: '流动性', updated: '更新时间',
@@ -71,7 +72,7 @@
       share: '分享', downloadPng: '下载 PNG', copyImage: '复制图片', simulatedTrade: '模拟交易 · 无真实资金',
       gmgnOnly: '请打开 GMGN Solana 代币页面进行模拟交易。', auto: '自动', chinese: '简体中文', english: 'English',
       safe: '安全', advanced: '高级', closed: '关闭', totalBuy: '总买入', totalSell: '总卖出',
-      totalProfit: '总利润', paperBalance: '虚拟余额', breakeven: '一键回本',
+      totalProfit: '总利润', paperBalance: '虚拟余额', totalAssets: '资产总额', breakeven: '一键回本',
       breakevenUnavailable: '当前持仓价值不足以收回剩余成本', pressEnter: '按 Enter 确认',
       editPresets: '编辑预设档位', savePresets: '保存预设档位', presetsSaved: '预设档位已保存',
       invalidPresets: '请输入 8 个有效的预设数值',
@@ -81,7 +82,8 @@
       sound: '交易提示音', setupInPopup: '请点击浏览器工具栏中的 Tango 扩展完成首次设置。',
       accountSettings: '语言与虚拟本金', resetWithBalance: '按此本金重置账户',
       resetBalanceConfirm: '确定重置虚拟账户并删除所有交易记录吗？', openDashboardFailed: '无法打开数据面板',
-      dragToMove: '拖拽移动', openToken: '在 GMGN 打开此代币',
+      dragToMove: '拖拽移动', openToken: '在 GMGN 打开此代币', clickForPositions: '点击查看持仓',
+      quoteLoading: '行情正在更新，请稍后重试。',
       lastKnownPrice: '当前页面无法读取该代币的 GMGN 实时价格；卖出将按最近记录价格模拟成交。'
     }
   };
