@@ -13,6 +13,7 @@
   let markerState = null;
   let overlay = null;
   let lastScaleMode = null;
+  const hiddenMarkerIds = new Set();
 
   function parseNumber(text) {
     const source = String(text || '').trim();
@@ -152,7 +153,8 @@
 
   function renderMarkers() {
     const root = ensureOverlay();
-    if (!markerState?.markers?.length) {
+    const visibleMarkers = (markerState?.markers || []).filter((marker) => !hiddenMarkerIds.has(marker.id));
+    if (!visibleMarkers.length) {
       root.replaceChildren();
       return;
     }
@@ -162,7 +164,7 @@
       return;
     }
     const nodes = [];
-    markerState.markers.forEach((marker) => {
+    visibleMarkers.forEach((marker) => {
       const rawValue = scale.type === 'MARKET_CAP'
         ? Number(marker.marketCap || 0) / scale.factor
         : Number(marker.price || (markerState.currentPrice * Number(marker.marketCap || 0) / markerState.currentMarketCap) || 0);
@@ -176,11 +178,30 @@
         borderTop: `1px dashed ${color}`, color, left: '0', position: 'fixed', right: '58px', top: `${Math.round(y)}px`, opacity: '.94'
       });
       const label = document.createElement('span');
-      label.textContent = `${marker.label} · ${compactUsd(scale.type === 'MARKET_CAP' ? marker.marketCap : rawValue)}`;
       Object.assign(label.style, {
         background: 'rgba(12,13,18,.95)', border: `1px solid ${color}`, borderRadius: '5px', color,
-        font: '800 10px/1.2 Inter,system-ui,sans-serif', padding: '3px 6px', position: 'absolute', right: '5px', top: '-11px', whiteSpace: 'nowrap'
+        alignItems: 'center', display: 'flex', font: '800 10px/1.2 Inter,system-ui,sans-serif', gap: '5px',
+        padding: '3px 4px 3px 6px', pointerEvents: 'auto', position: 'absolute', right: '5px', top: '-11px', whiteSpace: 'nowrap'
       });
+      const text = document.createElement('span');
+      text.textContent = `${marker.label} · ${compactUsd(scale.type === 'MARKET_CAP' ? marker.marketCap : rawValue)}`;
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.textContent = '×';
+      close.title = marker.closeLabel || 'Hide line';
+      close.setAttribute('aria-label', close.title);
+      Object.assign(close.style, {
+        appearance: 'none', background: 'rgba(255,255,255,.08)', border: '0', borderRadius: '3px', color,
+        cursor: 'pointer', font: '900 12px/14px Inter,system-ui,sans-serif', height: '15px', padding: '0', width: '15px'
+      });
+      close.addEventListener('pointerdown', (event) => event.stopPropagation());
+      close.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        hiddenMarkerIds.add(marker.id);
+        renderMarkers();
+      });
+      label.append(text, close);
       line.appendChild(label);
       nodes.push(line);
     });
@@ -190,7 +211,10 @@
   window.addEventListener('message', (event) => {
     if (event.data?.source !== 'TANGO_PAPER_PARENT' || event.data?.type !== 'CHART_MARKERS') return;
     const nextState = event.data.payload || null;
-    if (markerState?.tokenAddress !== nextState?.tokenAddress) lastScaleMode = null;
+    if (markerState?.tokenAddress !== nextState?.tokenAddress) {
+      lastScaleMode = null;
+      hiddenMarkerIds.clear();
+    }
     markerState = nextState;
     renderMarkers();
   });

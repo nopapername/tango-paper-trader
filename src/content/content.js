@@ -362,12 +362,12 @@
   function renderBar(summary) {
     const collapsed = runtime.settings.barCollapsed;
     return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)} ${collapsed ? 'collapsed' : ''}" style="${floatingStyle(runtime.settings.barPosition)}">
-      <span class="tango-drag-grip" data-bar-drag title="${t('dragToMove')}">⠿</span>
       <div class="tango-bar-main" data-action="toggle-drawer">
         ${collapsed ? `<strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong>` : `
-          <div class="tango-stat"><strong>${accountMoney(summary.cashBalanceSol)}</strong><span>${t('balance')}</span></div>
-          <div class="tango-bar-divider"></div>
-          <div class="tango-stat optional"><strong>${accountMoney(summary.equitySol)}</strong><span>${t('equity')}</span></div>
+          <div class="tango-balance-column">
+            <div class="tango-stat tango-balance-stat"><strong>${accountMoney(summary.cashBalanceSol)}</strong><span>${t('balance')}</span></div>
+            <div class="tango-assets-inline"><span>${t('totalAssets')}</span><strong>${accountMoney(summary.equitySol)}</strong></div>
+          </div>
           <div class="tango-bar-divider"></div>
           <div class="tango-stat"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>`}
         <span class="tango-bar-hint">${t('clickForPositions')} · ${summary.positionCount}</span>
@@ -390,13 +390,13 @@
       [data-testid="wallet-connected"].tango-wallet-summary-anchor { overflow: visible !important; position: relative !important; }
       #tango-header-account-summary {
         align-items: center; background: rgba(12,13,18,.96); border: 1px solid rgba(155,124,255,.34);
-        border-radius: 5px; color: #aeb1bd; display: flex; font: 600 9px/18px Inter,ui-sans-serif,system-ui,sans-serif;
-        gap: 6px; padding: 1px 6px; pointer-events: none; position: absolute; right: 0;
+        border-radius: 6px; color: #aeb1bd; display: flex; font: 600 11px/22px Inter,ui-sans-serif,system-ui,sans-serif;
+        gap: 8px; padding: 3px 8px; pointer-events: none; position: absolute; right: 0;
         top: calc(100% + 2px); white-space: nowrap; width: max-content; z-index: 80;
       }
-      #tango-header-account-summary strong { color: #f4f1ff; font-weight: 800; }
-      #tango-header-account-summary i { background: rgba(255,255,255,.12); height: 10px; width: 1px; }
-      #tango-header-account-summary .tango-header-paper-badge { color: #bcaaff; font-size: 8px; font-weight: 800; letter-spacing: .04em; }
+      #tango-header-account-summary strong { color: #f4f1ff; font-size: 12px; font-weight: 800; }
+      #tango-header-account-summary i { background: rgba(255,255,255,.12); height: 13px; width: 1px; }
+      #tango-header-account-summary .tango-header-paper-badge { color: #bcaaff; font-size: 9px; font-weight: 800; letter-spacing: .04em; }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -543,13 +543,14 @@
     const markers = [];
     const entryMarketCap = Number(position?.averageEntryMarketCap || tokenTrades.find((trade) => trade.side === 'BUY')?.marketCapUsd || 0);
     if (entryMarketCap > 0) markers.push({
-      side: 'BUY', marketCap: entryMarketCap,
-      price: priceAtMarketCap(entryMarketCap, position?.averageEntryPriceUsd), label: t('paperBuy')
+      id: `entry:${address}`, side: 'BUY', marketCap: entryMarketCap,
+      price: priceAtMarketCap(entryMarketCap, position?.averageEntryPriceUsd), label: t('paperBuy'), closeLabel: t('hideChartLine')
     });
-    tokenTrades.filter((trade) => trade.side === 'SELL').slice(-4).forEach((trade) => {
+    const latestSellTrades = tokenTrades.filter((trade) => trade.side === 'SELL').slice(0, 4);
+    latestSellTrades.forEach((trade) => {
       markers.push({
-        side: 'SELL', marketCap: Number(trade.marketCapUsd),
-        price: priceAtMarketCap(trade.marketCapUsd, trade.observedPriceUsd), label: t('paperSell')
+        id: `sell:${trade.id || `${trade.executedAt}:${trade.marketCapUsd}`}`, side: 'SELL', marketCap: Number(trade.marketCapUsd),
+        price: priceAtMarketCap(trade.marketCapUsd, trade.observedPriceUsd), label: t('paperSell'), closeLabel: t('hideChartLine')
       });
     });
     return { tokenAddress: address, currentPrice, currentMarketCap, markers };
@@ -631,7 +632,7 @@
   function bindDrag() {
     bindDraggable('[data-drag-handle]', '.tango-panel', 'panelPosition');
     bindDraggable('[data-drawer-drag]', '.tango-drawer', 'drawerPosition');
-    bindDraggable('[data-bar-drag]', '.tango-bar', 'barPosition');
+    bindDraggable('.tango-bar', '.tango-bar', 'barPosition');
   }
 
   function bindDraggable(handleSelector, elementSelector, settingKey) {
@@ -640,10 +641,13 @@
     if (!handle || !element) return;
     handle.addEventListener('pointerdown', (event) => {
       if (event.target.closest('button')) return;
-      event.preventDefault();
       const rect = element.getBoundingClientRect();
       const startX = event.clientX; const startY = event.clientY;
+      let dragged = false;
       const onMove = (move) => {
+        if (!dragged && Math.hypot(move.clientX - startX, move.clientY - startY) < 5) return;
+        dragged = true;
+        move.preventDefault();
         runtime.settings[settingKey] = {
           x: Math.min(Math.max(0, innerWidth - rect.width), Math.max(0, rect.left + move.clientX - startX)),
           y: Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, rect.top + move.clientY - startY))
@@ -653,10 +657,14 @@
         element.style.right = 'auto'; element.style.bottom = 'auto'; element.style.transform = 'none';
       };
       const onUp = async () => {
-        global.removeEventListener('pointermove', onMove); global.removeEventListener('pointerup', onUp);
+        global.removeEventListener('pointermove', onMove); global.removeEventListener('pointerup', onUp); global.removeEventListener('pointercancel', onUp);
+        if (!dragged) return;
+        const suppressClick = (click) => { click.preventDefault(); click.stopImmediatePropagation(); };
+        element.addEventListener('click', suppressClick, true);
+        setTimeout(() => element.removeEventListener('click', suppressClick, true), 0);
         await Tango.Store.saveSettings(runtime.settings);
       };
-      global.addEventListener('pointermove', onMove); global.addEventListener('pointerup', onUp);
+      global.addEventListener('pointermove', onMove); global.addEventListener('pointerup', onUp); global.addEventListener('pointercancel', onUp);
     });
   }
 
