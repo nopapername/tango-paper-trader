@@ -1,6 +1,6 @@
 # 隐私说明
 
-GMGN Paper Trader 不收集、出售、共享或上传任何用户数据。
+Tango Paper Trader 不收集、出售、共享或上传任何用户数据。
 
 插件保存的数据只有：
 

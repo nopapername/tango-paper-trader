@@ -1,4 +1,4 @@
-# GMGN Paper Trader
+# Tango Paper Trader
 
 一个不连接钱包、不发送真实交易的 Chrome Manifest V3 模拟交易扩展。所有设置、虚拟余额、持仓和交易记录都保存在浏览器本地。
 

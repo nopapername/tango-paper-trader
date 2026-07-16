@@ -250,7 +250,7 @@
     return `
       <div class="gpt-card">
         <div class="gpt-header">
-          <div><strong>Paper Trader</strong><span class="gpt-live">SIM</span></div>
+          <div><strong>Tango Paper Trader</strong><span class="gpt-live">SIM</span></div>
           <button class="gpt-icon" data-action="collapse" title="折叠">−</button>
         </div>
         <div class="gpt-body">
