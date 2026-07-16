@@ -5,7 +5,15 @@
     settings: `${NS}.settings`, account: `${NS}.account`,
     positions: `${NS}.positions`, trades: `${NS}.trades`
   };
-  const DEFAULTS = { startingBalances: { sol: 10, bsc: 5 }, feePct: 1, slippagePct: 0.5, buyPresets: [0.1, .25, .5, 1], sellPresets: [25, 50, 75, 100] };
+  const CHAIN_CONFIG = {
+    sol: { name: 'Solana', quote: 'SOL', initial: 10 }, bsc: { name: 'BSC', quote: 'BNB', initial: 5 },
+    base: { name: 'Base', quote: 'ETH', initial: 5 }, eth: { name: 'Ethereum', quote: 'ETH', initial: 5 },
+    tron: { name: 'Tron', quote: 'TRX', initial: 1000 }, monad: { name: 'Monad', quote: 'MON', initial: 100 },
+    hyperevm: { name: 'HyperEVM', quote: 'HYPE', initial: 10 }, megaeth: { name: 'MegaETH', quote: 'ETH', initial: 5 },
+    xlayer: { name: 'X Layer', quote: 'OKB', initial: 10 }, robinhood: { name: 'Robinhood', quote: 'USD', initial: 10000 }
+  };
+  const DEFAULT_BALANCES = Object.fromEntries(Object.entries(CHAIN_CONFIG).map(([chain, config]) => [chain, config.initial]));
+  const DEFAULTS = { startingBalances: DEFAULT_BALANCES, feePct: 1, slippagePct: 0.5, buyPresets: [0.1, .25, .5, 1], sellPresets: [25, 50, 75, 100] };
   const get = (defaults) => new Promise((resolve) => chrome.storage.local.get(defaults, resolve));
   const set = (value) => new Promise((resolve) => chrome.storage.local.set(value, resolve));
   const $ = (selector) => document.querySelector(selector);
@@ -28,16 +36,21 @@
     const data = await get({ [STORAGE.settings]: DEFAULTS, [STORAGE.account]: null, [STORAGE.positions]: {}, [STORAGE.trades]: [] });
     const settings = { ...DEFAULTS, ...(data[STORAGE.settings] || {}) };
     settings.startingBalances = { ...DEFAULTS.startingBalances, ...(settings.startingBalances || {}) };
+    if (data[STORAGE.account]) {
+      data[STORAGE.account].balances = { ...DEFAULT_BALANCES, ...settings.startingBalances, ...(data[STORAGE.account].balances || {}) };
+    }
     return { settings, account: data[STORAGE.account], positions: data[STORAGE.positions] || {}, trades: data[STORAGE.trades] || [] };
   }
 
   async function render() {
     const data = await state();
     const balances = data.account?.balances || data.settings.startingBalances;
-    $('#solBalance').textContent = `${number(balances.sol)} SOL`;
-    $('#bnbBalance').textContent = `${number(balances.bsc)} BNB`;
-    $('#startSol').value = data.settings.startingBalances.sol;
-    $('#startBnb').value = data.settings.startingBalances.bsc;
+    $('#balances').innerHTML = Object.entries(CHAIN_CONFIG).map(([chain, config]) =>
+      `<div><small>${escapeHtml(config.name)}</small><b>${number(balances[chain])} ${escapeHtml(config.quote)}</b></div>`
+    ).join('');
+    $('#chainSettings').innerHTML = Object.entries(CHAIN_CONFIG).map(([chain, config]) =>
+      `<label>初始 ${escapeHtml(config.name)}<input data-start-chain="${chain}" type="number" min="0" step="any" value="${Number(data.settings.startingBalances[chain]) || 0}"></label>`
+    ).join('');
     $('#feePct').value = data.settings.feePct;
     $('#slippagePct').value = data.settings.slippagePct;
 
@@ -64,7 +77,10 @@
   });
   $('#save').addEventListener('click', async () => {
     const data = await state();
-    data.settings.startingBalances = { sol: Math.max(0, Number($('#startSol').value) || 0), bsc: Math.max(0, Number($('#startBnb').value) || 0) };
+    data.settings.startingBalances = { ...data.settings.startingBalances };
+    document.querySelectorAll('[data-start-chain]').forEach((input) => {
+      data.settings.startingBalances[input.dataset.startChain] = Math.max(0, Number(input.value) || 0);
+    });
     data.settings.feePct = Math.min(100, Math.max(0, Number($('#feePct').value) || 0));
     data.settings.slippagePct = Math.min(100, Math.max(0, Number($('#slippagePct').value) || 0));
     await set({ [STORAGE.settings]: data.settings });
@@ -86,7 +102,7 @@
     const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), ...data }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
-    anchor.href = url; anchor.download = `gmgn-paper-trader-${new Date().toISOString().slice(0, 10)}.json`; anchor.click();
+    anchor.href = url; anchor.download = `tango-paper-trader-${new Date().toISOString().slice(0, 10)}.json`; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     status('数据已导出');
   });

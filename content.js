@@ -6,10 +6,28 @@
     settings: `${NS}.settings`,
     account: `${NS}.account`,
     positions: `${NS}.positions`,
-    trades: `${NS}.trades`
+    trades: `${NS}.trades`,
+    panelPosition: `${NS}.panelPosition`
   };
+  const CHAIN_CONFIG = {
+    sol: { quote: 'SOL', initial: 10 },
+    bsc: { quote: 'BNB', initial: 5 },
+    base: { quote: 'ETH', initial: 5 },
+    eth: { quote: 'ETH', initial: 5 },
+    tron: { quote: 'TRX', initial: 1000 },
+    monad: { quote: 'MON', initial: 100 },
+    hyperevm: { quote: 'HYPE', initial: 10 },
+    megaeth: { quote: 'ETH', initial: 5 },
+    xlayer: { quote: 'OKB', initial: 10 },
+    robinhood: { quote: 'USD', initial: 10000 }
+  };
+  const CHAIN_ALIASES = {
+    solana: 'sol', bnb: 'bsc', ethereum: 'eth', hyper: 'hyperevm',
+    hyper_evm: 'hyperevm', mega: 'megaeth', x_layer: 'xlayer', rh: 'robinhood'
+  };
+  const DEFAULT_BALANCES = Object.fromEntries(Object.entries(CHAIN_CONFIG).map(([chain, config]) => [chain, config.initial]));
   const DEFAULT_SETTINGS = {
-    startingBalances: { sol: 10, bsc: 5 },
+    startingBalances: DEFAULT_BALANCES,
     feePct: 1,
     slippagePct: 0.5,
     buyPresets: [0.1, 0.25, 0.5, 1],
@@ -27,15 +45,17 @@
   const storageSet = (value) => new Promise((resolve) => chrome.storage.local.set(value, resolve));
 
   function parseRoute() {
-    const match = location.pathname.match(/^\/(sol|bsc)\/token\/([^/?#]+)/i);
+    const match = location.pathname.match(/^\/([^/?#]+)\/token\/([^/?#]+)/i);
     if (!match) return null;
-    const chain = match[1].toLowerCase();
+    const routeChain = match[1].toLowerCase();
+    const chain = CHAIN_ALIASES[routeChain] || routeChain;
     const address = decodeURIComponent(match[2]);
+    const config = CHAIN_CONFIG[chain] || { quote: chain.toUpperCase(), initial: 100 };
     return {
       chain,
       address,
       key: `${chain}:${address.toLowerCase()}`,
-      quote: chain === 'bsc' ? 'BNB' : 'SOL'
+      quote: config.quote
     };
   }
 
@@ -140,6 +160,8 @@
       initialBalances: { ...settings.startingBalances },
       createdAt: Date.now()
     };
+    account.balances = { ...DEFAULT_BALANCES, ...settings.startingBalances, ...(account.balances || {}) };
+    account.initialBalances = { ...settings.startingBalances, ...(account.initialBalances || {}) };
     return {
       settings,
       account,
@@ -250,7 +272,7 @@
     return `
       <div class="gpt-card">
         <div class="gpt-header">
-          <div><strong>Tango Paper Trader</strong><span class="gpt-live">SIM</span></div>
+          <div class="gpt-title"><strong>虚拟交易面板</strong><span class="gpt-live">SIM</span><small>TANGO PAPER TRADER</small></div>
           <button class="gpt-icon" data-action="collapse" title="折叠">−</button>
         </div>
         <div class="gpt-body">
@@ -268,20 +290,69 @@
             <div><small>持仓价值</small><b data-role="value">--</b></div>
             <div><small>未实现 PnL</small><b data-role="pnl">--</b></div>
           </div>
-          <div class="gpt-section">
+          <div class="gpt-section gpt-buy-section">
             <div class="gpt-label"><span>买入</span><span data-role="costs">--</span></div>
             <div class="gpt-presets" data-role="buy-presets"></div>
             <div class="gpt-order"><input data-role="buy-amount" type="number" min="0" step="any" placeholder="自定义金额"><button class="gpt-buy" data-action="buy">虚拟买入</button></div>
           </div>
-          <div class="gpt-section">
+          <div class="gpt-section gpt-sell-section">
             <div class="gpt-label"><span>卖出持仓</span><span data-role="position">--</span></div>
             <div class="gpt-presets" data-role="sell-presets"></div>
             <div class="gpt-order"><input data-role="sell-percent" type="number" min="1" max="100" placeholder="比例 %"><button class="gpt-sell" data-action="sell">虚拟卖出</button></div>
           </div>
-          <div class="gpt-footer">纯本地模拟 · 不连接钱包 · 不发送交易</div>
+          <div class="gpt-footer"><b>仅供模拟训练</b> · 不连接钱包 · 不发送真实交易</div>
         </div>
         <div class="gpt-toast" data-role="toast"></div>
       </div>`;
+  }
+
+  function clampPanelPosition(left, top) {
+    const rect = panel.getBoundingClientRect();
+    return {
+      left: Math.max(8, Math.min(left, window.innerWidth - rect.width - 8)),
+      top: Math.max(8, Math.min(top, window.innerHeight - Math.min(rect.height, window.innerHeight - 16) - 8))
+    };
+  }
+
+  async function restorePanelPosition() {
+    const data = await storageGet({ [STORAGE.panelPosition]: null });
+    const saved = data[STORAGE.panelPosition];
+    if (!panel || !saved || !Number.isFinite(saved.left) || !Number.isFinite(saved.top)) return;
+    const next = clampPanelPosition(saved.left, saved.top);
+    panel.style.left = `${next.left}px`;
+    panel.style.top = `${next.top}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+  }
+
+  function enablePanelDrag() {
+    const handle = panel.querySelector('.gpt-header');
+    let drag = null;
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || event.target.closest('button')) return;
+      const rect = panel.getBoundingClientRect();
+      drag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+      handle.setPointerCapture(event.pointerId);
+      panel.classList.add('gpt-dragging');
+      event.preventDefault();
+    });
+    handle.addEventListener('pointermove', (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const next = clampPanelPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY);
+      panel.style.left = `${next.left}px`;
+      panel.style.top = `${next.top}px`;
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    });
+    const finish = async (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      drag = null;
+      panel.classList.remove('gpt-dragging');
+      const rect = panel.getBoundingClientRect();
+      await storageSet({ [STORAGE.panelPosition]: { left: rect.left, top: rect.top } });
+    };
+    handle.addEventListener('pointerup', finish);
+    handle.addEventListener('pointercancel', finish);
   }
 
   function createPanel() {
@@ -290,6 +361,8 @@
     panel.id = 'gmgn-paper-trader-root';
     panel.innerHTML = panelMarkup();
     document.documentElement.appendChild(panel);
+    enablePanelDrag();
+    restorePanelPosition();
     panel.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-action]');
       if (!button) return;

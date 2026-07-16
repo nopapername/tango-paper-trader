@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tango Paper Trader",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "在 GMGN 页面上使用纯本地虚拟资金练习买卖，不连接钱包，不发送真实交易。",
   "permissions": ["storage"],
   "content_security_policy": {

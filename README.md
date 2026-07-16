@@ -4,7 +4,8 @@
 
 ## 功能
 
-- 在 GMGN 的 Solana / BSC 代币页面显示虚拟交易面板
+- 在 GMGN 代币页面显示可拖动的虚拟交易面板，并记住上次位置
+- 支持 GMGN 当前十条链：Solana、BSC、Base、Ethereum、Tron、Monad、HyperEVM、MegaETH、X Layer、Robinhood
 - 虚拟买入、按比例卖出、平均成本和已实现/未实现 PnL
 - 自定义初始 SOL / BNB、手续费和滑点
 - 持仓与最近 1000 条交易记录
@@ -19,8 +20,8 @@
 1. 在 Chrome 地址栏打开 `chrome://extensions/`。
 2. 打开右上角“开发者模式”。
 3. 点击“加载已解压的扩展程序”。
-4. 选择本目录 `gmgn-paper-trader`。
-5. 打开一个形如 `https://gmgn.ai/sol/token/...` 或 `https://gmgn.ai/bsc/token/...` 的页面。
+4. 选择本目录 `tango-paper-trader`。
+5. 打开 GMGN 任一支持链的代币详情页面，例如 `https://gmgn.ai/sol/token/...`、`https://gmgn.ai/bsc/token/...` 或 `https://gmgn.ai/eth/token/...`。
 
 ## 安全边界
 
