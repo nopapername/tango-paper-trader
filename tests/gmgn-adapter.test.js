@@ -28,3 +28,11 @@ test('quick-buy injection is restricted to the Solana trench root', () => {
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/trend?chain=sol'), false);
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=bsc'), false);
 });
+
+test('trading panel is restricted to an exact Solana token detail route', () => {
+  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/sol/token/AbC123pump'), true);
+  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/sol/token/AbC123pump?tab=holders'), true);
+  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/?chain=sol&token=AbC123pump'), false);
+  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/monitor?chain=sol&token=AbC123pump'), false);
+  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/bsc/token/0x123'), false);
+});

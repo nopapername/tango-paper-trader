@@ -34,3 +34,8 @@ body{background:var(--bg);color:var(--text);margin:0;width:360px}
 .balance-button.selected{background:rgba(155,124,255,.18);border-color:var(--brand);color:#d1c6ff}
 .setup-card .button{margin-top:10px}
 .disabled-note{background:rgba(255,184,77,.08);border:1px solid rgba(255,184,77,.25);border-radius:9px;color:#ffd18c;font-size:11px;margin:14px 0;padding:12px;text-align:center}
+.account-settings{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin:0 0 10px;padding:0 11px}
+.account-settings summary{cursor:pointer;font-size:11px;font-weight:700;padding:10px 0}
+.account-settings[open]{padding-bottom:11px}
+.account-settings .field{margin-top:2px}
+.account-settings .reset-balance{margin-top:0}

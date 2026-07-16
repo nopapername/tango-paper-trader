@@ -6,7 +6,7 @@
   const runtime = {
     state: null, settings: null, current: null, drawerOpen: false, modal: null,
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
-    presetEditing: null, suppressConfirmForSession: false, audioContext: null
+    presetEditing: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null
   };
 
   const host = document.createElement('div');
@@ -198,6 +198,16 @@
   function primeTradeAudio() {
     if (!runtime.settings?.soundEnabled) return;
     try {
+      if (!runtime.tradeSounds && global.Audio) {
+        runtime.tradeSounds = {
+          BUY: new global.Audio('https://gmgn.ai/static/sounds/Handgun.mp3'),
+          SELL: new global.Audio('https://gmgn.ai/static/sounds/Kaching.mp3')
+        };
+        Object.values(runtime.tradeSounds).forEach((audio) => {
+          audio.preload = 'auto';
+          audio.volume = 0.55;
+        });
+      }
       const AudioContext = global.AudioContext || global.webkitAudioContext;
       if (!AudioContext) return null;
       if (!runtime.audioContext || runtime.audioContext.state === 'closed') runtime.audioContext = new AudioContext();
@@ -208,6 +218,19 @@
 
   function playTradeSound(side) {
     const context = primeTradeAudio();
+    const sound = runtime.tradeSounds?.[side];
+    if (sound) {
+      try {
+        sound.currentTime = 0;
+        const playback = sound.play();
+        if (playback?.catch) playback.catch(() => playFallbackTradeSound(side, context));
+        return;
+      } catch { /* Fall through to a short locally generated cue. */ }
+    }
+    playFallbackTradeSound(side, context);
+  }
+
+  function playFallbackTradeSound(side, context) {
     if (!context) return;
     try {
       const gain = context.createGain();
@@ -263,6 +286,7 @@
   function renderPanel() {
     if (!runtime.state.initialized || !runtime.settings.enabled) return '';
     const current = runtime.current;
+    if (!current?.token) return '';
     const position = currentPosition();
     const mark = position ? Tango.Engine.markPosition(position, current?.quote) : null;
     const quoteValid = Tango.Engine.validateQuote(current?.quote).ok;
@@ -281,7 +305,7 @@
         <div class="tango-token-strip"><span class="tango-paper-logo">T</span><strong>TANGO</strong><span class="tango-paper-badge">${t('paper')}</span><span>${esc(symbol)}</span></div>
         <div class="tango-header-actions"><button class="tango-icon-button tango-edit-all" data-action="${runtime.presetEditing === 'all' ? 'save-presets' : 'edit-presets'}" title="${t(runtime.presetEditing === 'all' ? 'savePresets' : 'editPresets')}">${runtime.presetEditing === 'all' ? '✓' : '✎'}</button><button class="tango-icon-button" data-action="toggle-sound" title="${t('sound')}">${runtime.settings.soundEnabled ? '🔊' : '🔇'}</button><button class="tango-icon-button" data-action="dashboard">⚙</button><button class="tango-icon-button" data-action="collapse-panel">${runtime.settings.panelCollapsed ? '＋' : '×'}</button></div>
       </div>
-      ${runtime.settings.panelCollapsed ? '' : current ? `<div class="tango-trade-body">
+      ${runtime.settings.panelCollapsed ? '' : `<div class="tango-trade-body">
         <section class="tango-trade-block">
           <div class="tango-trade-title buy-title"><span>${t('buy')}</span><span class="tango-mode-tab active buy-tab">P1</span><span class="tango-mode-tab">P2</span><span class="tango-mode-tab">P3</span><span class="tango-title-balance">◎ ${Tango.Format.number(runtime.state.account.cashBalanceSol, language(), 4)}</span></div>
           <div class="tango-preset-grid">${renderPresetGrid('buy', runtime.settings.buyPresets)}</div>
@@ -305,7 +329,7 @@
           <span>${t('pnlAmount')} <strong class="${pnlClass(totalProfit)}">${accountMoney(totalProfit, true)}</strong></span>
         </div>
         ${quoteValid ? '' : `<div class="tango-warning">${t(current?.quote?.priceUsd ? 'staleQuote' : 'invalidQuote')}</div>`}
-      </div>` : `<div class="tango-empty">${t('gmgnOnly')}</div>`}
+      </div>`}
     </div>`;
   }
 
@@ -369,7 +393,11 @@
       if (action === 'toggle-drawer') { runtime.drawerOpen = !runtime.drawerOpen; render(); }
       if (action === 'collapse-bar') { runtime.settings.barCollapsed = !runtime.settings.barCollapsed; await Tango.Store.saveSettings(runtime.settings); }
       if (action === 'collapse-panel') { runtime.settings.panelCollapsed = !runtime.settings.panelCollapsed; await Tango.Store.saveSettings(runtime.settings); }
-      if (action === 'dashboard') chrome.runtime.openOptionsPage();
+      if (action === 'dashboard') {
+        chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD' })
+          .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
+          .catch(() => showToast(t('openDashboardFailed'), 'error'));
+      }
       if (action === 'toggle-sound') { runtime.settings.soundEnabled = !runtime.settings.soundEnabled; await Tango.Store.saveSettings(runtime.settings); render(); }
       if (action === 'breakeven') await sellBreakeven();
       if (action === 'edit-presets') { runtime.presetEditing = 'all'; render(); }

@@ -143,6 +143,7 @@
   }
 
   async function readCurrentToken() {
+    if (!isTokenDetailPage()) return null;
     const address = tokenAddressFromUrl();
     const chain = chainFromUrl();
     if (!address || chain !== 'sol') return null;
@@ -171,6 +172,11 @@
   function isTrenchPage(url = location.href) {
     const parsed = new URL(url);
     return parsed.hostname === 'gmgn.ai' && (parsed.pathname === '/' || parsed.pathname === '') && chainFromUrl(url) === 'sol';
+  }
+
+  function isTokenDetailPage(url = location.href) {
+    const parsed = new URL(url);
+    return parsed.hostname === 'gmgn.ai' && /^\/sol\/token\/[^/]+\/?$/i.test(parsed.pathname);
   }
 
   function trenchColumn(card) {
@@ -207,23 +213,16 @@
       if (slot.dataset.tangoQuickBuy === '1') continue;
       const card = slot.closest('[class~="group/a"]');
       if (!card || !trenchColumn(card)) continue;
-      const anchor = card.querySelector('a[href*="pump.fun/coin/"], a[href*="/sol/token/"]');
+      const tokenLinkSelector = 'a[href*="pump.fun/coin/"], a[href*="/sol/token/"]';
+      const anchor = card.matches(tokenLinkSelector) ? card : card.querySelector(tokenLinkSelector);
       if (!anchor) continue;
       const href = anchor.href;
       const address = tokenAddressFromUrl(href);
-      const amountSol = parseMoney(slot.textContent) || Number(defaultAmountSol);
-      if (!address || !(amountSol > 0)) continue;
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'tango-list-quick-buy';
-      button.dataset.tangoQuickBuy = '1';
-      button.textContent = `T·${amountSol} SOL`;
-      button.title = `Tango Paper Buy ${amountSol} SOL`;
-      button.addEventListener('pointerdown', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
-      button.addEventListener('click', (event) => {
+      const nativeControl = slot.querySelector('[data-testid="quickbuy"]');
+      const amountSol = parseMoney(nativeControl?.textContent || slot.textContent) || Number(defaultAmountSol);
+      if (!address || !nativeControl || !(amountSol > 0)) continue;
+      const handleClick = (event) => {
+        if (!nativeControl.contains(event.target)) return;
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
@@ -240,29 +239,45 @@
           amountSol,
           sourceUrl: href
         });
-      });
+      };
       slot.classList.add('tango-native-buy-overridden');
       slot.dataset.tangoQuickBuy = '1';
-      slot.appendChild(button);
+      slot.__tangoQuickBuyHandler = handleClick;
+      slot.addEventListener('click', handleClick, true);
+      nativeControl.classList.add('tango-quick-buy-target');
+      nativeControl.dataset.tangoQuickBuy = '1';
+      nativeControl.dataset.tangoOriginalTitle = nativeControl.getAttribute('title') || '';
+      nativeControl.dataset.tangoOriginalAriaLabel = nativeControl.getAttribute('aria-label') || '';
+      nativeControl.title = `Tango Paper Buy ${amountSol} SOL`;
+      nativeControl.setAttribute('aria-label', `Tango Paper Buy ${amountSol} SOL`);
       injected += 1;
     }
     return injected;
   }
 
   function clearQuickBuy() {
-    document.querySelectorAll('.tango-list-quick-buy, .tango-list-quick-group').forEach((element) => element.remove());
     document.querySelectorAll('.tango-native-buy-overridden').forEach((slot) => {
+      if (slot.__tangoQuickBuyHandler) slot.removeEventListener('click', slot.__tangoQuickBuyHandler, true);
+      delete slot.__tangoQuickBuyHandler;
       slot.classList.remove('tango-native-buy-overridden');
       delete slot.dataset.tangoQuickBuy;
     });
-    document.querySelectorAll('[data-tango-quick-buy]').forEach((element) => {
-      if (!element.classList.contains('tango-list-quick-buy')) delete element.dataset.tangoQuickBuy;
+    document.querySelectorAll('.tango-quick-buy-target').forEach((element) => {
+      const originalTitle = element.dataset.tangoOriginalTitle;
+      const originalAriaLabel = element.dataset.tangoOriginalAriaLabel;
+      if (originalTitle) element.setAttribute('title', originalTitle); else element.removeAttribute('title');
+      if (originalAriaLabel) element.setAttribute('aria-label', originalAriaLabel); else element.removeAttribute('aria-label');
+      element.classList.remove('tango-quick-buy-target');
+      delete element.dataset.tangoQuickBuy;
+      delete element.dataset.tangoOriginalTitle;
+      delete element.dataset.tangoOriginalAriaLabel;
     });
   }
 
   Tango.GMGN = {
     chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, discoverTokenCards, clearQuickBuy,
-    _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _isTrenchPage: isTrenchPage
+    _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _isTrenchPage: isTrenchPage,
+    _isTokenDetailPage: isTokenDetailPage
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.GMGN;

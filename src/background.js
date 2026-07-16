@@ -1,6 +1,12 @@
 let solPriceCache = { price: 0, fetchedAt: 0 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'TANGO_OPEN_DASHBOARD') {
+    chrome.runtime.openOptionsPage()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type === 'TANGO_GET_SOL_PRICE') {
     getSolPrice().then((price) => sendResponse({ ok: true, price }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));

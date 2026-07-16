@@ -34,6 +34,11 @@
           <div class="stat"><span>${t('totalPnl')}</span><strong class="${cls(summary.totalPnlSol)}">${Tango.Format.sol(summary.totalPnlSol, language(), true)}</strong></div>
           <div class="stat"><span>${t('positions')}</span><strong>${summary.positionCount}</strong></div>
         </div>` : `<div class="disabled-note">${t('disabled')}</div>`}
+        <details class="account-settings"><summary>${t('accountSettings')}</summary>
+          <label class="field"><span>${t('language')}</span><select id="account-language"><option value="zh-CN" ${language() === 'zh-CN' ? 'selected' : ''}>简体中文</option><option value="en" ${language() === 'en' ? 'selected' : ''}>English</option></select></label>
+          <label class="field"><span>${t('startingBalance')}</span><input class="input" id="reset-balance" type="number" min="0.01" step="0.01" value="${esc(settings.initialBalanceSol)}"></label>
+          <button class="button secondary reset-balance" id="reset-balance-button">${t('resetWithBalance')}</button>
+        </details>
         <button class="button" id="dashboard">${t('openDashboard')}</button><button class="button secondary" id="gmgn">GMGN ↗</button>
       </div>`;
     }
@@ -49,6 +54,10 @@
       settings.language = event.target.value;
       render();
     });
+    document.querySelector('#account-language')?.addEventListener('change', async (event) => {
+      settings = await Tango.Store.saveSettings({ ...settings, language: event.target.value });
+      render();
+    });
     document.querySelectorAll('[data-balance]').forEach((button) => button.addEventListener('click', () => {
       pendingBalance = Number(button.dataset.balance);
       render();
@@ -56,6 +65,15 @@
     document.querySelector('#initialize')?.addEventListener('click', async () => {
       const custom = Number(document.querySelector('#custom-balance')?.value);
       const balance = custom > 0 ? custom : pendingBalance;
+      const data = await Tango.Store.initialize(balance, settings.language);
+      state = data.state;
+      settings = data.settings;
+      render();
+    });
+    document.querySelector('#reset-balance-button')?.addEventListener('click', async () => {
+      const balance = Number(document.querySelector('#reset-balance')?.value);
+      if (!(balance > 0)) return;
+      if (!global.confirm(t('resetBalanceConfirm'))) return;
       const data = await Tango.Store.initialize(balance, settings.language);
       state = data.state;
       settings = data.settings;
