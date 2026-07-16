@@ -6,7 +6,8 @@
   const runtime = {
     state: null, settings: null, current: null, drawerOpen: false, modal: null,
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
-    presetEditing: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null
+    presetEditing: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
+    solPriceUsd: 0, solPricePromise: null, lastUrl: location.href, routeTimer: null
   };
 
   const host = document.createElement('div');
@@ -68,6 +69,12 @@
     }
     const previousAddress = runtime.current?.token?.address;
     runtime.current = await Tango.GMGN.readCurrentToken();
+    if (runtime.current) {
+      const positionPrice = currentPosition()?.lastSolPriceUsd;
+      runtime.current.quote.solPriceUsd = Number(runtime.solPriceUsd || positionPrice || 0);
+    }
+    queueRender();
+    ensureSolPrice(runtime.current);
     if (runtime.current?.quote?.priceUsd > 0 && currentPosition() && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
       runtime.state = Tango.Engine.updatePositionQuote(runtime.state, runtime.current.token, runtime.current.quote);
       runtime.lastQuoteWriteAt = Date.now();
@@ -76,6 +83,28 @@
     if (runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1);
     else Tango.GMGN.clearQuickBuy();
     if (previousAddress !== runtime.current?.token?.address || runtime.current) queueRender();
+  }
+
+  function ensureSolPrice(context) {
+    if (!context || context.quote.solPriceUsd > 0 || runtime.solPricePromise) return;
+    runtime.solPricePromise = chrome.runtime.sendMessage({ type: 'TANGO_GET_SOL_PRICE' })
+      .then((response) => {
+        const price = Number(response?.price || 0);
+        if (!(price > 0)) return;
+        runtime.solPriceUsd = price;
+        if (runtime.current) runtime.current.quote.solPriceUsd = price;
+        queueRender();
+      })
+      .catch(() => null)
+      .finally(() => { runtime.solPricePromise = null; });
+  }
+
+  function positionUrl(position) {
+    return `https://gmgn.ai/sol/token/${encodeURIComponent(position.tokenAddress)}`;
+  }
+
+  function openPosition(position) {
+    location.href = positionUrl(position);
   }
 
   async function handleQuickBuy(context) {
@@ -164,9 +193,10 @@
   }
 
   async function sellPosition(position, percent) {
-    const quote = {
+    const currentMatches = runtime.current?.token?.address?.toLowerCase() === position.tokenAddress.toLowerCase();
+    const quote = currentMatches && Tango.Engine.validateQuote(runtime.current?.quote).ok ? runtime.current.quote : {
       priceUsd: position.lastPriceUsd, marketCapUsd: position.lastMarketCapUsd,
-      solPriceUsd: position.lastSolPriceUsd, observedAt: position.quoteObservedAt
+      solPriceUsd: position.lastSolPriceUsd, observedAt: Date.now()
     };
     await sell(percent, { token: { chain: position.chain, address: position.tokenAddress, symbol: position.symbol }, quote });
   }
@@ -252,11 +282,16 @@
 
   function renderBar(summary) {
     const collapsed = runtime.settings.barCollapsed;
-    return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)}" data-action="toggle-drawer">
-      ${collapsed ? `<strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong>` : `
-        <div class="tango-stat"><strong>${accountMoney(summary.equitySol)}</strong><span>${t('balance')}</span></div>
-        <div class="tango-bar-divider"></div>
-        <div class="tango-stat"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>`}
+    return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)}" style="${floatingStyle(runtime.settings.barPosition)}">
+      <span class="tango-drag-grip" data-bar-drag title="${t('dragToMove')}">⠿</span>
+      <div class="tango-bar-main" data-action="toggle-drawer">
+        ${collapsed ? `<strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong>` : `
+          <div class="tango-stat"><strong>${accountMoney(summary.equitySol)}</strong><span>${t('balance')}</span></div>
+          <div class="tango-bar-divider"></div>
+          <div class="tango-stat"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>
+          <div class="tango-bar-divider"></div>
+          <div class="tango-stat"><strong>${summary.positionCount}</strong><span>${t('positions')}</span></div>`}
+      </div>
       <button class="tango-icon-button" data-action="collapse-bar">${collapsed ? '＋' : '－'}</button>
     </div>`;
   }
@@ -307,12 +342,12 @@
       </div>
       ${runtime.settings.panelCollapsed ? '' : `<div class="tango-trade-body">
         <section class="tango-trade-block">
-          <div class="tango-trade-title buy-title"><span>${t('buy')}</span><span class="tango-mode-tab active buy-tab">P1</span><span class="tango-mode-tab">P2</span><span class="tango-mode-tab">P3</span><span class="tango-title-balance">◎ ${Tango.Format.number(runtime.state.account.cashBalanceSol, language(), 4)}</span></div>
+          <div class="tango-trade-title buy-title"><span>${t('buy')}</span><span class="tango-title-balance">◎ ${Tango.Format.number(runtime.state.account.cashBalanceSol, language(), 4)}</span></div>
           <div class="tango-preset-grid">${renderPresetGrid('buy', runtime.settings.buyPresets)}</div>
           <div class="tango-trade-meta"><span>⌁ ${Tango.Format.percent(runtime.settings.slippageBps / 100, language())}</span><span>♜ ${Tango.Format.sol(runtime.settings.networkFeeSol, language())}</span><span>♙ ${feePercent}%</span><span class="safe">${t('entryMc')} ${position ? Tango.Format.usd(position.averageEntryMarketCap, language(), true) : '--'}</span></div>
         </section>
         <section class="tango-trade-block">
-          <div class="tango-trade-title sell-title"><span>${t('sell')} %</span><span class="tango-mode-tab active sell-tab">P1</span><span class="tango-mode-tab">P2</span><span class="tango-mode-tab">P3</span><span class="tango-title-balance">${position ? `${Tango.Format.compact(position.quantity, language(), 2)} ${esc(symbol)}` : `0 ${esc(symbol)}`}</span></div>
+          <div class="tango-trade-title sell-title"><span>${t('sell')} %</span><span class="tango-title-balance">${position ? `${Tango.Format.compact(position.quantity, language(), 2)} ${esc(symbol)}` : `0 ${esc(symbol)}`}</span></div>
           <div class="tango-preset-grid">${renderPresetGrid('sell', runtime.settings.sellPresets)}</div>
           <div class="tango-trade-meta"><span>⌁ ${runtime.settings.fastMode ? 'FAST' : t('auto')}</span><span>♜ ${Tango.Format.sol(runtime.settings.networkFeeSol, language())}</span><button class="tango-breakeven-link" data-action="breakeven" ${breakevenPercent ? '' : 'disabled'} title="${esc(breakevenPercent ? breakevenLabel : t('breakevenUnavailable'))}">${esc(breakevenLabel)}</button><span class="safe">${t('currentMc')} ${Tango.Format.usd(current.quote.marketCapUsd, language(), true)}</span></div>
         </section>
@@ -339,25 +374,66 @@
     return `left:${Math.max(0,pos.x)}px;top:${Math.max(0,pos.y)}px;right:auto;transform:none;`;
   }
 
+  function floatingStyle(position) {
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return '';
+    return `left:${Math.max(0, position.x)}px;top:${Math.max(0, position.y)}px;right:auto;bottom:auto;transform:none;`;
+  }
+
   function renderDrawer() {
     if (!runtime.drawerOpen) return '';
     const positions = Object.values(runtime.state.positions || {});
-    return `<div class="tango-drawer tango-card">
-      <div class="tango-row"><div class="tango-brand"><span class="tango-dot"></span>${t('openPositions')}</div><button class="tango-icon-button" data-action="toggle-drawer">✕</button></div>
+    return `<div class="tango-drawer tango-card" style="${floatingStyle(runtime.settings.drawerPosition)}">
+      <div class="tango-drawer-header" data-drawer-drag><div class="tango-brand"><span class="tango-dot"></span>${t('openPositions')}</div><button class="tango-icon-button" data-action="toggle-drawer">✕</button></div>
       ${positions.length ? positions.map((position) => {
-        const mark = Tango.Engine.markPosition(position);
-        const stale = Date.now() - Number(position.quoteObservedAt || 0) > Tango.QUOTE_STALE_MS;
+        const currentMatches = runtime.current?.token?.address?.toLowerCase() === position.tokenAddress.toLowerCase();
+        const hasLiveQuote = currentMatches && Tango.Engine.validateQuote(runtime.current?.quote).ok;
+        const mark = Tango.Engine.markPosition(position, hasLiveQuote ? runtime.current.quote : null);
         return `<div class="tango-position">
-          <div class="tango-row"><span class="tango-position-title">${esc(position.symbol)}</span><strong class="${pnlClass(mark.unrealizedPnlSol)}">${accountMoney(mark.unrealizedPnlSol, true)} · ${Tango.Format.percent(mark.roi, language(), true)}</strong></div>
+          <div class="tango-row"><button class="tango-position-link" data-position-open data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}" title="${t('openToken')}">${position.logoUrl ? `<img src="${esc(position.logoUrl)}" alt="">` : `<span class="tango-position-fallback">${esc(position.symbol.slice(0, 1))}</span>`}<span><strong>${esc(position.symbol)}</strong><small>${esc(position.name || position.tokenAddress.slice(0, 8))}</small></span></button><strong class="${pnlClass(mark.unrealizedPnlSol)}">${accountMoney(mark.unrealizedPnlSol, true)} · ${Tango.Format.percent(mark.roi, language(), true)}</strong></div>
           <div class="tango-position-meta"><span>${t('value')} ${accountMoney(mark.valueSol)}</span><span>${t('cost')} ${accountMoney(position.costBasisSol)}</span><span>${t('held')} ${Tango.Format.duration(Date.now()-position.openedAt, language())}</span></div>
           <div class="tango-mini-actions">
-            <button class="tango-button" data-position-sell="25" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}" ${stale ? 'disabled' : ''}>25%</button>
-            <button class="tango-button" data-position-sell="50" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}" ${stale ? 'disabled' : ''}>50%</button>
-            <button class="tango-button" data-position-sell="100" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}" ${stale ? 'disabled' : ''}>${t('close')}</button>
-          </div>${stale ? `<div class="tango-warning">${t('staleQuote')}</div>` : ''}
+            <button class="tango-button sell-position" data-position-sell="25" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}">25%</button>
+            <button class="tango-button sell-position" data-position-sell="50" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}">50%</button>
+            <button class="tango-button sell-position" data-position-sell="100" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}">${t('close')}</button>
+          </div>${hasLiveQuote ? '' : `<div class="tango-position-note">${t('lastKnownPrice')}</div>`}
         </div>`;
       }).join('') : `<div class="tango-empty">${t('noPositions')}</div>`}
     </div>`;
+  }
+
+  function renderChartMarkers() {
+    if (!runtime.current?.token) return '';
+    const chartFrame = document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe');
+    const rect = chartFrame?.getBoundingClientRect();
+    if (!rect || rect.width < 300 || rect.height < 200 || rect.bottom < 0 || rect.top > innerHeight) return '';
+    const address = runtime.current.token.address.toLowerCase();
+    const tokenTrades = (runtime.state.trades || []).filter((trade) =>
+      trade.chain === runtime.current.token.chain && trade.tokenAddress.toLowerCase() === address && Number(trade.marketCapUsd) > 0
+    );
+    const position = currentPosition();
+    const markers = [];
+    const entryMarketCap = Number(position?.averageEntryMarketCap || tokenTrades.find((trade) => trade.side === 'BUY')?.marketCapUsd || 0);
+    if (entryMarketCap > 0) markers.push({ side: 'BUY', marketCap: entryMarketCap });
+    tokenTrades.filter((trade) => trade.side === 'SELL').slice(0, 4).forEach((trade) => {
+      markers.push({ side: 'SELL', marketCap: Number(trade.marketCapUsd) });
+    });
+    if (!markers.length) return '';
+    const scaleValues = markers.map((marker) => marker.marketCap);
+    const currentMarketCap = Number(runtime.current.quote.marketCapUsd || 0);
+    if (currentMarketCap > 0) scaleValues.push(currentMarketCap);
+    const logs = scaleValues.map((value) => Math.log(Math.max(1, value)));
+    const min = Math.min(...logs); const max = Math.max(...logs);
+    const points = markers.map((marker, index) => ({
+      ...marker,
+      top: max === min ? 50 + (index - (markers.length - 1) / 2) * 9 : 12 + (max - Math.log(Math.max(1, marker.marketCap))) / (max - min) * 76
+    })).sort((a, b) => a.top - b.top);
+    for (let index = 1; index < points.length; index += 1) {
+      if (points[index].top - points[index - 1].top < 7) points[index].top = points[index - 1].top + 7;
+    }
+    const overflow = Math.max(0, (points.at(-1)?.top || 0) - 90);
+    if (overflow) points.forEach((point) => { point.top -= overflow; });
+    const style = `left:${Math.round(rect.left)}px;top:${Math.round(rect.top)}px;width:${Math.round(Math.max(280, rect.width - 54))}px;height:${Math.round(rect.height)}px;`;
+    return `<div class="tango-chart-markers" style="${style}">${points.map((marker) => `<div class="tango-chart-marker ${marker.side.toLowerCase()}" style="top:${Math.max(6, Math.min(92, marker.top))}%"><span>${t(marker.side === 'BUY' ? 'buy' : 'sell')} · ${Tango.Format.usd(marker.marketCap, language(), true)}</span></div>`).join('')}</div>`;
   }
 
   function renderModal() {
@@ -376,13 +452,17 @@
       return;
     }
     const summary = Tango.Engine.portfolioSummary(runtime.state);
-    shell.innerHTML = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
+    shell.innerHTML = `${renderChartMarkers()}${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     bindEvents();
   }
 
   function bindEvents() {
     shell.querySelectorAll('[data-buy]').forEach((button) => button.addEventListener('click', () => buy(Number(button.dataset.buy))));
     shell.querySelectorAll('[data-sell]').forEach((button) => button.addEventListener('click', () => sell(Number(button.dataset.sell))));
+    shell.querySelectorAll('[data-position-open]').forEach((button) => button.addEventListener('click', () => {
+      const position = runtime.state.positions[button.dataset.key];
+      if (position) openPosition(position);
+    }));
     shell.querySelectorAll('[data-position-sell]').forEach((button) => button.addEventListener('click', () => {
       const position = runtime.state.positions[button.dataset.key];
       if (position) sellPosition(position, Number(button.dataset.positionSell));
@@ -420,22 +500,28 @@
   }
 
   function bindDrag() {
-    const handle = shadow.querySelector('[data-drag-handle]');
-    const panel = shadow.querySelector('.tango-panel');
-    if (!handle || !panel) return;
+    bindDraggable('[data-drag-handle]', '.tango-panel', 'panelPosition');
+    bindDraggable('[data-drawer-drag]', '.tango-drawer', 'drawerPosition');
+    bindDraggable('[data-bar-drag]', '.tango-bar', 'barPosition');
+  }
+
+  function bindDraggable(handleSelector, elementSelector, settingKey) {
+    const handle = shadow.querySelector(handleSelector);
+    const element = shadow.querySelector(elementSelector);
+    if (!handle || !element) return;
     handle.addEventListener('pointerdown', (event) => {
       if (event.target.closest('button')) return;
       event.preventDefault();
-      const rect = panel.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
       const startX = event.clientX; const startY = event.clientY;
       const onMove = (move) => {
-        runtime.settings.panelPosition = {
-          x: Math.min(innerWidth - rect.width, Math.max(0, rect.left + move.clientX - startX)),
-          y: Math.min(innerHeight - rect.height, Math.max(0, rect.top + move.clientY - startY))
+        runtime.settings[settingKey] = {
+          x: Math.min(Math.max(0, innerWidth - rect.width), Math.max(0, rect.left + move.clientX - startX)),
+          y: Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, rect.top + move.clientY - startY))
         };
-        panel.style.left = `${runtime.settings.panelPosition.x}px`;
-        panel.style.top = `${runtime.settings.panelPosition.y}px`;
-        panel.style.right = 'auto'; panel.style.transform = 'none';
+        element.style.left = `${runtime.settings[settingKey].x}px`;
+        element.style.top = `${runtime.settings[settingKey].y}px`;
+        element.style.right = 'auto'; element.style.bottom = 'auto'; element.style.transform = 'none';
       };
       const onUp = async () => {
         global.removeEventListener('pointermove', onMove); global.removeEventListener('pointerup', onUp);
@@ -451,13 +537,23 @@
     await refresh();
     await tickQuote();
     runtime.quoteTimer = setInterval(tickQuote, 3000);
+    runtime.routeTimer = setInterval(() => {
+      if (location.href === runtime.lastUrl) return;
+      runtime.lastUrl = location.href;
+      tickQuote();
+    }, 150);
     let mutationTimer;
     runtime.observer = new MutationObserver(() => {
+      if (location.href !== runtime.lastUrl) {
+        runtime.lastUrl = location.href;
+        tickQuote();
+      }
       clearTimeout(mutationTimer);
       mutationTimer = setTimeout(() => {
         if (runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1);
         else Tango.GMGN.clearQuickBuy();
-      }, 500);
+        if (runtime.current?.token && document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe') && !shadow.querySelector('.tango-chart-markers')) queueRender();
+      }, 250);
     });
     runtime.observer.observe(document.body, { childList: true, subtree: true });
     Tango.Store.subscribe(refresh);

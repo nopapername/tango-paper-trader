@@ -39,7 +39,9 @@
       customBalance: 'Custom balance', buySuccess: 'Paper buy successful', sellSuccess: 'Paper sell successful',
       sound: 'Trade sounds', setupInPopup: 'Open the Tango extension popup to finish setup.',
       accountSettings: 'Language & paper principal', resetWithBalance: 'Reset with this balance',
-      resetBalanceConfirm: 'Reset the paper account and delete all trades?', openDashboardFailed: 'Could not open the dashboard'
+      resetBalanceConfirm: 'Reset the paper account and delete all trades?', openDashboardFailed: 'Could not open the dashboard',
+      dragToMove: 'Drag to move', openToken: 'Open token on GMGN',
+      lastKnownPrice: 'This page cannot read the token’s live GMGN price. A sell will use the most recently recorded price.'
     },
     'zh-CN': {
       paper: '模拟盘', balance: '虚拟余额', equity: '账户净值', todayPnl: '今日盈亏',
@@ -78,7 +80,9 @@
       customBalance: '自定义本金', buySuccess: '模拟买入成功', sellSuccess: '模拟卖出成功',
       sound: '交易提示音', setupInPopup: '请点击浏览器工具栏中的 Tango 扩展完成首次设置。',
       accountSettings: '语言与虚拟本金', resetWithBalance: '按此本金重置账户',
-      resetBalanceConfirm: '确定重置虚拟账户并删除所有交易记录吗？', openDashboardFailed: '无法打开数据面板'
+      resetBalanceConfirm: '确定重置虚拟账户并删除所有交易记录吗？', openDashboardFailed: '无法打开数据面板',
+      dragToMove: '拖拽移动', openToken: '在 GMGN 打开此代币',
+      lastKnownPrice: '当前页面无法读取该代币的 GMGN 实时价格；卖出将按最近记录价格模拟成交。'
     }
   };
 

@@ -40,10 +40,10 @@
   border-radius: 18px;
   bottom: 18px;
   display: flex;
-  gap: 14px;
+  gap: 10px;
   left: 50%;
-  min-height: 58px;
-  padding: 8px 9px 8px 18px;
+  min-height: 68px;
+  padding: 9px 10px;
   position: fixed;
   transform: translateX(-50%);
   user-select: none;
@@ -51,13 +51,15 @@
 }
 
 .tango-bar.top { bottom: auto; top: 18px; }
+.tango-bar-main { align-items: center; cursor: pointer; display: flex; gap: 16px; padding: 4px 8px; }
+.tango-drag-grip { color: var(--muted); cursor: move; font-size: 17px; line-height: 1; padding: 10px 3px; touch-action: none; }
 .tango-brand { align-items: center; display: flex; font-weight: 800; gap: 7px; letter-spacing: .04em; }
 .tango-dot { background: var(--brand); border-radius: 50%; box-shadow: 0 0 14px var(--brand); height: 8px; width: 8px; }
 .tango-paper-badge { background: rgba(155,124,255,.16); border: 1px solid rgba(155,124,255,.4); border-radius: 5px; color: #c7b8ff; font-size: 9px; padding: 2px 5px; }
-.tango-stat { display: grid; gap: 2px; min-width: 76px; text-align: center; }
+.tango-stat { display: grid; gap: 3px; min-width: 94px; text-align: center; }
 .tango-stat span { color: var(--muted); font-size: 9px; letter-spacing: .06em; order: 2; text-transform: uppercase; }
-.tango-stat strong { font-size: 14px; font-weight: 800; order: 1; }
-.tango-bar-divider { background: var(--line); height: 32px; width: 1px; }
+.tango-stat strong { font-size: 16px; font-weight: 800; order: 1; }
+.tango-bar-divider { background: var(--line); height: 38px; width: 1px; }
 .tango-up { color: var(--green) !important; }
 .tango-down { color: var(--red) !important; }
 .tango-flat { color: var(--text) !important; }
@@ -82,11 +84,11 @@
   right: 18px;
   top: 50%;
   transform: translateY(-50%);
-  width: 310px;
+  width: 380px;
 }
 .tango-panel.collapsed { height: 48px; overflow: hidden; }
-.tango-header { align-items: center; border-bottom: 1px solid var(--line); cursor: move; display: flex; justify-content: space-between; margin-bottom: 0; min-height: 45px; padding: 8px 10px; }
-.tango-header-actions { display: flex; gap: 5px; }
+.tango-header { align-items: center; border-bottom: 1px solid var(--line); cursor: move; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 0; min-height: 50px; padding: 9px 12px; touch-action: none; }
+.tango-header-actions { display: flex; flex-shrink: 0; gap: 6px; }
 .tango-token { align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; display: flex; gap: 10px; margin-bottom: 10px; padding: 10px; }
 .tango-token-logo { align-items: center; background: linear-gradient(135deg,var(--brand),#3a1c85); border-radius: 50%; display: flex; font-weight: 800; height: 36px; justify-content: center; overflow: hidden; width: 36px; }
 .tango-token-logo img { height: 100%; object-fit: cover; width: 100%; }
@@ -121,14 +123,23 @@
   padding: 14px;
   position: fixed;
   right: 0;
-  width: 360px;
+  width: 420px;
 }
 .tango-drawer.hidden { display: none; }
-.tango-position { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; margin: 8px 0; padding: 10px; }
+.tango-drawer-header { align-items: center; cursor: move; display: flex; justify-content: space-between; margin: -4px -2px 10px; padding: 4px 2px 8px; touch-action: none; }
+.tango-position { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; margin: 9px 0; padding: 11px; }
 .tango-row { align-items: center; display: flex; justify-content: space-between; gap: 8px; }
 .tango-position-title { font-size: 14px; font-weight: 800; }
+.tango-position-link { align-items: center; appearance: none; background: transparent; border: 0; color: var(--text); cursor: pointer; display: flex; font: inherit; gap: 9px; min-width: 0; padding: 0; text-align: left; }
+.tango-position-link img,.tango-position-fallback { align-items: center; background: #252735; border-radius: 50%; display: flex; flex: 0 0 32px; height: 32px; justify-content: center; object-fit: cover; width: 32px; }
+.tango-position-link span:last-child { display: grid; min-width: 0; }
+.tango-position-link strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tango-position-link small { color: var(--muted); font-size: 9px; max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tango-position-link:hover strong { color: var(--brand); text-decoration: underline; }
 .tango-position-meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 10px; gap: 7px; margin: 5px 0 8px; }
 .tango-mini-actions { display: grid; gap: 5px; grid-template-columns: repeat(3,1fr); }
+.tango-button.sell-position { border-color: rgba(255,77,94,.45); color: #ff7c89; }
+.tango-position-note { color: #ffca78; font-size: 9px; line-height: 1.45; margin-top: 7px; }
 
 .tango-modal-backdrop { align-items: center; background: rgba(0,0,0,.55); display: flex; inset: 0; justify-content: center; position: fixed; }
 .tango-modal { border-radius: 16px; padding: 18px; width: 340px; }
@@ -151,15 +162,12 @@
 .tango-balance-options { display: grid; gap: 6px; grid-template-columns: repeat(3,1fr); }
 .tango-language { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; margin-top: 8px; }
 
-.tango-trade-body { padding: 0 11px 10px; }
-.tango-trade-block { padding: 10px 0 9px; }
+.tango-trade-body { padding: 0 14px 13px; }
+.tango-trade-block { padding: 12px 0 11px; }
 .tango-trade-block + .tango-trade-block { border-top: 1px solid var(--line); }
-.tango-trade-title { align-items: center; display: flex; font-weight: 800; gap: 9px; margin-bottom: 9px; }
+.tango-trade-title { align-items: center; display: flex; font-weight: 800; gap: 9px; margin-bottom: 10px; }
 .tango-trade-title.buy-title { color: #39e58c; }
 .tango-trade-title.sell-title { color: #ff6673; }
-.tango-mode-tab { color: var(--muted); font-size: 11px; font-weight: 700; }
-.tango-mode-tab.active.buy-tab { color: #39e58c; }
-.tango-mode-tab.active.sell-tab { color: #ff6673; }
 .tango-title-balance { color: var(--text); font-size: 11px; font-weight: 700; margin-left: auto; max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tango-preset.buy-preset { background: transparent; border-color: #26d77e; color: #42e797; font-weight: 800; }
 .tango-preset.buy-preset:hover { background: rgba(38,215,126,.12); }
@@ -181,7 +189,7 @@
 .tango-preset-editor.sell { border-color: #ff4d5e; color: #ff6673; }
 .tango-preset-editor:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(155,124,255,.16); }
 .tango-edit-all { color: #c7b8ff; }
-.tango-trade-meta { align-items: center; color: var(--muted); display: flex; font-size: 10px; gap: 8px; margin-top: 8px; overflow: hidden; white-space: nowrap; }
+.tango-trade-meta { align-items: center; color: var(--muted); display: flex; flex-wrap: wrap; font-size: 10px; gap: 8px 10px; margin-top: 9px; }
 .tango-trade-meta .safe { color: #d7d9df; margin-left: auto; }
 .tango-breakeven-link { appearance: none; background: transparent; border: 0; color: #ffbe55; cursor: pointer; font-family: inherit; font-size: 10px; font-weight: 700; line-height: 1.2; padding: 0; }
 .tango-breakeven-link:hover { color: #ffd78e; text-decoration: underline; }
@@ -190,15 +198,19 @@
 .tango-token-strip strong { color: var(--text); max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tango-token-strip span { color: var(--muted); }
 .tango-paper-logo { color: var(--brand); font-size: 15px; font-weight: 900; letter-spacing: -.08em; }
-.tango-summary-grid { border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4,1fr); padding: 10px 4px 8px; }
+.tango-summary-grid { border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4,1fr); padding: 12px 4px 10px; }
 .tango-summary-item { min-width: 0; padding: 0 5px; text-align: center; }
-.tango-summary-item span { color: var(--muted); display: block; font-size: 9px; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tango-summary-item strong { display: block; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tango-bottom-details { color: var(--muted); display: grid; font-size: 8px; gap: 3px; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 0 2px 2px; text-align: center; }
+.tango-summary-item span { color: var(--muted); display: block; font-size: 10px; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tango-summary-item strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tango-bottom-details { color: var(--muted); display: grid; font-size: 9px; gap: 5px; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 1px 2px 4px; text-align: center; }
 .tango-bottom-details span { min-width: 0; white-space: nowrap; }
-.tango-bottom-details strong { color: #c9cbd3; font-size: 8px; }
+.tango-bottom-details strong { color: #c9cbd3; font-size: 9px; }
+.tango-chart-markers { pointer-events: none; position: fixed; }
+.tango-chart-marker { border-top: 1px dashed currentColor; color: #42e797; left: 0; opacity: .92; position: absolute; right: 0; }
+.tango-chart-marker.sell { color: #ff6673; }
+.tango-chart-marker span { background: rgba(12,13,18,.94); border: 1px solid currentColor; border-radius: 5px; color: currentColor; font-size: 10px; font-weight: 800; padding: 3px 6px; position: absolute; right: 7px; top: -12px; white-space: nowrap; }
 @media (max-width: 760px) {
-  .tango-panel { right: 8px; width: min(318px,calc(100vw - 16px)); }
+  .tango-panel { right: 8px; width: min(380px,calc(100vw - 16px)); }
   .tango-bar .tango-stat.optional { display: none; }
   .tango-drawer { width: min(360px,100vw); }
 }
