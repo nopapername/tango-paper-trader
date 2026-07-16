@@ -10,8 +10,33 @@
     return `${String(chain || '').toLowerCase()}:${String(tokenAddress || '').toLowerCase()}`;
   }
 
+  function usesMarketCapValuation(position) {
+    if (position?.valuationMode === 'MARKET_CAP') return true;
+    const price = Number(position?.averageEntryPriceUsd || 0);
+    const marketCap = Number(position?.averageEntryMarketCap || 0);
+    if (!(price > 0 && marketCap > 0)) return false;
+    const ratio = marketCap / price;
+    return ratio > 900_000_000 && ratio < 1_100_000_000;
+  }
+
+  function effectiveQuotePrice(quote, position) {
+    const marketCap = Number(quote?.marketCapUsd || 0);
+    const positionUsesMarketCap = usesMarketCapValuation(position);
+    const useMarketCap = position ? positionUsesMarketCap : quote?.valuationMode === 'MARKET_CAP';
+    if (useMarketCap && marketCap > 0) {
+      return marketCap / Number(position?.marketCapDivisor || quote?.marketCapDivisor || 1_000_000_000);
+    }
+    if (position && !positionUsesMarketCap && quote?.valuationMode === 'MARKET_CAP' && marketCap > 0) {
+      const referencePrice = Number(position.lastPriceUsd || position.averageEntryPriceUsd || 0);
+      const referenceMarketCap = Number(position.lastMarketCapUsd || position.averageEntryMarketCap || 0);
+      if (referencePrice > 0 && referenceMarketCap > 0) return referencePrice * marketCap / referenceMarketCap;
+    }
+    const price = Number(quote?.priceUsd || 0);
+    return price > 0 ? price : marketCap > 0 ? marketCap / 1_000_000_000 : 0;
+  }
+
   function validateQuote(quote, now = Date.now(), staleMs) {
-    if (!quote || !(Number(quote.priceUsd) > 0)) return { ok: false, reason: 'invalidQuote' };
+    if (!quote || !(effectiveQuotePrice(quote) > 0)) return { ok: false, reason: 'invalidQuote' };
     if (!(Number(quote.solPriceUsd) > 0)) return { ok: false, reason: 'invalidQuote' };
     const maxAge = Number(staleMs || Tango.QUOTE_STALE_MS || 15_000);
     if (!quote.observedAt || now - Number(quote.observedAt) > maxAge) return { ok: false, reason: 'staleQuote' };
@@ -35,11 +60,16 @@
     const netInvestmentSol = amountSol - platformFeeSol - networkFeeSol;
     if (!(netInvestmentSol > 0)) throw new Error('invalidAmount');
 
-    const executionPriceUsd = Number(order.quote.priceUsd) * (1 + slippage);
-    const solPriceUsd = Number(order.quote.solPriceUsd || 1);
-    const quantity = netInvestmentSol * solPriceUsd / executionPriceUsd;
     const key = positionKey(order.token.chain, order.token.address);
     const existing = state.positions[key];
+    const valuationMode = existing
+      ? (usesMarketCapValuation(existing) ? 'MARKET_CAP' : 'PRICE')
+      : (order.quote.valuationMode === 'MARKET_CAP' ? 'MARKET_CAP' : 'PRICE');
+    const marketCapDivisor = Number(existing?.marketCapDivisor || order.quote.marketCapDivisor || 1_000_000_000);
+    const valuationContext = existing || (valuationMode === 'MARKET_CAP' ? { valuationMode, marketCapDivisor } : null);
+    const executionPriceUsd = effectiveQuotePrice(order.quote, valuationContext) * (1 + slippage);
+    const solPriceUsd = Number(order.quote.solPriceUsd || 1);
+    const quantity = netInvestmentSol * solPriceUsd / executionPriceUsd;
     const existingQuantity = Number(existing?.quantity || 0);
     const existingCost = Number(existing?.costBasisSol || 0);
     const nextQuantity = existingQuantity + quantity;
@@ -61,7 +91,7 @@
       side: 'BUY',
       quantity: round(quantity),
       amountSol: round(amountSol),
-      observedPriceUsd: Number(order.quote.priceUsd),
+      observedPriceUsd: effectiveQuotePrice(order.quote, valuationContext),
       executionPriceUsd: round(executionPriceUsd),
       marketCapUsd: Number(order.quote.marketCapUsd || 0),
       liquidityUsd: Number(order.quote.liquidityUsd || 0),
@@ -88,12 +118,14 @@
       averageEntryPriceUsd: round(averageEntryPriceUsd),
       averageEntryMarketCap: round(averageEntryMarketCap),
       realizedPnlSol: Number(existing?.realizedPnlSol || 0),
-      lastPriceUsd: Number(order.quote.priceUsd),
+      lastPriceUsd: effectiveQuotePrice(order.quote, valuationContext),
       lastMarketCapUsd: Number(order.quote.marketCapUsd || 0),
       lastSolPriceUsd: solPriceUsd,
       quoteObservedAt: Number(order.quote.observedAt),
       openedAt: existing?.openedAt || now,
-      updatedAt: now
+      updatedAt: now,
+      valuationMode,
+      marketCapDivisor
     };
     nextState.trades = [trade, ...(state.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
     return { state: nextState, trade, position: nextState.positions[key] };
@@ -114,7 +146,7 @@
     if (!(quantity > 0)) throw new Error('invalidAmount');
 
     const slippage = Number(settings.slippageBps || 0) / 10_000;
-    const executionPriceUsd = Number(order.quote.priceUsd) * (1 - slippage);
+    const executionPriceUsd = effectiveQuotePrice(order.quote, existing) * (1 - slippage);
     const solPriceUsd = Number(order.quote.solPriceUsd || existing.lastSolPriceUsd || 1);
     const grossProceedsSol = quantity * executionPriceUsd / solPriceUsd;
     const platformFeeSol = feeFor(grossProceedsSol, settings);
@@ -135,7 +167,7 @@
       side: 'SELL',
       quantity: round(quantity),
       amountSol: round(netProceedsSol),
-      observedPriceUsd: Number(order.quote.priceUsd),
+      observedPriceUsd: effectiveQuotePrice(order.quote, existing),
       executionPriceUsd: round(executionPriceUsd),
       marketCapUsd: Number(order.quote.marketCapUsd || 0),
       liquidityUsd: Number(order.quote.liquidityUsd || 0),
@@ -162,7 +194,7 @@
         quantity: round(remainingQuantity),
         costBasisSol: round(remainingCost),
         realizedPnlSol: round(Number(existing.realizedPnlSol || 0) + realizedPnlSol),
-        lastPriceUsd: Number(order.quote.priceUsd),
+        lastPriceUsd: effectiveQuotePrice(order.quote, existing),
         lastMarketCapUsd: Number(order.quote.marketCapUsd || 0),
         lastSolPriceUsd: solPriceUsd,
         quoteObservedAt: Number(order.quote.observedAt),
@@ -176,7 +208,7 @@
   }
 
   function markPosition(position, quote) {
-    const priceUsd = Number(quote?.priceUsd || position.lastPriceUsd || position.averageEntryPriceUsd || 0);
+    const priceUsd = quote ? effectiveQuotePrice(quote, position) : Number(position.lastPriceUsd || position.averageEntryPriceUsd || 0);
     const solPriceUsd = Number(quote?.solPriceUsd || position.lastSolPriceUsd || 1);
     const valueSol = priceUsd > 0 ? Number(position.quantity) * priceUsd / solPriceUsd : Number(position.costBasisSol);
     const unrealizedPnlSol = valueSol - Number(position.costBasisSol);
@@ -188,7 +220,7 @@
     if (!position || !(Number(position.quantity) > 0) || !validateQuote(quote).ok) return null;
     const slippage = Number(settings.slippageBps || 0) / 10_000;
     const feeRate = Number(settings.platformFeeBps || 0) / 10_000;
-    const executionPriceUsd = Number(quote.priceUsd) * (1 - slippage);
+    const executionPriceUsd = effectiveQuotePrice(quote, position) * (1 - slippage);
     const grossFullValueSol = Number(position.quantity) * executionPriceUsd / Number(quote.solPriceUsd);
     const targetGrossSol = (Number(position.costBasisSol) + Number(settings.networkFeeSol || 0)) / Math.max(1e-9, 1 - feeRate);
     const percent = targetGrossSol / grossFullValueSol * 100;
@@ -233,7 +265,7 @@
     const nextState = structuredCloneSafe(state);
     nextState.positions[key] = {
       ...nextState.positions[key],
-      lastPriceUsd: Number(quote.priceUsd),
+      lastPriceUsd: effectiveQuotePrice(quote, nextState.positions[key]),
       lastMarketCapUsd: Number(quote.marketCapUsd || nextState.positions[key].lastMarketCapUsd || 0),
       lastSolPriceUsd: Number(quote.solPriceUsd || nextState.positions[key].lastSolPriceUsd || 1),
       quoteObservedAt: Number(quote.observedAt),

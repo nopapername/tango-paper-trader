@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Tango Paper Trader",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Paper trade Solana meme tokens directly on GMGN with bilingual portfolio analytics.",
   "permissions": ["storage"],
-  "host_permissions": ["https://gmgn.ai/*", "https://api.coingecko.com/*"],
+  "host_permissions": ["https://gmgn.ai/*", "https://api.coingecko.com/*", "https://api.dexscreener.com/*"],
   "background": {
     "service_worker": "src/background.js"
   },
@@ -14,6 +14,20 @@
   },
   "options_page": "dashboard.html",
   "content_scripts": [
+    {
+      "matches": ["https://gmgn.ai/*"],
+      "js": ["src/content/page-main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://gmgn.ai/*"],
+      "js": ["src/content/chart-main.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    },
     {
       "matches": ["https://gmgn.ai/*"],
       "css": ["src/content/content.css"],

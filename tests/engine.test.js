@@ -53,6 +53,33 @@ test('stale and invalid quotes are rejected', () => {
   assert.throws(() => Engine.executeBuy(state(), { token, quote: { priceUsd: 0, observedAt: 1_000 }, amountSol: 1 }, settings, 1_000), /invalidQuote/);
 });
 
+test('market-cap-only trench quotes can buy and track pnl without a token price', () => {
+  const marketCapQuote = {
+    priceUsd: 0, marketCapUsd: 3_000, solPriceUsd: 100, observedAt: 1_000,
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+  };
+  const bought = Engine.executeBuy(state(), { token, quote: marketCapQuote, amountSol: 1 }, settings, 1_000);
+  assert.equal(bought.position.valuationMode, 'MARKET_CAP');
+  assert.ok(bought.position.quantity > 0);
+
+  const doubled = { ...marketCapQuote, marketCapUsd: 6_000, observedAt: 2_000 };
+  const mark = Engine.markPosition(bought.position, doubled);
+  assert.ok(mark.valueSol > bought.position.costBasisSol * 1.9);
+  const sold = Engine.executeSell(bought.state, { token, quote: doubled, percent: 100 }, settings, 2_000);
+  assert.ok(sold.trade.realizedPnlSol > 0);
+});
+
+test('adding a market-cap trench quote to a price position keeps the original valuation mode', () => {
+  const first = Engine.executeBuy(state(), { token, quote, amountSol: 1 }, settings, 1_000);
+  const listQuote = {
+    priceUsd: 0, marketCapUsd: 4_000_000, solPriceUsd: 100, observedAt: 2_000,
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+  };
+  const second = Engine.executeBuy(first.state, { token, quote: listQuote, amountSol: 1 }, settings, 2_000);
+  assert.equal(second.position.valuationMode, 'PRICE');
+  assert.ok(second.position.averageEntryPriceUsd > 2 && second.position.averageEntryPriceUsd < 4.1);
+});
+
 test('portfolio summary combines cash, marked positions and trade stats', () => {
   const bought = Engine.executeBuy(state(), { token, quote, amountSol: 10 }, settings, 1_000);
   const marked = Engine.updatePositionQuote(bought.state, token, { ...quote, priceUsd: 3, observedAt: 2_000 });

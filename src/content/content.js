@@ -7,7 +7,7 @@
     state: null, settings: null, current: null, drawerOpen: false, modal: null,
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
     presetEditing: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
-    solPriceUsd: 0, solPricePromise: null, lastUrl: location.href, routeTimer: null
+    solPriceUsd: 0, solPricePromise: null, tokenQuotePromise: null, gmgnQuotes: new Map(), lastUrl: location.href, routeTimer: null
   };
 
   const host = document.createElement('div');
@@ -20,6 +20,26 @@
   shell.className = 'tango-shell';
   shadow.append(stylesheet, shell);
   document.documentElement.appendChild(host);
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
+    (event.data.quotes || []).forEach((quote) => {
+      if (!quote?.address) return;
+      const address = String(quote.address).toLowerCase();
+      runtime.gmgnQuotes.set(address, quote);
+      if (runtime.current?.token?.address?.toLowerCase() === address && Number(quote.priceUsd) > 0) {
+        runtime.current.quote = {
+          ...runtime.current.quote,
+          ...quote,
+          marketCapUsd: Number(runtime.current.quote.marketCapUsd || quote.marketCapUsd || 0),
+          solPriceUsd: Number(runtime.current.quote.solPriceUsd || runtime.solPriceUsd || 0),
+          valuationMode: 'PRICE'
+        };
+        queueRender();
+      }
+    });
+  });
+  window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
 
   function language() { return Tango.I18n.resolveLanguage(runtime.settings?.language); }
   function t(key) { return Tango.I18n.t(key, runtime.settings?.language); }
@@ -75,6 +95,7 @@
     }
     queueRender();
     ensureSolPrice(runtime.current);
+    ensureTokenQuote(runtime.current);
     if (runtime.current?.quote?.priceUsd > 0 && currentPosition() && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
       runtime.state = Tango.Engine.updatePositionQuote(runtime.state, runtime.current.token, runtime.current.quote);
       runtime.lastQuoteWriteAt = Date.now();
@@ -99,6 +120,45 @@
       .finally(() => { runtime.solPricePromise = null; });
   }
 
+  function ensureTokenQuote(context) {
+    if (!context?.token?.address || runtime.tokenQuotePromise || (context.quote.priceUsd > 0 && context.quote.marketCapUsd > 0)) return;
+    const address = context.token.address;
+    const gmgnQuote = runtime.gmgnQuotes.get(address.toLowerCase());
+    if (Number(gmgnQuote?.priceUsd) > 0) {
+      context.quote = {
+        ...context.quote,
+        ...gmgnQuote,
+        marketCapUsd: Number(context.quote.marketCapUsd || gmgnQuote.marketCapUsd || 0),
+        solPriceUsd: Number(context.quote.solPriceUsd || runtime.solPriceUsd || 0),
+        valuationMode: 'PRICE'
+      };
+      queueRender();
+      return;
+    }
+    runtime.tokenQuotePromise = chrome.runtime.sendMessage({ type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address })
+      .then((response) => {
+        const quote = response?.quote;
+        if (!quote || runtime.current?.token?.address !== address) return;
+        runtime.current.quote = {
+          ...runtime.current.quote,
+          ...quote,
+          marketCapUsd: Number(runtime.current.quote.marketCapUsd || quote.marketCapUsd || 0),
+          solPriceUsd: Number(runtime.current.quote.solPriceUsd || runtime.solPriceUsd || 0),
+          valuationMode: 'PRICE'
+        };
+        queueRender();
+      })
+      .catch(() => null)
+      .finally(() => { runtime.tokenQuotePromise = null; });
+  }
+
+  function requestWithTimeout(message, timeoutMs = 650) {
+    return Promise.race([
+      chrome.runtime.sendMessage(message).catch(() => null),
+      new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))
+    ]);
+  }
+
   function positionUrl(position) {
     return `https://gmgn.ai/sol/token/${encodeURIComponent(position.tokenAddress)}`;
   }
@@ -110,12 +170,27 @@
   async function handleQuickBuy(context) {
     if (!runtime.settings?.enabled) return;
     if (context.token.chain !== 'sol') return showToast('GMGN Solana only in V1', 'error');
-    if (!(context.quote.solPriceUsd > 0)) {
-      try {
-        const response = await chrome.runtime.sendMessage({ type: 'TANGO_GET_SOL_PRICE' });
-        context.quote.solPriceUsd = Number(response?.price || 1);
-      } catch { context.quote.solPriceUsd = 0; }
+    const gmgnQuote = runtime.gmgnQuotes.get(context.token.address.toLowerCase());
+    const needsExternalTokenFallback = !(Number(gmgnQuote?.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0);
+    const [tokenResponse, solResponse] = await Promise.all([
+      Number(gmgnQuote?.priceUsd) > 0
+        ? { quote: gmgnQuote }
+        : needsExternalTokenFallback
+          ? requestWithTimeout({ type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address: context.token.address })
+          : null,
+      context.quote.solPriceUsd > 0 ? null : requestWithTimeout({ type: 'TANGO_GET_SOL_PRICE' })
+    ]);
+    const externalQuote = tokenResponse?.quote;
+    if (Number(externalQuote?.priceUsd) > 0) {
+      context.quote = {
+        ...context.quote,
+        ...externalQuote,
+        marketCapUsd: Number(context.quote.marketCapUsd || externalQuote.marketCapUsd || 0),
+        valuationMode: 'PRICE'
+      };
     }
+    context.quote.solPriceUsd = Number(context.quote.solPriceUsd || solResponse?.price || runtime.solPriceUsd || 1);
+    context.quote.observedAt = Date.now();
     await buy(context.amountSol, context);
   }
 
@@ -290,6 +365,8 @@
           <div class="tango-bar-divider"></div>
           <div class="tango-stat"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>
           <div class="tango-bar-divider"></div>
+          <div class="tango-stat optional"><strong class="${pnlClass(summary.todayPnlSol)}">${accountMoney(summary.todayPnlSol, true)}</strong><span>${t('todayPnl')}</span></div>
+          <div class="tango-bar-divider"></div>
           <div class="tango-stat"><strong>${summary.positionCount}</strong><span>${t('positions')}</span></div>`}
       </div>
       <button class="tango-icon-button" data-action="collapse-bar">${collapsed ? '＋' : '－'}</button>
@@ -401,39 +478,38 @@
     </div>`;
   }
 
-  function renderChartMarkers() {
-    if (!runtime.current?.token) return '';
-    const chartFrame = document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe');
-    const rect = chartFrame?.getBoundingClientRect();
-    if (!rect || rect.width < 300 || rect.height < 200 || rect.bottom < 0 || rect.top > innerHeight) return '';
+  function chartMarkerPayload() {
+    if (!runtime.current?.token) return { markers: [] };
     const address = runtime.current.token.address.toLowerCase();
     const tokenTrades = (runtime.state.trades || []).filter((trade) =>
       trade.chain === runtime.current.token.chain && trade.tokenAddress.toLowerCase() === address && Number(trade.marketCapUsd) > 0
     );
     const position = currentPosition();
+    const currentPrice = Number(runtime.current.quote.priceUsd || 0);
+    const currentMarketCap = Number(runtime.current.quote.marketCapUsd || 0);
+    const priceAtMarketCap = (marketCap, fallback = 0) => currentPrice > 0 && currentMarketCap > 0
+      ? currentPrice * Number(marketCap) / currentMarketCap
+      : Number(fallback || 0);
     const markers = [];
     const entryMarketCap = Number(position?.averageEntryMarketCap || tokenTrades.find((trade) => trade.side === 'BUY')?.marketCapUsd || 0);
-    if (entryMarketCap > 0) markers.push({ side: 'BUY', marketCap: entryMarketCap });
-    tokenTrades.filter((trade) => trade.side === 'SELL').slice(0, 4).forEach((trade) => {
-      markers.push({ side: 'SELL', marketCap: Number(trade.marketCapUsd) });
+    if (entryMarketCap > 0) markers.push({
+      side: 'BUY', marketCap: entryMarketCap,
+      price: priceAtMarketCap(entryMarketCap, position?.averageEntryPriceUsd), label: t('buy')
     });
-    if (!markers.length) return '';
-    const scaleValues = markers.map((marker) => marker.marketCap);
-    const currentMarketCap = Number(runtime.current.quote.marketCapUsd || 0);
-    if (currentMarketCap > 0) scaleValues.push(currentMarketCap);
-    const logs = scaleValues.map((value) => Math.log(Math.max(1, value)));
-    const min = Math.min(...logs); const max = Math.max(...logs);
-    const points = markers.map((marker, index) => ({
-      ...marker,
-      top: max === min ? 50 + (index - (markers.length - 1) / 2) * 9 : 12 + (max - Math.log(Math.max(1, marker.marketCap))) / (max - min) * 76
-    })).sort((a, b) => a.top - b.top);
-    for (let index = 1; index < points.length; index += 1) {
-      if (points[index].top - points[index - 1].top < 7) points[index].top = points[index - 1].top + 7;
-    }
-    const overflow = Math.max(0, (points.at(-1)?.top || 0) - 90);
-    if (overflow) points.forEach((point) => { point.top -= overflow; });
-    const style = `left:${Math.round(rect.left)}px;top:${Math.round(rect.top)}px;width:${Math.round(Math.max(280, rect.width - 54))}px;height:${Math.round(rect.height)}px;`;
-    return `<div class="tango-chart-markers" style="${style}">${points.map((marker) => `<div class="tango-chart-marker ${marker.side.toLowerCase()}" style="top:${Math.max(6, Math.min(92, marker.top))}%"><span>${t(marker.side === 'BUY' ? 'buy' : 'sell')} · ${Tango.Format.usd(marker.marketCap, language(), true)}</span></div>`).join('')}</div>`;
+    tokenTrades.filter((trade) => trade.side === 'SELL').slice(0, 4).forEach((trade) => {
+      markers.push({
+        side: 'SELL', marketCap: Number(trade.marketCapUsd),
+        price: priceAtMarketCap(trade.marketCapUsd, trade.observedPriceUsd), label: t('sell')
+      });
+    });
+    return { currentPrice, currentMarketCap, markers };
+  }
+
+  function syncChartMarkers() {
+    const frame = document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe');
+    frame?.contentWindow?.postMessage({
+      source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: chartMarkerPayload()
+    }, '*');
   }
 
   function renderModal() {
@@ -452,8 +528,9 @@
       return;
     }
     const summary = Tango.Engine.portfolioSummary(runtime.state);
-    shell.innerHTML = `${renderChartMarkers()}${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
+    shell.innerHTML = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     bindEvents();
+    syncChartMarkers();
   }
 
   function bindEvents() {
@@ -552,7 +629,7 @@
       mutationTimer = setTimeout(() => {
         if (runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1);
         else Tango.GMGN.clearQuickBuy();
-        if (runtime.current?.token && document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe') && !shadow.querySelector('.tango-chart-markers')) queueRender();
+        if (document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe')) syncChartMarkers();
       }, 250);
     });
     runtime.observer.observe(document.body, { childList: true, subtree: true });

@@ -191,32 +191,56 @@
     return match ? parseMoney(match[1]) : 0;
   }
 
+  function ensureQuickBuyStyle() {
+    if (document.querySelector('#tango-trench-buy-style')) return;
+    const style = document.createElement('style');
+    style.id = 'tango-trench-buy-style';
+    style.textContent = `
+      .BuyButton-continer.tango-native-buy-overridden { position: relative !important; }
+      .tango-list-quick-buy {
+        align-items: flex-end; appearance: none; background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 10%, transparent);
+        border: 0; border-radius: 6px; bottom: 0; box-sizing: border-box; color: var(--customize-button-ultra-color, #00ffee);
+        cursor: pointer; display: flex; font: 600 12px/12px Inter, ui-sans-serif, system-ui, sans-serif; gap: 4px; inset: 0;
+        justify-content: flex-end; padding: 0 10px 32px 8px; position: absolute; white-space: nowrap; width: 100%; z-index: 50;
+      }
+      .tango-list-quick-buy:hover { background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 20%, transparent); filter: brightness(1.12); }
+      .tango-list-quick-buy:active { opacity: .55; }
+      .tango-list-quick-buy svg { flex: 0 0 12px; height: 12px; width: 12px; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   function discoverTokenCards(onQuickBuy, defaultAmountSol = 0.1) {
     if (!isTrenchPage()) {
       clearQuickBuy();
       return 0;
     }
+    ensureQuickBuyStyle();
     const nativeSlots = document.querySelectorAll('.BuyButton-continer');
     let injected = 0;
     for (const slot of nativeSlots) {
       if (injected >= 80) break;
-      if (slot.dataset.tangoQuickBuy === '1' && slot.querySelector('.tango-list-quick-buy')) continue;
-      if (slot.dataset.tangoQuickBuy === '1') restoreQuickBuySlot(slot);
       const card = slot.closest('[class~="group/a"]');
       if (!card || !trenchColumn(card)) continue;
       const tokenLinkSelector = 'a[href*="pump.fun/coin/"], a[href*="/sol/token/"]';
-      const anchor = card.matches(tokenLinkSelector) ? card : card.querySelector(tokenLinkSelector);
-      if (!anchor) continue;
-      const href = anchor.href;
+      const anchor = card.querySelector(tokenLinkSelector);
+      const cardHref = card.getAttribute('href');
+      const href = cardHref?.includes('/sol/token/') ? new URL(cardHref, location.origin).href : anchor?.href;
+      if (!href) continue;
       const address = tokenAddressFromUrl(href);
       const nativeControl = slot.querySelector('[data-testid="quickbuy"]');
       const amountSol = parseMoney(nativeControl?.textContent || slot.textContent) || Number(defaultAmountSol);
       if (!address || !nativeControl || !(amountSol > 0)) continue;
-      const replacement = nativeControl.cloneNode(true);
-      replacement.classList.add('tango-list-quick-buy');
+      if (slot.dataset.tangoQuickBuy === '1' && slot.querySelector('.tango-list-quick-buy') &&
+        slot.dataset.tangoTokenAddress === address && Number(slot.dataset.tangoAmountSol) === amountSol) continue;
+      if (slot.dataset.tangoQuickBuy === '1') restoreQuickBuySlot(slot);
+      const replacement = document.createElement('button');
+      replacement.type = 'button';
+      replacement.className = 'tango-list-quick-buy';
       replacement.dataset.tangoQuickBuy = '1';
       replacement.title = `Tango Paper Buy ${amountSol} SOL`;
       replacement.setAttribute('aria-label', `Tango Paper Buy ${amountSol} SOL`);
+      replacement.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m13.688 8.12-6.471 7.705c-.206.245-.604.061-.55-.255l1.007-5.843-4.617-.061c-.88-.012-1.352-1.038-.79-1.714L8.723.191c.205-.247.605-.063.55.253L8.247 6.399l4.641.003c.888.001 1.371 1.038.8 1.718Z"/></svg><span>' + amountSol + ' SOL</span>';
       const blockNativePointer = (event) => {
         event.stopPropagation();
         event.stopImmediatePropagation();
@@ -229,26 +253,42 @@
         const symbol = cardSymbol(text);
         const prices = text.match(/\$[0-9.,eE+\-]+/g) || [];
         const marketCapUsd = cardMarketCap(text);
-        const isPumpToken = anchor.hostname === 'pump.fun' || /pump$/i.test(address);
+        const isPumpToken = /pump$/i.test(address);
         const visiblePrice = prices.map(parseMoney).find((value) => value > 0 && value < 1) || 0;
-        const priceUsd = visiblePrice || (isPumpToken && marketCapUsd > 0 ? marketCapUsd / 1_000_000_000 : 0);
+        const priceUsd = visiblePrice || (marketCapUsd > 0 ? marketCapUsd / 1_000_000_000 : 0);
+        const logoUrl = card.querySelector('img[alt="logo"]')?.src || '';
         onQuickBuy({
-          token: { chain: chainFromUrl(href) || 'sol', address, symbol, name: symbol, logoUrl: '' },
-          quote: { priceUsd, marketCapUsd, liquidityUsd: 0, solPriceUsd: 0, source: isPumpToken ? 'GMGN_TRENCH_MC' : 'GMGN_LIST', observedAt: priceUsd ? Date.now() : 0 },
+          token: { chain: chainFromUrl(href) || 'sol', address, symbol, name: symbol, logoUrl },
+          quote: {
+            priceUsd, marketCapUsd, liquidityUsd: 0, solPriceUsd: 0,
+            source: isPumpToken ? 'GMGN_TRENCH_MC' : 'GMGN_LIST_MC',
+            valuationMode: visiblePrice > 0 ? 'PRICE' : 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
+            observedAt: priceUsd > 0 || marketCapUsd > 0 ? Date.now() : 0
+          },
           amountSol,
           sourceUrl: href
         });
       };
       slot.classList.add('tango-native-buy-overridden');
       slot.dataset.tangoQuickBuy = '1';
+      slot.dataset.tangoTokenAddress = address;
+      slot.dataset.tangoAmountSol = String(amountSol);
       slot.__tangoOriginalQuickBuy = nativeControl;
       slot.__tangoReplacementQuickBuy = replacement;
       slot.__tangoQuickBuyHandler = handleClick;
       slot.__tangoPointerBlocker = blockNativePointer;
+      slot.__tangoNativeStyle = {
+        pointerEvents: nativeControl.style.pointerEvents,
+        visibility: nativeControl.style.visibility,
+        ariaHidden: nativeControl.getAttribute('aria-hidden')
+      };
+      nativeControl.style.pointerEvents = 'none';
+      nativeControl.style.visibility = 'hidden';
+      nativeControl.setAttribute('aria-hidden', 'true');
       replacement.addEventListener('pointerdown', blockNativePointer, true);
       replacement.addEventListener('mousedown', blockNativePointer, true);
       replacement.addEventListener('click', handleClick, true);
-      nativeControl.replaceWith(replacement);
+      slot.appendChild(replacement);
       injected += 1;
     }
     return injected;
@@ -269,13 +309,22 @@
       replacement.removeEventListener('mousedown', slot.__tangoPointerBlocker, true);
     }
     if (replacement && slot.__tangoQuickBuyHandler) replacement.removeEventListener('click', slot.__tangoQuickBuyHandler, true);
-    if (replacement?.isConnected && original) replacement.replaceWith(original);
+    if (replacement?.isConnected) replacement.remove();
+    if (original && slot.__tangoNativeStyle) {
+      original.style.pointerEvents = slot.__tangoNativeStyle.pointerEvents;
+      original.style.visibility = slot.__tangoNativeStyle.visibility;
+      if (slot.__tangoNativeStyle.ariaHidden == null) original.removeAttribute('aria-hidden');
+      else original.setAttribute('aria-hidden', slot.__tangoNativeStyle.ariaHidden);
+    }
     delete slot.__tangoOriginalQuickBuy;
     delete slot.__tangoReplacementQuickBuy;
     delete slot.__tangoQuickBuyHandler;
     delete slot.__tangoPointerBlocker;
+    delete slot.__tangoNativeStyle;
     slot.classList.remove('tango-native-buy-overridden');
     delete slot.dataset.tangoQuickBuy;
+    delete slot.dataset.tangoTokenAddress;
+    delete slot.dataset.tangoAmountSol;
   }
 
   Tango.GMGN = {
