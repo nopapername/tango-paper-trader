@@ -1,10 +1,24 @@
 let solPriceCache = { price: 0, fetchedAt: 0 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== 'TANGO_GET_SOL_PRICE') return false;
-  getSolPrice().then((price) => sendResponse({ ok: true, price }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
+  if (message?.type === 'TANGO_GET_SOL_PRICE') {
+    getSolPrice().then((price) => sendResponse({ ok: true, price }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.type === 'TANGO_GET_SESSION_CONFIRM') {
+    chrome.storage.session.get('tangoSkipTradeConfirmation')
+      .then((session) => sendResponse({ ok: true, suppressed: Boolean(session.tangoSkipTradeConfirmation) }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.type === 'TANGO_SET_SESSION_CONFIRM') {
+    chrome.storage.session.set({ tangoSkipTradeConfirmation: Boolean(message.suppressed) })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  return false;
 });
 
 async function getSolPrice() {

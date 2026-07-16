@@ -33,7 +33,8 @@
       totalProfit: 'Total Profit', paperBalance: 'Paper Balance', breakeven: 'Recover Cost',
       breakevenUnavailable: 'Current value cannot recover the remaining cost', pressEnter: 'Press Enter',
       editPresets: 'Edit presets', savePresets: 'Save presets', presetsSaved: 'Presets saved',
-      invalidPresets: 'Enter 8 valid preset values'
+      invalidPresets: 'Enter 8 valid preset values',
+      skipConfirmSession: "Don't ask again until the browser restarts"
     },
     'zh-CN': {
       paper: '模拟盘', balance: '虚拟余额', equity: '账户净值', todayPnl: '今日盈亏',
@@ -66,7 +67,8 @@
       totalProfit: '总利润', paperBalance: '虚拟余额', breakeven: '一键回本',
       breakevenUnavailable: '当前持仓价值不足以收回剩余成本', pressEnter: '按 Enter 确认',
       editPresets: '编辑预设档位', savePresets: '保存预设档位', presetsSaved: '预设档位已保存',
-      invalidPresets: '请输入 8 个有效的预设数值'
+      invalidPresets: '请输入 8 个有效的预设数值',
+      skipConfirmSession: '本次浏览器会话不再提示（重启浏览器后恢复）'
     }
   };
 

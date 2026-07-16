@@ -6,7 +6,7 @@
   const runtime = {
     state: null, settings: null, current: null, drawerOpen: false, modal: null,
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
-    presetEditing: null
+    presetEditing: null, suppressConfirmForSession: false
   };
 
   const host = document.createElement('div');
@@ -35,6 +35,9 @@
   function currentPosition() {
     if (!runtime.current?.token) return null;
     return runtime.state.positions[Tango.Engine.positionKey(runtime.current.token.chain, runtime.current.token.address)] || null;
+  }
+  function requiresConfirmation() {
+    return !runtime.settings.fastMode && runtime.settings.confirmationEnabled && !runtime.suppressConfirmForSession;
   }
 
   async function refresh() {
@@ -83,7 +86,7 @@
     };
     try {
       previewBuy(order);
-      if (!runtime.settings.fastMode && runtime.settings.confirmationEnabled) return;
+      if (requiresConfirmation()) return;
       await commitBuy(order);
     } catch (error) { showToast(t(error.message), 'error'); }
   }
@@ -93,7 +96,7 @@
     if (!validation.ok) throw new Error(validation.reason);
     if (!(order.amountSol > 0)) throw new Error('invalidAmount');
     if (order.amountSol > runtime.state.account.cashBalanceSol) throw new Error('insufficientBalance');
-    if (runtime.settings.fastMode || !runtime.settings.confirmationEnabled) return;
+    if (!requiresConfirmation()) return;
     const fee = order.amountSol * runtime.settings.platformFeeBps / 10_000;
     const executionPrice = order.quote.priceUsd * (1 + runtime.settings.slippageBps / 10_000);
     runtime.modal = {
@@ -107,6 +110,7 @@
         [t('networkFee'), Tango.Format.sol(runtime.settings.networkFeeSol, language())],
         [t('executionPrice'), Tango.Format.usd(executionPrice, language())]
       ],
+      allowSessionSuppress: true,
       action: () => commitBuy(order)
     };
     render();
@@ -129,10 +133,11 @@
       if (!runtime.state.positions[key]) throw new Error('noPosition');
       const validation = Tango.Engine.validateQuote(order.quote);
       if (!validation.ok) throw new Error(validation.reason);
-      if (!runtime.settings.fastMode && runtime.settings.confirmationEnabled) {
+      if (requiresConfirmation()) {
         runtime.modal = {
           type: 'confirm', title: t('simulatedSell'),
           rows: [[t('token'), order.token.symbol], [t('amount'), `${percent}%`], [t('observedPrice'), Tango.Format.usd(order.quote.priceUsd, language())]],
+          allowSessionSuppress: true,
           action: () => commitSell(order)
         };
         return render();
@@ -300,6 +305,7 @@
     if (!runtime.modal) return '';
     return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3>
       <div class="tango-confirm-list">${runtime.modal.rows.map(([label,value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
+      ${runtime.modal.allowSessionSuppress ? `<label class="tango-session-confirm"><input id="tango-skip-session-confirm" type="checkbox"><span>${t('skipConfirmSession')}</span></label>` : ''}
       <div class="tango-modal-actions"><button class="tango-button" data-action="cancel-modal">${t('cancel')}</button><button class="tango-button primary" data-action="confirm-modal">${t('confirm')}</button></div>
     </div></div>`;
   }
@@ -339,7 +345,15 @@
       if (action === 'edit-presets') { runtime.presetEditing = 'all'; render(); }
       if (action === 'save-presets') await savePresetEdits();
       if (action === 'cancel-modal') { runtime.modal = null; render(); }
-      if (action === 'confirm-modal') { const callback = runtime.modal?.action; if (callback) await callback(); }
+      if (action === 'confirm-modal') {
+        const suppressForSession = Boolean(runtime.modal?.allowSessionSuppress && shadow.querySelector('#tango-skip-session-confirm')?.checked);
+        const callback = runtime.modal?.action;
+        if (callback) await callback();
+        if (suppressForSession) {
+          runtime.suppressConfirmForSession = true;
+          await chrome.runtime.sendMessage({ type: 'TANGO_SET_SESSION_CONFIRM', suppressed: true }).catch(() => null);
+        }
+      }
       if (action === 'initialize') {
         const data = await Tango.Store.initialize(runtime.pendingBalance || 100, runtime.pendingLanguage || runtime.settings.language);
         runtime.state = data.state; runtime.settings = data.settings; render();
@@ -378,6 +392,8 @@
   }
 
   async function start() {
+    const session = await chrome.runtime.sendMessage({ type: 'TANGO_GET_SESSION_CONFIRM' }).catch(() => null);
+    runtime.suppressConfirmForSession = Boolean(session?.suppressed);
     await refresh();
     await tickQuote();
     runtime.quoteTimer = setInterval(tickQuote, 3000);
