@@ -168,14 +168,20 @@
     };
   }
 
-  function findTokenCard(anchor) {
-    let candidate = anchor;
-    for (let depth = 0; depth < 9 && candidate?.parentElement; depth += 1) {
-      candidate = candidate.parentElement;
-      const text = candidate.textContent || '';
-      if (/\bMC\s*:?[\s$]/i.test(text) && text.length < 1600) return candidate;
+  function isTrenchPage(url = location.href) {
+    const parsed = new URL(url);
+    return parsed.hostname === 'gmgn.ai' && (parsed.pathname === '/' || parsed.pathname === '') && chainFromUrl(url) === 'sol';
+  }
+
+  function trenchColumn(card) {
+    const headings = ['新创建', '即将打满', '已开盘', 'new creation', 'about to graduate', 'launched'];
+    let candidate = card?.parentElement;
+    for (let depth = 0; depth < 8 && candidate; depth += 1, candidate = candidate.parentElement) {
+      const text = (candidate.textContent || '').trim().toLowerCase();
+      const hasHeading = headings.some((heading) => text.startsWith(heading) || text.includes(`${heading}\n`));
+      if (hasHeading && candidate.querySelectorAll('[class~="group/a"]').length > 0) return candidate;
     }
-    return anchor.closest('[role="row"], tr, li, [class*="card"], [class*="item"]') || anchor.parentElement;
+    return null;
   }
 
   function cardSymbol(text) {
@@ -189,32 +195,38 @@
     return match ? parseMoney(match[1]) : 0;
   }
 
-  function discoverTokenCards(onQuickBuy) {
-    const anchors = document.querySelectorAll('a[href*="/token/"], a[href*="pump.fun/coin/"]');
+  function discoverTokenCards(onQuickBuy, defaultAmountSol = 0.1) {
+    if (!isTrenchPage()) {
+      clearQuickBuy();
+      return 0;
+    }
+    const nativeSlots = document.querySelectorAll('.BuyButton-continer');
     let injected = 0;
-    for (const anchor of anchors) {
+    for (const slot of nativeSlots) {
       if (injected >= 80) break;
+      if (slot.dataset.tangoQuickBuy === '1') continue;
+      const card = slot.closest('[class~="group/a"]');
+      if (!card || !trenchColumn(card)) continue;
+      const anchor = card.querySelector('a[href*="pump.fun/coin/"], a[href*="/sol/token/"]');
+      if (!anchor) continue;
       const href = anchor.href;
       const address = tokenAddressFromUrl(href);
-      if (!address || anchor.dataset.tangoQuickBuy === '1') continue;
-      const card = findTokenCard(anchor);
-      if (!card || card.querySelector('[data-tango-quick-buy]')) {
-        anchor.dataset.tangoQuickBuy = '1';
-        continue;
-      }
-      const quickGroup = document.createElement('div');
-      quickGroup.dataset.tangoQuickBuy = '1';
-      if (anchor.hostname === 'pump.fun') quickGroup.dataset.tangoPlacement = 'trench';
-      quickGroup.className = 'tango-list-quick-group';
-      for (const amountSol of [0.1, 0.5, 1]) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'tango-list-quick-buy';
-        button.textContent = amountSol === 1 ? 'T·1' : String(amountSol);
-        button.title = `Tango Paper Buy ${amountSol} SOL`;
-        button.addEventListener('click', (event) => {
-          event.preventDefault();
-          event.stopPropagation();
+      const amountSol = parseMoney(slot.textContent) || Number(defaultAmountSol);
+      if (!address || !(amountSol > 0)) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tango-list-quick-buy';
+      button.dataset.tangoQuickBuy = '1';
+      button.textContent = `T·${amountSol} SOL`;
+      button.title = `Tango Paper Buy ${amountSol} SOL`;
+      button.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         const text = card.textContent || '';
         const symbol = cardSymbol(text);
         const prices = text.match(/\$[0-9.,eE+\-]+/g) || [];
@@ -228,19 +240,29 @@
           amountSol,
           sourceUrl: href
         });
-        });
-        quickGroup.appendChild(button);
-      }
-      card.appendChild(quickGroup);
-      anchor.dataset.tangoQuickBuy = '1';
+      });
+      slot.classList.add('tango-native-buy-overridden');
+      slot.dataset.tangoQuickBuy = '1';
+      slot.appendChild(button);
       injected += 1;
     }
     return injected;
   }
 
+  function clearQuickBuy() {
+    document.querySelectorAll('.tango-list-quick-buy, .tango-list-quick-group').forEach((element) => element.remove());
+    document.querySelectorAll('.tango-native-buy-overridden').forEach((slot) => {
+      slot.classList.remove('tango-native-buy-overridden');
+      delete slot.dataset.tangoQuickBuy;
+    });
+    document.querySelectorAll('[data-tango-quick-buy]').forEach((element) => {
+      if (!element.classList.contains('tango-list-quick-buy')) delete element.dataset.tangoQuickBuy;
+    });
+  }
+
   Tango.GMGN = {
-    chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, discoverTokenCards,
-    _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol
+    chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, discoverTokenCards, clearQuickBuy,
+    _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _isTrenchPage: isTrenchPage
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.GMGN;

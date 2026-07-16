@@ -20,3 +20,11 @@ test('extracts trench market cap and symbol from card text', () => {
   assert.equal(GMGN._cardSymbol(text), 'HIMA');
   assert.equal(GMGN._cardMarketCap(text), 2600);
 });
+
+test('quick-buy injection is restricted to the Solana trench root', () => {
+  assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=sol'), true);
+  assert.equal(GMGN._isTrenchPage('https://gmgn.ai/sol/token/AbC123pump'), false);
+  assert.equal(GMGN._isTrenchPage('https://gmgn.ai/monitor?chain=sol'), false);
+  assert.equal(GMGN._isTrenchPage('https://gmgn.ai/trend?chain=sol'), false);
+  assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=bsc'), false);
+});

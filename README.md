@@ -5,8 +5,12 @@ Tango Paper Trader is a bilingual, local-first Chrome extension for paper tradin
 ## Features
 
 - GMGN token-page trading overlay
+- First-run language and paper balance setup inside the extension popup
+- Master enable/disable switch that removes all GMGN overlays and quick-buy replacements
 - Always-visible paper balance and PnL bar
 - Quick buy presets and percentage sells
+- Native-slot replacement for GMGN Solana trench quick-buy controls (no buttons in token headers, monitoring feeds, favorites, or alert tips)
+- Optional buy/sell confirmation sounds and prominent fill notifications
 - Weighted cost basis, realized/unrealized PnL and entry/exit market cap
 - Cross-page position drawer
 - Dashboard, trade history and monthly PnL calendar

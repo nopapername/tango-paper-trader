@@ -34,7 +34,10 @@
       breakevenUnavailable: 'Current value cannot recover the remaining cost', pressEnter: 'Press Enter',
       editPresets: 'Edit presets', savePresets: 'Save presets', presetsSaved: 'Presets saved',
       invalidPresets: 'Enter 8 valid preset values',
-      skipConfirmSession: "Don't ask again until the browser restarts"
+      skipConfirmSession: "Don't ask again until the browser restarts", enabled: 'Extension enabled',
+      disabled: 'All Tango features are off', setup: 'Set up paper account', setupHint: 'Choose a language and starting paper balance here.',
+      customBalance: 'Custom balance', buySuccess: 'Paper buy successful', sellSuccess: 'Paper sell successful',
+      sound: 'Trade sounds', setupInPopup: 'Open the Tango extension popup to finish setup.'
     },
     'zh-CN': {
       paper: '模拟盘', balance: '虚拟余额', equity: '账户净值', todayPnl: '今日盈亏',
@@ -68,7 +71,10 @@
       breakevenUnavailable: '当前持仓价值不足以收回剩余成本', pressEnter: '按 Enter 确认',
       editPresets: '编辑预设档位', savePresets: '保存预设档位', presetsSaved: '预设档位已保存',
       invalidPresets: '请输入 8 个有效的预设数值',
-      skipConfirmSession: '本次浏览器会话不再提示（重启浏览器后恢复）'
+      skipConfirmSession: '本次浏览器会话不再提示（重启浏览器后恢复）', enabled: '启用全部功能',
+      disabled: 'Tango 全部功能已关闭', setup: '设置模拟账户', setupHint: '请在这里选择语言和初始虚拟本金。',
+      customBalance: '自定义本金', buySuccess: '模拟买入成功', sellSuccess: '模拟卖出成功',
+      sound: '交易提示音', setupInPopup: '请点击浏览器工具栏中的 Tango 扩展完成首次设置。'
     }
   };
 

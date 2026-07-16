@@ -6,7 +6,7 @@
   const runtime = {
     state: null, settings: null, current: null, drawerOpen: false, modal: null,
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
-    presetEditing: null, suppressConfirmForSession: false
+    presetEditing: null, suppressConfirmForSession: false, audioContext: null
   };
 
   const host = document.createElement('div');
@@ -41,9 +41,17 @@
   }
 
   async function refresh() {
+    const previousSettings = runtime.settings;
     const data = await Tango.Store.getAll();
     runtime.state = data.state;
     runtime.settings = data.settings;
+    const quickBuyConfigChanged = previousSettings && (
+      previousSettings.enabled !== runtime.settings.enabled ||
+      previousSettings.showListQuickBuy !== runtime.settings.showListQuickBuy ||
+      Number(previousSettings.buyPresets?.[0]) !== Number(runtime.settings.buyPresets?.[0])
+    );
+    if (!runtime.settings.enabled || !runtime.state.initialized || !runtime.settings.showListQuickBuy || quickBuyConfigChanged) Tango.GMGN.clearQuickBuy();
+    if (!runtime.settings.enabled) runtime.current = null;
     queueRender();
   }
 
@@ -54,6 +62,10 @@
   }
 
   async function tickQuote() {
+    if (!runtime.settings?.enabled || !runtime.state?.initialized) {
+      Tango.GMGN.clearQuickBuy();
+      return;
+    }
     const previousAddress = runtime.current?.token?.address;
     runtime.current = await Tango.GMGN.readCurrentToken();
     if (runtime.current?.quote?.priceUsd > 0 && currentPosition() && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
@@ -61,11 +73,13 @@
       runtime.lastQuoteWriteAt = Date.now();
       await Tango.Store.saveState(runtime.state);
     }
-    if (runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy);
+    if (runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1);
+    else Tango.GMGN.clearQuickBuy();
     if (previousAddress !== runtime.current?.token?.address || runtime.current) queueRender();
   }
 
   async function handleQuickBuy(context) {
+    if (!runtime.settings?.enabled) return;
     if (context.token.chain !== 'sol') return showToast('GMGN Solana only in V1', 'error');
     if (!(context.quote.solPriceUsd > 0)) {
       try {
@@ -77,6 +91,7 @@
   }
 
   async function buy(amountSol, context = runtime.current) {
+    primeTradeAudio();
     if (!runtime.state.initialized) return showToast(t('startPaperTrading'), 'error');
     const order = {
       token: context?.token,
@@ -122,11 +137,13 @@
       runtime.state = result.state;
       runtime.modal = null;
       await Tango.Store.saveState(runtime.state);
-      showToast(`${t('tradeFilled')}: ${Tango.Format.sol(order.amountSol, language())} ${order.token.symbol}`, 'success');
+      playTradeSound('BUY');
+      showToast(`${t('buySuccess')} · ${Tango.Format.sol(order.amountSol, language())} ${order.token.symbol}`, 'success');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
   }
 
   async function sell(percent, context = runtime.current) {
+    primeTradeAudio();
     const order = { token: context?.token, quote: context?.quote, percent: Number(percent), sourceUrl: location.href };
     try {
       const key = Tango.Engine.positionKey(order.token?.chain, order.token?.address);
@@ -160,7 +177,8 @@
       runtime.state = result.state;
       runtime.modal = null;
       await Tango.Store.saveState(runtime.state);
-      showToast(`${t('tradeFilled')}: ${order.percent}% ${order.token.symbol}`, 'success');
+      playTradeSound('SELL');
+      showToast(`${t('sellSuccess')} · ${order.percent}% ${order.token.symbol}`, 'success');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
   }
 
@@ -177,6 +195,38 @@
     runtime.toastTimer = setTimeout(() => { runtime.toast = null; render(); }, 2600);
   }
 
+  function primeTradeAudio() {
+    if (!runtime.settings?.soundEnabled) return;
+    try {
+      const AudioContext = global.AudioContext || global.webkitAudioContext;
+      if (!AudioContext) return null;
+      if (!runtime.audioContext || runtime.audioContext.state === 'closed') runtime.audioContext = new AudioContext();
+      if (runtime.audioContext.state === 'suspended') runtime.audioContext.resume().catch(() => {});
+      return runtime.audioContext;
+    } catch { return null; }
+  }
+
+  function playTradeSound(side) {
+    const context = primeTradeAudio();
+    if (!context) return;
+    try {
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.34);
+      gain.connect(context.destination);
+      const notes = side === 'BUY' ? [660, 880] : [520, 390];
+      notes.forEach((frequency, index) => {
+        const oscillator = context.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        oscillator.connect(gain);
+        oscillator.start(context.currentTime + index * 0.09);
+        oscillator.stop(context.currentTime + 0.2 + index * 0.09);
+      });
+    } catch { /* Audio can be blocked by browser policy; the visual confirmation remains. */ }
+  }
+
   function renderBar(summary) {
     const collapsed = runtime.settings.barCollapsed;
     return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)}" data-action="toggle-drawer">
@@ -185,21 +235,6 @@
         <div class="tango-bar-divider"></div>
         <div class="tango-stat"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>`}
       <button class="tango-icon-button" data-action="collapse-bar">${collapsed ? '＋' : '－'}</button>
-    </div>`;
-  }
-
-  function renderOnboarding() {
-    return `<div class="tango-onboarding">
-      <div class="tango-brand" style="justify-content:center"><span class="tango-dot"></span>TANGO <span class="tango-paper-badge">${t('paper')}</span></div>
-      <h2>${t('welcome')}</h2><p>${t('paperOnly')}</p>
-      <div class="tango-balance-options">
-        ${[10,50,100].map((value) => `<button class="tango-button" data-init-balance="${value}">${value} SOL</button>`).join('')}
-      </div>
-      <div class="tango-language">
-        <button class="tango-button" data-init-language="zh-CN">简体中文</button>
-        <button class="tango-button" data-init-language="en">English</button>
-      </div>
-      <button class="tango-button primary" data-action="initialize">${t('startPaperTrading')}</button>
     </div>`;
   }
 
@@ -226,7 +261,7 @@
   }
 
   function renderPanel() {
-    if (!runtime.state.initialized) return `<div class="tango-panel tango-card"><div class="tango-trade-body">${renderOnboarding()}</div></div>`;
+    if (!runtime.state.initialized || !runtime.settings.enabled) return '';
     const current = runtime.current;
     const position = currentPosition();
     const mark = position ? Tango.Engine.markPosition(position, current?.quote) : null;
@@ -244,7 +279,7 @@
     return `<div class="tango-panel tango-card ${runtime.settings.panelCollapsed ? 'collapsed' : ''}" style="${panelStyle()}">
       <div class="tango-header" data-drag-handle>
         <div class="tango-token-strip"><span class="tango-paper-logo">T</span><strong>TANGO</strong><span class="tango-paper-badge">${t('paper')}</span><span>${esc(symbol)}</span></div>
-        <div class="tango-header-actions"><button class="tango-icon-button tango-edit-all" data-action="${runtime.presetEditing === 'all' ? 'save-presets' : 'edit-presets'}" title="${t(runtime.presetEditing === 'all' ? 'savePresets' : 'editPresets')}">${runtime.presetEditing === 'all' ? '✓' : '✎'}</button><button class="tango-icon-button" data-action="dashboard">⚙</button><button class="tango-icon-button" data-action="collapse-panel">${runtime.settings.panelCollapsed ? '＋' : '×'}</button></div>
+        <div class="tango-header-actions"><button class="tango-icon-button tango-edit-all" data-action="${runtime.presetEditing === 'all' ? 'save-presets' : 'edit-presets'}" title="${t(runtime.presetEditing === 'all' ? 'savePresets' : 'editPresets')}">${runtime.presetEditing === 'all' ? '✓' : '✎'}</button><button class="tango-icon-button" data-action="toggle-sound" title="${t('sound')}">${runtime.settings.soundEnabled ? '🔊' : '🔇'}</button><button class="tango-icon-button" data-action="dashboard">⚙</button><button class="tango-icon-button" data-action="collapse-panel">${runtime.settings.panelCollapsed ? '＋' : '×'}</button></div>
       </div>
       ${runtime.settings.panelCollapsed ? '' : current ? `<div class="tango-trade-body">
         <section class="tango-trade-block">
@@ -312,6 +347,10 @@
 
   function render() {
     if (!runtime.state || !runtime.settings) return;
+    if (!runtime.settings.enabled || !runtime.state.initialized) {
+      shell.innerHTML = '';
+      return;
+    }
     const summary = Tango.Engine.portfolioSummary(runtime.state);
     shell.innerHTML = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     bindEvents();
@@ -324,16 +363,6 @@
       const position = runtime.state.positions[button.dataset.key];
       if (position) sellPosition(position, Number(button.dataset.positionSell));
     }));
-    shell.querySelectorAll('[data-init-balance]').forEach((button) => button.addEventListener('click', () => {
-      shell.querySelectorAll('[data-init-balance]').forEach((item) => item.dataset.selected = '0');
-      button.dataset.selected = '1';
-      runtime.pendingBalance = Number(button.dataset.initBalance);
-    }));
-    shell.querySelectorAll('[data-init-language]').forEach((button) => button.addEventListener('click', () => {
-      runtime.pendingLanguage = button.dataset.initLanguage;
-      runtime.settings.language = runtime.pendingLanguage;
-      render();
-    }));
     shell.querySelectorAll('[data-action]').forEach((element) => element.addEventListener('click', async (event) => {
       event.stopPropagation();
       const action = element.dataset.action;
@@ -341,6 +370,7 @@
       if (action === 'collapse-bar') { runtime.settings.barCollapsed = !runtime.settings.barCollapsed; await Tango.Store.saveSettings(runtime.settings); }
       if (action === 'collapse-panel') { runtime.settings.panelCollapsed = !runtime.settings.panelCollapsed; await Tango.Store.saveSettings(runtime.settings); }
       if (action === 'dashboard') chrome.runtime.openOptionsPage();
+      if (action === 'toggle-sound') { runtime.settings.soundEnabled = !runtime.settings.soundEnabled; await Tango.Store.saveSettings(runtime.settings); render(); }
       if (action === 'breakeven') await sellBreakeven();
       if (action === 'edit-presets') { runtime.presetEditing = 'all'; render(); }
       if (action === 'save-presets') await savePresetEdits();
@@ -353,10 +383,6 @@
           runtime.suppressConfirmForSession = true;
           await chrome.runtime.sendMessage({ type: 'TANGO_SET_SESSION_CONFIRM', suppressed: true }).catch(() => null);
         }
-      }
-      if (action === 'initialize') {
-        const data = await Tango.Store.initialize(runtime.pendingBalance || 100, runtime.pendingLanguage || runtime.settings.language);
-        runtime.state = data.state; runtime.settings = data.settings; render();
       }
     }));
     shell.querySelectorAll('.tango-preset-editor').forEach((input) => input.addEventListener('keydown', (event) => {
@@ -401,7 +427,8 @@
     runtime.observer = new MutationObserver(() => {
       clearTimeout(mutationTimer);
       mutationTimer = setTimeout(() => {
-        if (runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy);
+        if (runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1);
+        else Tango.GMGN.clearQuickBuy();
       }, 500);
     });
     runtime.observer.observe(document.body, { childList: true, subtree: true });

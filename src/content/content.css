@@ -1,37 +1,24 @@
 .tango-list-quick-buy {
   appearance: none;
-  background: #8b5cf6;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 7px;
+  background: rgba(139, 92, 246, .16);
+  border: 1px solid #8b5cf6;
+  border-radius: 6px;
   color: #fff;
   cursor: pointer;
-  font: 700 11px/1.2 Inter, ui-sans-serif, system-ui, sans-serif;
+  font: 700 12px/1 Inter, ui-sans-serif, system-ui, sans-serif;
+  height: 24px;
   margin: 0;
-  padding: 5px 8px;
+  min-width: 72px;
+  padding: 0 7px;
   position: relative;
-  z-index: 5;
+  white-space: nowrap;
+  width: 100%;
+  z-index: 30;
 }
 
 .tango-list-quick-buy:hover { background: #7c3aed; }
-.tango-list-quick-group {
-  align-items: center;
-  display: grid;
-  flex: 0 0 auto;
-  gap: 3px;
-  grid-template-columns: repeat(3,1fr);
-  margin: 3px 5px;
-  position: relative;
-  z-index: 6;
-}
-.tango-list-quick-group[data-tango-placement="trench"] {
-  margin-left: auto;
-  width: 102px;
-}
-.tango-list-quick-group[data-tango-placement="trench"] .tango-list-quick-buy {
-  box-shadow: 0 3px 12px rgba(0,0,0,.35);
-  font-size: 9px;
-  padding: 4px 3px;
-}
+.BuyButton-continer.tango-native-buy-overridden > :not(.tango-list-quick-buy) { display: none !important; }
+.BuyButton-continer.tango-native-buy-overridden { align-items: center !important; display: flex !important; justify-content: center !important; pointer-events: auto !important; }
 
 #tango-paper-trader-host {
   all: initial;
@@ -172,9 +159,10 @@
 .tango-session-confirm { align-items: flex-start; color: var(--muted); cursor: pointer; display: flex; font-size: 11px; gap: 7px; margin-top: 12px; }
 .tango-session-confirm input { accent-color: var(--brand); margin: 2px 0 0; }
 
-.tango-toast { background: #171923; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.4); left: 50%; padding: 10px 14px; position: fixed; top: 20px; transform: translateX(-50%); }
+.tango-toast { background: #171923; border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 16px 48px rgba(0,0,0,.52); font-size: 12px; font-weight: 800; left: 50%; min-width: 210px; padding: 12px 16px; position: fixed; text-align: center; top: 20px; transform: translateX(-50%); }
 .tango-toast.error { border-color: rgba(255,100,124,.55); color: #ff9aaa; }
-.tango-toast.success { border-color: rgba(62,230,160,.55); color: var(--green); }
+.tango-toast.success { background: rgba(17,45,35,.98); border-color: rgba(62,230,160,.72); color: var(--green); }
+.tango-toast.success::before { content: '✓'; margin-right: 7px; }
 
 .tango-onboarding { padding: 7px 2px 3px; text-align: center; }
 .tango-onboarding h2 { font-size: 18px; margin: 3px 0 5px; }

@@ -2,7 +2,7 @@
   const Tango = global.Tango;
   const app = document.querySelector('#app');
   const fileInput = document.querySelector('#import-file');
-  const runtime = { state: null, settings: null, tab: 'overview', month: new Date(), filters: { search: '', side: 'ALL', result: 'ALL', date: '' }, onboardingBalance: 100, onboardingLanguage: 'auto', toast: '', solPriceUsd: 0 };
+  const runtime = { state: null, settings: null, tab: 'overview', month: new Date(), filters: { search: '', side: 'ALL', result: 'ALL', date: '' }, toast: '', solPriceUsd: 0 };
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   const lang = () => Tango.I18n.resolveLanguage(runtime.settings?.language);
   const t = (key) => Tango.I18n.t(key, runtime.settings?.language);
@@ -25,7 +25,7 @@
   function render() {
     document.documentElement.lang = lang();
     document.documentElement.dataset.theme = runtime.settings?.theme === 'light' ? 'light' : 'dark';
-    if (!runtime.state.initialized) return renderOnboarding();
+    if (!runtime.state.initialized) return renderSetupRequired();
     const summary = Tango.Engine.portfolioSummary(runtime.state);
     const titles = { overview: t('overview'), positions: t('positions'), history: t('tradeHistory'), calendar: t('calendar'), settings: t('settings') };
     app.innerHTML = `<div class="app"><aside class="sidebar">
@@ -39,15 +39,11 @@
     bind();
   }
 
-  function renderOnboarding() {
+  function renderSetupRequired() {
     app.innerHTML = `<div class="onboarding-page"><section class="onboarding card">
       <div class="brand" style="justify-content:center;padding:0"><span class="dot"></span>TANGO <span class="badge">${t('paper')}</span></div>
-      <h1>${t('welcome')}</h1><p>${t('paperOnly')}</p>
-      <div class="balance-options">${[10,50,100].map((value) => `<button class="button ${runtime.onboardingBalance===value?'selected':''}" data-balance="${value}">${value} SOL</button>`).join('')}</div>
-      <input class="input custom-balance" id="custom-starting-balance" type="number" min="0.01" step="0.01" placeholder="${t('custom')} SOL">
-      <div class="language-options"><button class="button" data-language="zh-CN">简体中文</button><button class="button" data-language="en">English</button></div>
-      <button class="button primary" style="width:100%" data-action="initialize">${t('startPaperTrading')}</button>
-    </section></div>`; bind();
+      <h1>${t('setup')}</h1><p>${t('setupInPopup')}</p>
+    </section></div>`;
   }
 
   function renderTab(summary) {
@@ -137,6 +133,7 @@
       <div class="field"><label>PnL Bar</label><select class="select" id="setting-bar-position"><option value="bottom" ${s.pnlBarPosition==='bottom'?'selected':''}>Bottom</option><option value="top" ${s.pnlBarPosition==='top'?'selected':''}>Top</option></select></div>
       <label class="checkbox"><input id="setting-fast" type="checkbox" ${s.fastMode?'checked':''}> ${t('fastMode')}</label>
       <label class="checkbox"><input id="setting-confirm" type="checkbox" ${s.confirmationEnabled?'checked':''}> ${t('confirmTrades')}</label>
+      <label class="checkbox"><input id="setting-sound" type="checkbox" ${s.soundEnabled?'checked':''}> ${t('sound')}</label>
       <label class="checkbox"><input id="setting-list-buy" type="checkbox" ${s.showListQuickBuy?'checked':''}> ${t('quickBuy')}</label>
     </div><div class="actions" style="margin-top:15px"><button class="button primary" data-action="save-settings">${t('confirm')}</button></div></div>
     <div class="settings-section"><h3>Data</h3><div class="actions"><button class="button" data-action="export-json">${t('exportJson')}</button><button class="button" data-action="import-json">${t('importJson')}</button><button class="button danger" data-action="reset">${t('resetAccount')}</button></div><p class="muted">${t('resetWarning')}</p></div></section>`;
@@ -144,8 +141,6 @@
 
   function bind() {
     app.querySelectorAll('[data-tab]').forEach((button)=>button.addEventListener('click',()=>{runtime.tab=button.dataset.tab;render();}));
-    app.querySelectorAll('[data-balance]').forEach((button)=>button.addEventListener('click',()=>{runtime.onboardingBalance=Number(button.dataset.balance);render();}));
-    app.querySelectorAll('[data-language]').forEach((button)=>button.addEventListener('click',()=>{runtime.onboardingLanguage=button.dataset.language;runtime.settings.language=button.dataset.language;render();}));
     app.querySelectorAll('[data-month]').forEach((button)=>button.addEventListener('click',()=>{runtime.month=new Date(runtime.month.getFullYear(),runtime.month.getMonth()+Number(button.dataset.month),1);render();}));
     app.querySelectorAll('[data-calendar-date]').forEach((button)=>button.addEventListener('click',()=>{runtime.filters.date=button.dataset.calendarDate;runtime.tab='history';render();}));
     app.querySelectorAll('[data-share]').forEach((button)=>button.addEventListener('click',()=>shareTrade(button.dataset.share)));
@@ -158,7 +153,6 @@
   }
 
   async function action(name) {
-    if(name==='initialize'){const custom=Number(app.querySelector('#custom-starting-balance')?.value);const balance=custom>0?custom:runtime.onboardingBalance;const data=await Tango.Store.initialize(balance,runtime.onboardingLanguage);runtime.state=data.state;runtime.settings=data.settings;return render();}
     if(name==='open-gmgn')return chrome.tabs.create({url:'https://gmgn.ai/trend?chain=sol'});
     if(name==='export-json')return download(`tango-backup-${dateStamp()}.json`,JSON.stringify(await Tango.Store.exportData(),null,2),'application/json');
     if(name==='export-csv')return download(`tango-trades-${dateStamp()}.csv`,tradesCsv(),'text/csv;charset=utf-8');
@@ -170,7 +164,7 @@
         buyPresets:parsePresets(app.querySelector('#setting-buy-presets').value,runtime.settings.buyPresets),sellPresets:parsePresets(app.querySelector('#setting-sell-presets').value,runtime.settings.sellPresets),
         slippageBps:Number(app.querySelector('#setting-slippage').value),platformFeeBps:Number(app.querySelector('#setting-platform-fee').value),
         networkFeeSol:Number(app.querySelector('#setting-network-fee').value),pnlBarPosition:app.querySelector('#setting-bar-position').value,
-        fastMode:app.querySelector('#setting-fast').checked,confirmationEnabled:app.querySelector('#setting-confirm').checked,showListQuickBuy:app.querySelector('#setting-list-buy').checked};
+        fastMode:app.querySelector('#setting-fast').checked,confirmationEnabled:app.querySelector('#setting-confirm').checked,soundEnabled:app.querySelector('#setting-sound').checked,showListQuickBuy:app.querySelector('#setting-list-buy').checked};
       runtime.settings=await Tango.Store.saveSettings(runtime.settings);showToast(t('confirm'));render();
     }
   }
