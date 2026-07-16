@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "GMGN Paper Trader",
+  "version": "0.1.0",
+  "description": "在 GMGN 页面上使用纯本地虚拟资金练习买卖，不连接钱包，不发送真实交易。",
+  "permissions": ["storage"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "GMGN Paper Trader"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://gmgn.ai/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
