@@ -55,6 +55,21 @@ test('concurrent SOL requests share one fetch and preserve the 30 second cache',
   loaded.clock.now += 29_999;
   assert.equal(await loaded.context.getSolPrice(), 150);
   assert.equal(calls, 1);
+  loaded.clock.now += 1;
+  assert.equal(await loaded.context.getSolPrice(), 150);
+  assert.equal(calls, 2);
+});
+
+test('a fully rejected SOL request clears its in-flight slot and can retry', async () => {
+  let calls = 0;
+  const loaded = loadBackground(async () => {
+    calls += 1;
+    if (calls < 3) throw new Error('offline');
+    return jsonResponse({ solana: { usd: 151 } });
+  });
+  await assert.rejects(loaded.context.getSolPrice(), /offline/);
+  assert.equal(await loaded.context.getSolPrice(), 151);
+  assert.equal(calls, 3);
 });
 
 test('concurrent token requests share one fetch and choose the most liquid matching pair', async () => {

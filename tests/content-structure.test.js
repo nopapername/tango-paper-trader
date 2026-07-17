@@ -27,5 +27,6 @@ test('render computes one portfolio summary and passes it to the drawer', () => 
   assert.match(drawer, /^function renderDrawer\(summary\)/);
   assert.doesNotMatch(drawer, /portfolioSummary/);
   assert.match(render, /const summary = Tango\.Engine\.portfolioSummary\(runtime\.state\)/);
+  assert.equal([...render.matchAll(/Tango\.Engine\.portfolioSummary\(runtime\.state\)/g)].length, 1);
   assert.match(render, /renderDrawer\(summary\)/);
 });
