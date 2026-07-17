@@ -21,6 +21,11 @@ test('extracts trench market cap and symbol from card text', () => {
   assert.equal(GMGN._cardMarketCap(text), 2600);
 });
 
+test('extracts symbol and name from a trench title without opening token detail', () => {
+  const text = '4RY...pump\nCogito 我认为 ITS LITERALLY FINE\n20s\nMC\n$4.2K\n模拟盘\n0.5 SOL';
+  assert.deepEqual(GMGN._tokenIdentityFromText(text), { symbol: 'Cogito', name: '我认为 ITS LITERALLY FINE' });
+});
+
 test('quick-buy injection is restricted to the Solana trench root', () => {
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=sol'), true);
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/sol/token/AbC123pump'), false);

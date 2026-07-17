@@ -31,15 +31,28 @@
       return;
     }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
+    let enrichedState = runtime.state;
     (event.data.quotes || []).forEach((quote) => {
       if (!quote?.address) return;
       const address = String(quote.address).toLowerCase();
       runtime.gmgnQuotes.set(address, quote);
-      if (runtime.current?.token?.address?.toLowerCase() === address && Number(quote.priceUsd) > 0) {
+      if (runtime.current?.token?.address?.toLowerCase() === address) {
         mergeQuote(runtime.current, quote);
         queueRender();
       }
+      const position = Object.values(enrichedState?.positions || {}).find((item) => item.tokenAddress?.toLowerCase() === address);
+      if (position && (quote.symbol || quote.name || quote.logoUrl)) {
+        enrichedState = Tango.Engine.updatePositionMetadata(enrichedState, {
+          chain: position.chain, address: position.tokenAddress,
+          symbol: quote.symbol, name: quote.name, logoUrl: quote.logoUrl
+        });
+      }
     });
+    if (enrichedState && enrichedState !== runtime.state) {
+      runtime.state = enrichedState;
+      Tango.Store.saveState(runtime.state).catch(() => null);
+      queueRender();
+    }
   });
   window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
 
@@ -100,11 +113,18 @@
     if (runtime.current) {
       const positionPrice = currentPosition()?.lastSolPriceUsd;
       runtime.current.quote.solPriceUsd = Number(runtime.solPriceUsd || positionPrice || 0);
+      if (currentPosition()) {
+        const enrichedState = Tango.Engine.updatePositionMetadata(runtime.state, runtime.current.token);
+        if (enrichedState !== runtime.state) {
+          runtime.state = enrichedState;
+          await Tango.Store.saveState(runtime.state);
+        }
+      }
     }
     queueRender();
     ensureSolPrice(runtime.current);
     ensureTokenQuote(runtime.current);
-    if (runtime.current?.quote?.priceUsd > 0 && currentPosition() && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
+    if ((runtime.current?.quote?.priceUsd > 0 || runtime.current?.quote?.marketCapUsd > 0) && currentPosition() && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
       runtime.state = Tango.Engine.updatePositionQuote(runtime.state, runtime.current.token, runtime.current.quote);
       runtime.lastQuoteWriteAt = Date.now();
       await Tango.Store.saveState(runtime.state);
@@ -166,12 +186,18 @@
     return quote && Date.now() - Number(quote.observedAt || 0) <= maxAgeMs ? quote : null;
   }
 
-  async function waitForGmgnQuote(address, timeoutMs = 900) {
+  function isPlaceholderTokenLabel(value) {
+    return !String(value || '').trim() || /^(TOKEN|UNKNOWN|N\/A)$/i.test(String(value).trim());
+  }
+
+  async function waitForGmgnQuote(address, timeoutMs = 900, requireMetadata = false) {
     window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
       const quote = freshGmgnQuote(address);
-      if (Number(quote?.priceUsd) > 0 || Number(quote?.marketCapUsd) > 0) return quote;
+      const hasValue = Number(quote?.priceUsd) > 0 || Number(quote?.marketCapUsd) > 0;
+      const hasMetadata = !isPlaceholderTokenLabel(quote?.symbol) || !isPlaceholderTokenLabel(quote?.name);
+      if (hasValue && (!requireMetadata || hasMetadata)) return quote;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return null;
@@ -179,6 +205,14 @@
 
   function mergeQuote(context, quote) {
     if (!quote) return context.quote;
+    if (context?.token) {
+      const symbol = String(quote.symbol || '').replace(/^\$/, '').trim();
+      const name = String(quote.name || '').trim();
+      if (symbol && symbol.length <= 32 && !isPlaceholderTokenLabel(symbol) && isPlaceholderTokenLabel(context.token.symbol)) context.token.symbol = symbol;
+      if (name && name.length <= 100 && !isPlaceholderTokenLabel(name) &&
+        (isPlaceholderTokenLabel(context.token.name) || context.token.name === context.token.symbol)) context.token.name = name;
+      if (quote.logoUrl) context.token.logoUrl = String(quote.logoUrl);
+    }
     context.quote = {
       ...context.quote,
       ...quote,
@@ -201,8 +235,9 @@
     let networkQuote = freshGmgnQuote(context.token.address);
     if (networkQuote) mergeQuote(context, networkQuote);
     let hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
-    if (!hasTokenValue) {
-      networkQuote = await waitForGmgnQuote(context.token.address);
+    const needsMetadata = isPlaceholderTokenLabel(context.token.symbol) || isPlaceholderTokenLabel(context.token.name);
+    if (!hasTokenValue || needsMetadata) {
+      networkQuote = await waitForGmgnQuote(context.token.address, 900, needsMetadata);
       if (networkQuote) mergeQuote(context, networkQuote);
       hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
     }

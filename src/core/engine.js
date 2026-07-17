@@ -290,6 +290,23 @@
     return nextState;
   }
 
+  function updatePositionMetadata(state, token) {
+    const key = positionKey(token?.chain, token?.address);
+    const existing = state.positions[key];
+    if (!existing) return state;
+    const symbol = String(token.symbol || '').trim();
+    const name = String(token.name || '').trim();
+    const nextSymbol = symbol && !/^(TOKEN|UNKNOWN|N\/A)$/i.test(symbol) ? symbol : existing.symbol;
+    const nextName = name && !/^(TOKEN|UNKNOWN|N\/A)$/i.test(name) ? name : existing.name;
+    const nextLogoUrl = String(token.logoUrl || existing.logoUrl || '');
+    if (nextSymbol === existing.symbol && nextName === existing.name && nextLogoUrl === existing.logoUrl) return state;
+    const nextState = structuredCloneSafe(state);
+    nextState.positions[key] = {
+      ...nextState.positions[key], symbol: nextSymbol, name: nextName, logoUrl: nextLogoUrl, updatedAt: Date.now()
+    };
+    return nextState;
+  }
+
   function cryptoId(now) {
     const random = global.crypto?.randomUUID ? global.crypto.randomUUID() : Math.random().toString(36).slice(2);
     return `${now}-${random}`;
@@ -308,7 +325,7 @@
 
   Tango.Engine = {
     round, positionKey, validateQuote, executeBuy, executeSell, executeCloseAll, markPosition,
-    portfolioSummary, updatePositionQuote, breakevenSellPercent
+    portfolioSummary, updatePositionQuote, updatePositionMetadata, breakevenSellPercent
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Engine;

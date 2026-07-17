@@ -112,3 +112,16 @@ test('breakeven sell computes the percentage needed to recover remaining cost', 
   assert.ok(percent > 45 && percent < 60);
   assert.equal(Engine.breakevenSellPercent(bought.position, { ...quote, priceUsd: 0.5, observedAt: Date.now() }, settings), null);
 });
+
+test('detail metadata replaces a trench placeholder without changing balances', () => {
+  const placeholder = { ...token, symbol: 'TOKEN', name: 'Token' };
+  const bought = Engine.executeBuy(state(), { token: placeholder, quote, amountSol: 1 }, settings, 1_000);
+  const key = Engine.positionKey(token.chain, token.address);
+  const enriched = Engine.updatePositionMetadata(bought.state, {
+    ...token, symbol: 'Cogito', name: '我认为', logoUrl: 'https://example.com/cogito.png'
+  });
+  assert.equal(enriched.positions[key].symbol, 'Cogito');
+  assert.equal(enriched.positions[key].name, '我认为');
+  assert.equal(enriched.positions[key].quantity, bought.state.positions[key].quantity);
+  assert.equal(enriched.account.cashBalanceSol, bought.state.account.cashBalanceSol);
+});

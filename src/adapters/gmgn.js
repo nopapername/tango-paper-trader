@@ -162,7 +162,7 @@
         liquidityUsd,
         solPriceUsd: 0,
         source: 'GMGN',
-        observedAt: priceUsd > 0 ? Date.now() : 0
+        observedAt: priceUsd > 0 || marketCapUsd > 0 ? Date.now() : 0
       }
     };
   }
@@ -188,10 +188,39 @@
     return null;
   }
 
+  function tokenIdentityFromText(text) {
+    const reserved = new Set([
+      'MC', 'V', 'F', 'N', 'TX', 'DS', 'SOL', 'USD', 'P1', 'P2', 'P3', 'LIVE', 'OG',
+      'TANGO', 'PAPER', 'TOKEN', 'BUY', 'SELL', '模拟盘', '虚拟买入'
+    ]);
+    const lines = String(text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    for (const line of lines) {
+      const match = line.match(/^\$?([\p{L}\p{N}_][\p{L}\p{N}_.$-]{0,19})(?:\s+(.+))?$/u);
+      if (!match) continue;
+      const symbol = match[1].replace(/^\$/, '');
+      if (reserved.has(symbol.toUpperCase()) || /^\d+(?:s|m|h|d|w|mo|y)$/i.test(symbol) || symbol.includes('...')) continue;
+      const rawName = String(match[2] || '').replace(/\s+(?:MC|V|TX|DS|P[123])\b.*$/i, '').trim();
+      return { symbol, name: rawName && rawName.length <= 80 ? rawName : symbol };
+    }
+    return { symbol: 'TOKEN', name: 'Token' };
+  }
+
+  function cardTokenIdentity(card) {
+    const selectors = [
+      '[data-testid="token-symbol"]', '[data-token-symbol]', '[class*="token-symbol"]',
+      'a[href*="/sol/token/"]', 'a[href*="pump.fun/coin/"]'
+    ];
+    for (const selector of selectors) {
+      for (const element of card?.querySelectorAll?.(selector) || []) {
+        const identity = tokenIdentityFromText(element.innerText || element.textContent || '');
+        if (identity.symbol !== 'TOKEN') return identity;
+      }
+    }
+    return tokenIdentityFromText(card?.innerText || card?.textContent || '');
+  }
+
   function cardSymbol(text) {
-    const reserved = new Set(['MC', 'V', 'F', 'N', 'TX', 'DS', 'SOL', 'USD', 'P1', 'P2', 'P3']);
-    const lines = String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    return lines.find((line) => /^[A-Za-z][A-Za-z0-9_$]{1,14}$/.test(line) && !reserved.has(line.toUpperCase())) || 'TOKEN';
+    return tokenIdentityFromText(text).symbol;
   }
 
   function cardMarketCap(text) {
@@ -325,12 +354,13 @@
           const latestHref = cardTokenHref(card);
           const latestAddress = latestHref ? tokenAddressFromUrl(latestHref) : null;
           if (latestAddress !== address) return;
-          const symbol = cardSymbol(card.textContent || '');
+          const identity = cardTokenIdentity(card);
+          const symbol = identity.symbol;
           const isPumpToken = /pump$/i.test(address);
           const priceUsd = marketCapUsd > 0 ? marketCapUsd / 1_000_000_000 : 0;
           const logoUrl = card.querySelector('img[alt="logo"]')?.src || '';
           await onQuickBuy({
-            token: { chain: chainFromUrl(href) || 'sol', address, symbol, name: symbol, logoUrl },
+            token: { chain: chainFromUrl(href) || 'sol', address, symbol, name: identity.name, logoUrl },
             quote: {
               priceUsd, marketCapUsd, liquidityUsd: 0, solPriceUsd: 0,
               source: isPumpToken ? 'GMGN_TRENCH_MC' : 'GMGN_LIST_MC',
@@ -389,7 +419,8 @@
 
   Tango.GMGN = {
     chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, discoverTokenCards, clearQuickBuy,
-    _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _isTrenchPage: isTrenchPage,
+    _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,
+    _isTrenchPage: isTrenchPage,
     _isTokenDetailPage: isTokenDetailPage
   };
 

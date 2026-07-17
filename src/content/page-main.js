@@ -27,6 +27,9 @@
   const PRICE_KEYS = ['price_usd', 'priceUsd', 'usd_price', 'usdPrice', 'price'];
   const MC_KEYS = ['market_cap', 'marketCap', 'market_cap_usd', 'marketCapUsd', 'mc', 'fdv'];
   const LIQUIDITY_KEYS = ['liquidity_usd', 'liquidityUsd', 'liquidity'];
+  const SYMBOL_KEYS = ['symbol', 'token_symbol', 'tokenSymbol', 'ticker'];
+  const NAME_KEYS = ['name', 'token_name', 'tokenName'];
+  const LOGO_KEYS = ['logo', 'logo_url', 'logoUrl', 'image', 'image_url', 'imageUrl'];
 
   function numberFrom(value) {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -49,6 +52,11 @@
       if (object?.[key] != null) return object[key];
     }
     return null;
+  }
+
+  function metadataText(value, maxLength) {
+    if (typeof value !== 'string' && typeof value !== 'number') return '';
+    return String(value).trim().slice(0, maxLength);
   }
 
   function validSolanaAddress(value) {
@@ -74,6 +82,9 @@
         const marketCapUsd = numberFrom(firstValue(value, MC_KEYS));
         const rawLiquidity = firstValue(value, LIQUIDITY_KEYS);
         const liquidityUsd = numberFrom(typeof rawLiquidity === 'object' ? rawLiquidity?.usd : rawLiquidity);
+        const symbol = metadataText(firstValue(value, SYMBOL_KEYS), 32).replace(/^\$/, '');
+        const name = metadataText(firstValue(value, NAME_KEYS), 100);
+        const logoUrl = metadataText(firstValue(value, LOGO_KEYS), 1000);
         if (priceUsd > 0 || marketCapUsd > 0) {
           const key = address.toLowerCase();
           const previous = found.get(key) || quoteCache.get(key) || {};
@@ -82,6 +93,9 @@
             priceUsd: priceUsd || previous.priceUsd || 0,
             marketCapUsd: marketCapUsd || previous.marketCapUsd || 0,
             liquidityUsd: liquidityUsd || previous.liquidityUsd || 0,
+            symbol: symbol || previous.symbol || '',
+            name: name || previous.name || '',
+            logoUrl: logoUrl || previous.logoUrl || '',
             observedAt: Date.now(),
             source: 'GMGN_NETWORK'
           });
