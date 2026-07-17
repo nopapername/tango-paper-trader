@@ -87,6 +87,15 @@
     try { publish(extractQuotes(payload)); } catch {}
   }
 
+  function shouldInspectResponse(url, contentType) {
+    if (!/json/i.test(contentType || '')) return false;
+    try {
+      const parsed = new URL(String(url || ''), location.href);
+      if (!/(^|\.)gmgn\.ai$/i.test(parsed.hostname)) return false;
+      return /(?:token|rank|launchpad|pump|trench|pool|market|quote|price|swap|new)/i.test(parsed.pathname + parsed.search);
+    } catch { return false; }
+  }
+
   const nativeFetch = window.fetch;
   if (nativeFetch) {
     window.fetch = new Proxy(nativeFetch, {
@@ -94,7 +103,7 @@
         const request = Reflect.apply(target, thisArg, args);
         request.then((response) => {
           const contentType = response?.headers?.get('content-type') || '';
-          if (response?.ok && /gmgn/i.test(response.url || '') && /json/i.test(contentType)) {
+          if (response?.ok && shouldInspectResponse(response.url, contentType)) {
             response.clone().json().then(inspectPayload).catch(() => null);
           }
         }).catch(() => null);
@@ -113,7 +122,7 @@
   XMLHttpRequest.prototype.send = function tangoXhrSend(...args) {
     this.addEventListener('load', () => {
       const contentType = this.getResponseHeader('content-type') || '';
-      if (this.status >= 200 && this.status < 300 && /gmgn/i.test(this.__tangoRequestUrl || '') && /json/i.test(contentType)) {
+      if (this.status >= 200 && this.status < 300 && shouldInspectResponse(this.__tangoRequestUrl, contentType)) {
         try { inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText)); } catch {}
       }
     }, { once: true });

@@ -224,9 +224,9 @@
       .tango-list-quick-buy:hover { background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 20%, transparent); filter: brightness(1.12); }
       .tango-list-quick-buy:active { opacity: .55; }
       .tango-list-quick-buy:disabled { cursor: wait; opacity: .65; }
-      .tango-paper-hint { background: rgba(155,124,255,.16); border: 1px solid rgba(155,124,255,.48); border-radius: 4px; color: #c7b8ff; font-size: 8px; left: 6px; line-height: 13px; padding: 0 4px; position: absolute; top: 5px; }
-      .tango-buy-amount { align-items: center; bottom: 31px; display: flex; gap: 4px; position: absolute; right: 10px; }
-      .tango-buy-amount svg { flex: 0 0 12px; height: 12px; width: 12px; }
+      .tango-paper-hint { background: rgba(155,124,255,.18); border: 1px solid rgba(155,124,255,.55); border-radius: 4px; color: #d3c8ff; font-size: 9px; font-weight: 800; left: 6px; line-height: 14px; padding: 0 4px; position: absolute; top: 5px; }
+      .tango-buy-amount { align-items: center; bottom: 29px; display: flex; font-size: 14px; font-weight: 850; gap: 4px; letter-spacing: -.01em; position: absolute; right: 9px; text-shadow: 0 0 9px color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 45%, transparent); }
+      .tango-buy-amount svg { flex: 0 0 14px; height: 14px; width: 14px; }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -277,7 +277,9 @@
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        if (replacement.disabled) return;
+        const now = Date.now();
+        if (replacement.disabled || now - Number(replacement.dataset.tangoLastClickAt || 0) < 900) return;
+        replacement.dataset.tangoLastClickAt = String(now);
         replacement.disabled = true;
         try {
           const activeHref = cardTokenHref(card);
@@ -325,6 +327,9 @@
       nativeControl.setAttribute('aria-hidden', 'true');
       replacement.addEventListener('pointerdown', blockNativePointer, true);
       replacement.addEventListener('mousedown', blockNativePointer, true);
+      replacement.addEventListener('pointerup', blockNativePointer, true);
+      replacement.addEventListener('touchstart', blockNativePointer, { capture: true, passive: false });
+      replacement.addEventListener('touchend', blockNativePointer, { capture: true, passive: false });
       replacement.addEventListener('click', handleClick, true);
       slot.appendChild(replacement);
       injected += 1;
@@ -345,6 +350,9 @@
     if (replacement && slot.__tangoPointerBlocker) {
       replacement.removeEventListener('pointerdown', slot.__tangoPointerBlocker, true);
       replacement.removeEventListener('mousedown', slot.__tangoPointerBlocker, true);
+      replacement.removeEventListener('pointerup', slot.__tangoPointerBlocker, true);
+      replacement.removeEventListener('touchstart', slot.__tangoPointerBlocker, true);
+      replacement.removeEventListener('touchend', slot.__tangoPointerBlocker, true);
     }
     if (replacement && slot.__tangoQuickBuyHandler) replacement.removeEventListener('click', slot.__tangoQuickBuyHandler, true);
     if (replacement?.isConnected) replacement.remove();

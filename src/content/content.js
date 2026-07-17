@@ -7,7 +7,8 @@
     state: null, settings: null, current: null, drawerOpen: false, modal: null,
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
     presetEditing: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
-    solPriceUsd: 0, solPricePromise: null, tokenQuotePromise: null, gmgnQuotes: new Map(), lastUrl: location.href, routeTimer: null
+    solPriceUsd: 0, solPricePromise: null, quoteRequests: new Map(), quoteRetryAt: new Map(),
+    gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null
   };
 
   const host = document.createElement('div');
@@ -28,13 +29,7 @@
       const address = String(quote.address).toLowerCase();
       runtime.gmgnQuotes.set(address, quote);
       if (runtime.current?.token?.address?.toLowerCase() === address && Number(quote.priceUsd) > 0) {
-        runtime.current.quote = {
-          ...runtime.current.quote,
-          ...quote,
-          marketCapUsd: Number(runtime.current.quote.marketCapUsd || quote.marketCapUsd || 0),
-          solPriceUsd: Number(runtime.current.quote.solPriceUsd || runtime.solPriceUsd || 0),
-          valuationMode: 'PRICE'
-        };
+        mergeQuote(runtime.current, quote);
         queueRender();
       }
     });
@@ -122,35 +117,29 @@
   }
 
   function ensureTokenQuote(context) {
-    if (!context?.token?.address || runtime.tokenQuotePromise || (context.quote.priceUsd > 0 && context.quote.marketCapUsd > 0)) return;
+    if (!context?.token?.address || (context.quote.priceUsd > 0 && context.quote.marketCapUsd > 0)) return;
     const address = context.token.address;
-    const gmgnQuote = runtime.gmgnQuotes.get(address.toLowerCase());
+    const requestKey = address.toLowerCase();
+    const gmgnQuote = freshGmgnQuote(address);
     if (Number(gmgnQuote?.priceUsd) > 0) {
-      context.quote = {
-        ...context.quote,
-        ...gmgnQuote,
-        marketCapUsd: Number(context.quote.marketCapUsd || gmgnQuote.marketCapUsd || 0),
-        solPriceUsd: Number(context.quote.solPriceUsd || runtime.solPriceUsd || 0),
-        valuationMode: 'PRICE'
-      };
+      mergeQuote(context, gmgnQuote);
       queueRender();
       return;
     }
-    runtime.tokenQuotePromise = chrome.runtime.sendMessage({ type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address })
+    if (Date.now() < Number(runtime.quoteRetryAt.get(requestKey) || 0)) return;
+    sharedQuoteRequest({ type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address }, 1500)
       .then((response) => {
         const quote = response?.quote;
-        if (!quote || runtime.current?.token?.address !== address) return;
-        runtime.current.quote = {
-          ...runtime.current.quote,
-          ...quote,
-          marketCapUsd: Number(runtime.current.quote.marketCapUsd || quote.marketCapUsd || 0),
-          solPriceUsd: Number(runtime.current.quote.solPriceUsd || runtime.solPriceUsd || 0),
-          valuationMode: 'PRICE'
-        };
+        if (!quote) {
+          runtime.quoteRetryAt.set(requestKey, Date.now() + 15_000);
+          return;
+        }
+        runtime.quoteRetryAt.delete(requestKey);
+        if (runtime.current?.token?.address !== address) return;
+        mergeQuote(runtime.current, quote);
         queueRender();
       })
-      .catch(() => null)
-      .finally(() => { runtime.tokenQuotePromise = null; });
+      .catch(() => runtime.quoteRetryAt.set(requestKey, Date.now() + 15_000));
   }
 
   function requestWithTimeout(message, timeoutMs = 650) {
@@ -158,6 +147,48 @@
       chrome.runtime.sendMessage(message).catch(() => null),
       new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))
     ]);
+  }
+
+  function freshGmgnQuote(address, maxAgeMs = 30_000) {
+    const quote = runtime.gmgnQuotes.get(String(address || '').toLowerCase());
+    return quote && Date.now() - Number(quote.observedAt || 0) <= maxAgeMs ? quote : null;
+  }
+
+  function mergeQuote(context, quote) {
+    if (!quote) return context.quote;
+    context.quote = {
+      ...context.quote,
+      ...quote,
+      marketCapUsd: Number(quote.marketCapUsd || context.quote.marketCapUsd || 0),
+      solPriceUsd: Number(context.quote.solPriceUsd || quote.solPriceUsd || runtime.solPriceUsd || 0),
+      valuationMode: Number(quote.priceUsd) > 0 ? 'PRICE' : context.quote.valuationMode
+    };
+    return context.quote;
+  }
+
+  async function sharedQuoteRequest(message, timeoutMs = 650) {
+    const key = `${message.type}:${message.chain || ''}:${String(message.address || '').toLowerCase()}`;
+    if (runtime.quoteRequests.has(key)) return runtime.quoteRequests.get(key);
+    const request = requestWithTimeout(message, timeoutMs).finally(() => runtime.quoteRequests.delete(key));
+    runtime.quoteRequests.set(key, request);
+    return request;
+  }
+
+  async function resolveQuickBuyQuote(context) {
+    const networkQuote = freshGmgnQuote(context.token.address);
+    if (networkQuote) mergeQuote(context, networkQuote);
+    const hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
+    const tokenRequest = hasTokenValue ? Promise.resolve(null) : sharedQuoteRequest({
+      type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address: context.token.address
+    });
+    const solRequest = context.quote.solPriceUsd > 0
+      ? Promise.resolve(null)
+      : sharedQuoteRequest({ type: 'TANGO_GET_SOL_PRICE' });
+    const [tokenResponse, solResponse] = await Promise.all([tokenRequest, solRequest]);
+    mergeQuote(context, tokenResponse?.quote);
+    context.quote.solPriceUsd = Number(context.quote.solPriceUsd || solResponse?.price || runtime.solPriceUsd || 1);
+    context.quote.observedAt = Number(context.quote.observedAt || Date.now());
+    return context.quote;
   }
 
   function positionUrl(position) {
@@ -171,27 +202,14 @@
   async function handleQuickBuy(context) {
     if (!runtime.settings?.enabled) return;
     if (context.token.chain !== 'sol') return showToast('GMGN Solana only in V1', 'error');
-    const gmgnQuote = runtime.gmgnQuotes.get(context.token.address.toLowerCase());
-    const needsExternalTokenFallback = !(Number(gmgnQuote?.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0);
-    const [tokenResponse, solResponse] = await Promise.all([
-      Number(gmgnQuote?.priceUsd) > 0
-        ? { quote: gmgnQuote }
-        : needsExternalTokenFallback
-          ? requestWithTimeout({ type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address: context.token.address })
-          : null,
-      context.quote.solPriceUsd > 0 ? null : requestWithTimeout({ type: 'TANGO_GET_SOL_PRICE' })
-    ]);
-    const externalQuote = tokenResponse?.quote;
-    if (Number(externalQuote?.priceUsd) > 0) {
-      context.quote = {
-        ...context.quote,
-        ...externalQuote,
-        marketCapUsd: Number(context.quote.marketCapUsd || externalQuote.marketCapUsd || 0),
-        valuationMode: 'PRICE'
-      };
+    const lockKey = `${context.token.address.toLowerCase()}:${Number(context.amountSol)}`;
+    const lastHandledAt = Number(runtime.quickBuyLocks.get(lockKey) || 0);
+    if (Date.now() - lastHandledAt < 1000) return;
+    runtime.quickBuyLocks.set(lockKey, Date.now());
+    if (runtime.quickBuyLocks.size > 100) {
+      [...runtime.quickBuyLocks.entries()].filter(([, at]) => Date.now() - at > 5000).forEach(([key]) => runtime.quickBuyLocks.delete(key));
     }
-    context.quote.solPriceUsd = Number(context.quote.solPriceUsd || solResponse?.price || runtime.solPriceUsd || 1);
-    context.quote.observedAt = Date.now();
+    await resolveQuickBuyQuote(context);
     if (!(Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0)) {
       return showToast(t('quoteLoading'), 'error');
     }
@@ -208,6 +226,8 @@
       sourceUrl: context?.sourceUrl || location.href
     };
     try {
+      const orderKey = `${order.token?.address || ''}:${order.amountSol}`;
+      if (runtime.modal?.type === 'confirm' && runtime.modal.orderKey === orderKey) return;
       previewBuy(order);
       if (requiresConfirmation()) return;
       await commitBuy(order);
@@ -224,6 +244,7 @@
     const executionPrice = order.quote.priceUsd * (1 + runtime.settings.slippageBps / 10_000);
     runtime.modal = {
       type: 'confirm',
+      orderKey: `${order.token?.address || ''}:${order.amountSol}`,
       title: t('simulatedBuy'),
       rows: [
         [t('token'), order.token.symbol], [t('investment'), Tango.Format.sol(order.amountSol, language())],
@@ -364,12 +385,8 @@
     return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)} ${collapsed ? 'collapsed' : ''}" style="${floatingStyle(runtime.settings.barPosition)}">
       <div class="tango-bar-main" data-action="toggle-drawer">
         ${collapsed ? `<strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong>` : `
-          <div class="tango-balance-column">
-            <div class="tango-stat tango-balance-stat"><strong>${accountMoney(summary.cashBalanceSol)}</strong><span>${t('balance')}</span></div>
-            <div class="tango-assets-inline"><span>${t('totalAssets')}</span><strong>${accountMoney(summary.equitySol)}</strong></div>
-          </div>
-          <div class="tango-bar-divider"></div>
-          <div class="tango-stat"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>`}
+          <span class="tango-paper-badge tango-bar-paper">${t('paper')}</span>
+          <div class="tango-stat tango-pnl-hero"><strong class="${pnlClass(summary.totalPnlSol)}">${accountMoney(summary.totalPnlSol, true)}</strong><span>${t('pnl')}</span></div>`}
         <span class="tango-bar-hint">${t('clickForPositions')} · ${summary.positionCount}</span>
       </div>
       <button class="tango-icon-button" data-action="collapse-bar">${collapsed ? '＋' : '－'}</button>
@@ -477,7 +494,7 @@
           <div class="tango-trade-meta"><span>⌁ ${runtime.settings.fastMode ? 'FAST' : t('auto')}</span><span>♜ ${Tango.Format.sol(runtime.settings.networkFeeSol, language())}</span><button class="tango-breakeven-link" data-action="breakeven" ${breakevenPercent ? '' : 'disabled'} title="${esc(breakevenPercent ? breakevenLabel : t('breakevenUnavailable'))}">${esc(breakevenLabel)}</button><span class="safe">${t('currentMc')} ${Tango.Format.usd(current.quote.marketCapUsd, language(), true)}</span></div>
         </section>
         <div class="tango-summary-grid">
-          <div class="tango-summary-item"><span>${t('paperBalance')}</span><strong>${accountMoney(runtime.state.account.cashBalanceSol)}</strong></div>
+          <div class="tango-summary-item tango-paper-balance-summary"><span>${t('paperBalance')}</span><strong>${accountMoney(runtime.state.account.cashBalanceSol)}</strong></div>
           <div class="tango-summary-item"><span>${t('totalBuy')}</span><strong>${accountMoney(totalBuy)}</strong></div>
           <div class="tango-summary-item"><span>${t('totalSell')}</span><strong>${accountMoney(totalSell)}</strong></div>
           <div class="tango-summary-item"><span>${t('totalProfit')}</span><strong class="${pnlClass(totalProfit)}">${accountMoney(totalProfit, true)}</strong></div>

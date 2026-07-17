@@ -13,7 +13,11 @@
   let markerState = null;
   let overlay = null;
   let lastScaleMode = null;
+  let stableScale = null;
+  let scaleUpdatedAt = 0;
+  let stableSignature = '';
   const hiddenMarkerIds = new Set();
+  const markerPositions = new Map();
 
   function parseNumber(text) {
     const source = String(text || '').trim();
@@ -78,11 +82,15 @@
       return originalStrokeText.call(this, text, x, y, ...rest);
     };
     proto.clearRect = function tangoClearRect(x, y, width, height) {
-      if (this.canvas && Number(width) * Number(height) > this.canvas.width * this.canvas.height * 0.45) {
-        labelsByCanvas.delete(canvasId(this.canvas));
-      }
       return originalClearRect.call(this, x, y, width, height);
     };
+  }
+
+  function median(values) {
+    const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+    if (!sorted.length) return 0;
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
   }
 
   function linearFit(points, logarithmic) {
@@ -96,7 +104,30 @@
     const slope = prepared.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator;
     const intercept = meanY - slope * meanX;
     const error = Math.sqrt(prepared.reduce((sum, point) => sum + (point.y - (slope * point.x + intercept)) ** 2, 0) / prepared.length);
+    if (!(slope < 0)) return null;
     return { slope, intercept, error, logarithmic };
+  }
+
+  function robustFit(points, logarithmic) {
+    const prepared = points.map((point) => ({ point, x: logarithmic ? Math.log(point.value) : point.value, y: point.y }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+    if (prepared.length < 3) return null;
+    const slopes = [];
+    for (let left = 0; left < prepared.length; left += 1) {
+      for (let right = left + 1; right < prepared.length; right += 1) {
+        const deltaX = prepared[right].x - prepared[left].x;
+        if (Math.abs(deltaX) > Number.EPSILON) slopes.push((prepared[right].y - prepared[left].y) / deltaX);
+      }
+    }
+    const slope = median(slopes);
+    if (!(slope < 0)) return null;
+    const intercept = median(prepared.map((point) => point.y - slope * point.x));
+    const residuals = prepared.map((point) => Math.abs(point.y - (slope * point.x + intercept)));
+    const tolerance = Math.max(2.5, median(residuals) * 2.8);
+    const inliers = prepared
+      .filter((point) => Math.abs(point.y - (slope * point.x + intercept)) <= tolerance)
+      .map((point) => point.point);
+    return inliers.length >= 3 ? linearFit(inliers, logarithmic) : null;
   }
 
   function selectScale() {
@@ -104,9 +135,9 @@
     const groups = [...labelsByCanvas.values()].map((records) => [...records.values()])
       .map((points) => {
         const deduped = new Map();
-        points.filter((point) => Date.now() - point.updatedAt < 6_000).forEach((point) => deduped.set(Math.round(point.y), point));
+        points.filter((point) => Date.now() - point.updatedAt < 2_500).forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
         return [...deduped.values()].sort((a, b) => a.y - b.y);
-      }).filter((points) => points.length >= 2);
+      }).filter((points) => points.length >= 3 && new Set(points.map((point) => point.value)).size >= 3);
     const modes = [];
     if (Number(markerState.currentPrice) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(markerState.currentPrice) });
     if (Number(markerState.currentMarketCap) > 0) {
@@ -115,11 +146,12 @@
     const candidates = [];
     groups.forEach((points) => modes.forEach((mode) => {
       const nearest = Math.min(...points.map((point) => Math.abs(Math.log(point.value / mode.current))));
-      const linear = linearFit(points, false);
-      const logarithmic = linearFit(points, true);
+      const linear = robustFit(points, false);
+      const logarithmic = robustFit(points, true);
       const fit = !linear ? logarithmic : !logarithmic ? linear : linear.error <= logarithmic.error ? linear : logarithmic;
       if (!fit) return;
-      const score = nearest + Math.min(2, fit.error / Math.max(80, innerHeight));
+      const span = Math.max(1, points.at(-1).y - points[0].y);
+      const score = nearest + Math.min(2, fit.error / span * 8);
       candidates.push({ ...mode, points, fit, score });
     }));
     const best = candidates.sort((a, b) => a.score - b.score)[0];
@@ -129,7 +161,14 @@
     );
     const selected = previous && previous.score <= best.score + 0.28 ? previous : best;
     lastScaleMode = { type: selected.type, factor: selected.factor };
-    return selected;
+    const signature = `${selected.type}:${selected.factor}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
+    const sameMode = stableScale?.type === selected.type && stableScale?.factor === selected.factor;
+    if (sameMode && stableSignature === signature) return stableScale;
+    if (sameMode && Date.now() - scaleUpdatedAt < 500) return stableScale;
+    stableScale = selected;
+    stableSignature = signature;
+    scaleUpdatedAt = Date.now();
+    return stableScale;
   }
 
   function compactUsd(value) {
@@ -170,8 +209,11 @@
         : Number(marker.price || (markerState.currentPrice * Number(marker.marketCap || 0) / markerState.currentMarketCap) || 0);
       if (!(rawValue > 0)) return;
       const fitX = scale.fit.logarithmic ? Math.log(rawValue) : rawValue;
-      const y = scale.fit.slope * fitX + scale.fit.intercept;
-      if (!Number.isFinite(y) || y < 35 || y > innerHeight - 55) return;
+      const targetY = scale.fit.slope * fitX + scale.fit.intercept;
+      if (!Number.isFinite(targetY) || targetY < 35 || targetY > innerHeight - 55) return;
+      const previousY = markerPositions.get(marker.id);
+      const y = Number.isFinite(previousY) && Math.abs(previousY - targetY) < 3 ? previousY : targetY;
+      markerPositions.set(marker.id, y);
       const line = document.createElement('div');
       const color = marker.side === 'SELL' ? '#ff6673' : '#42e797';
       Object.assign(line.style, {
@@ -213,11 +255,19 @@
     const nextState = event.data.payload || null;
     if (markerState?.tokenAddress !== nextState?.tokenAddress) {
       lastScaleMode = null;
+      stableScale = null;
+      stableSignature = '';
       hiddenMarkerIds.clear();
+      markerPositions.clear();
     }
     markerState = nextState;
     renderMarkers();
   });
-  window.addEventListener('resize', renderMarkers, { passive: true });
-  setInterval(renderMarkers, 250);
+  window.addEventListener('resize', () => {
+    stableScale = null;
+    stableSignature = '';
+    markerPositions.clear();
+    renderMarkers();
+  }, { passive: true });
+  setInterval(renderMarkers, 400);
 })();
