@@ -154,7 +154,9 @@
       const source = document.querySelector(selector)?.src;
       if (source) return source;
     }
-    return document.querySelector('meta[property="og:image"]')?.content || '';
+    // GMGN is a SPA, so og:image can briefly belong to the previously viewed
+    // token. An empty logo is safer and will be filled from TokenHeader later.
+    return '';
   }
 
   async function readCurrentToken() {
@@ -273,6 +275,38 @@
     slot.classList.toggle('tango-quick-narrow', rect.width <= 72);
   }
 
+  function selectQuickBuyAmount(columnValue, nativeText, previousAmount, defaultAmount) {
+    return parseMoney(columnValue) || parseMoney(nativeText) || Number(previousAmount) || Number(defaultAmount);
+  }
+
+  function cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol) {
+    const columnInput = trenchColumn(card)?.querySelector('[data-sentry-component="BuyAmountInput"] input');
+    return selectQuickBuyAmount(columnInput?.value, nativeControl?.textContent, slot.dataset.tangoAmountSol, defaultAmountSol);
+  }
+
+  function readVisibleTokenMetadata(addresses) {
+    if (!isTrenchPage()) return [];
+    const requested = new Set((addresses || []).map((address) => String(address || '').toLowerCase()).filter(Boolean));
+    if (!requested.size) return [];
+    const found = new Map();
+    const links = document.querySelectorAll('a[href*="pump.fun/coin/"], a[href*="/sol/token/"]');
+    for (const link of links) {
+      if (found.size >= requested.size) break;
+      const address = tokenAddressFromUrl(link.href);
+      const normalized = String(address || '').toLowerCase();
+      if (!requested.has(normalized) || found.has(normalized)) continue;
+      const card = link.closest('[class~="group/a"]');
+      if (!card || !trenchColumn(card)) continue;
+      const identity = cardTokenIdentity(card);
+      found.set(normalized, {
+        chain: 'sol', address,
+        symbol: identity.symbol, name: identity.name,
+        logoUrl: card.querySelector('img[alt="logo"]')?.src || ''
+      });
+    }
+    return [...found.values()];
+  }
+
   function ensureQuickBuyStyle() {
     if (document.querySelector('#tango-trench-buy-style')) return;
     const style = document.createElement('style');
@@ -326,7 +360,7 @@
       const address = tokenAddressFromUrl(href);
       const existingReplacement = slot.querySelector('.tango-list-quick-buy');
       let nativeControl = slot.querySelector('[data-testid="quickbuy"]');
-      const amountSol = parseMoney(nativeControl?.textContent || '') || Number(slot.dataset.tangoAmountSol) || Number(defaultAmountSol);
+      const amountSol = cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol);
       if (!address || !(amountSol > 0)) continue;
       const currentMarketCap = cardMarketCap(card.innerText || card.textContent || '');
       if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
@@ -440,9 +474,10 @@
   }
 
   Tango.GMGN = {
-    chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, discoverTokenCards, clearQuickBuy,
+    chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, readVisibleTokenMetadata, discoverTokenCards, clearQuickBuy,
     _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,
     _tokenLogo: tokenLogo,
+    _selectQuickBuyAmount: selectQuickBuyAmount,
     _isTrenchPage: isTrenchPage,
     _isTokenDetailPage: isTokenDetailPage
   };

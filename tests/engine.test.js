@@ -125,3 +125,21 @@ test('detail metadata replaces a trench placeholder without changing balances', 
   assert.equal(enriched.positions[key].quantity, bought.state.positions[key].quantity);
   assert.equal(enriched.account.cashBalanceSol, bought.state.account.cashBalanceSol);
 });
+
+test('buying on a detail page cannot change another position logo', () => {
+  const trenchToken = { ...token, address: 'TrenchToken111', symbol: 'TRENCH', logoUrl: 'https://example.com/trench.png' };
+  const detailToken = { ...token, address: 'DetailToken222', symbol: 'DETAIL', logoUrl: 'https://example.com/detail.png' };
+  const trenchBuy = Engine.executeBuy(state(), { token: trenchToken, quote, amountSol: 1 }, settings, 1_000);
+  const detailBuy = Engine.executeBuy(trenchBuy.state, { token: detailToken, quote, amountSol: 1 }, settings, 1_100);
+  const detailRebuy = Engine.executeBuy(detailBuy.state, {
+    token: { ...detailToken, logoUrl: 'https://example.com/detail-new.png' }, quote, amountSol: 1
+  }, settings, 1_200);
+  assert.equal(detailRebuy.state.positions[Engine.positionKey('sol', trenchToken.address)].logoUrl, trenchToken.logoUrl);
+  assert.equal(detailRebuy.state.positions[Engine.positionKey('sol', detailToken.address)].logoUrl, 'https://example.com/detail-new.png');
+
+  const detailRebuyBeforeLogoLoads = Engine.executeBuy(detailRebuy.state, {
+    token: { ...detailToken, logoUrl: '' }, quote, amountSol: 1
+  }, settings, 1_300);
+  assert.equal(detailRebuyBeforeLogoLoads.state.positions[Engine.positionKey('sol', trenchToken.address)].logoUrl, trenchToken.logoUrl);
+  assert.equal(detailRebuyBeforeLogoLoads.state.positions[Engine.positionKey('sol', detailToken.address)].logoUrl, 'https://example.com/detail-new.png');
+});

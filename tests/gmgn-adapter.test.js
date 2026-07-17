@@ -58,3 +58,9 @@ test('detail token logo ignores unrelated token images elsewhere on the page', (
     global.document = originalDocument;
   }
 });
+
+test('trench column amount takes priority over the replaced native button amount', () => {
+  assert.equal(GMGN._selectQuickBuyAmount('0.7', '1 SOL', '1', 0.1), 0.7);
+  assert.equal(GMGN._selectQuickBuyAmount('', '0.5 SOL', '1', 0.1), 0.5);
+  assert.equal(GMGN._selectQuickBuyAmount('', '', '2', 0.1), 2);
+});

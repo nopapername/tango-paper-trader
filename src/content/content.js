@@ -11,7 +11,7 @@
     gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-    renderedMarkup: null, markerPayloads: new WeakMap()
+    renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false
   };
 
   const host = document.createElement('div');
@@ -49,7 +49,10 @@
         const metadata = isCurrentToken ? runtime.current.token : quote;
         enrichedState = Tango.Engine.updatePositionMetadata(enrichedState, {
           chain: position.chain, address: position.tokenAddress,
-          symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl
+          symbol: metadata.symbol, name: metadata.name,
+          // Network payloads can contain creator/related-token image fields.
+          // Only the current detail DOM is trusted as a position logo source.
+          logoUrl: isCurrentToken ? metadata.logoUrl : ''
         });
       }
     });
@@ -134,6 +137,35 @@
     requestAnimationFrame(() => { runtime.renderQueued = false; render(); });
   }
 
+  function syncQuickBuyButtons() {
+    if (runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) {
+      Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1, t('paper'));
+    } else {
+      Tango.GMGN.clearQuickBuy();
+    }
+  }
+
+  function queueQuickBuySync() {
+    if (runtime.quickBuySyncQueued) return;
+    runtime.quickBuySyncQueued = true;
+    requestAnimationFrame(() => {
+      runtime.quickBuySyncQueued = false;
+      syncQuickBuyButtons();
+    });
+  }
+
+  async function syncVisiblePositionMetadata() {
+    const positions = Object.values(runtime.state?.positions || {});
+    if (!positions.length) return;
+    const tokens = Tango.GMGN.readVisibleTokenMetadata(positions.map((position) => position.tokenAddress));
+    let nextState = runtime.state;
+    tokens.forEach((token) => { nextState = Tango.Engine.updatePositionMetadata(nextState, token); });
+    if (nextState === runtime.state) return;
+    runtime.state = nextState;
+    await Tango.Store.saveState(runtime.state);
+    queueRender();
+  }
+
   async function performQuoteTick() {
     if (!runtime.settings?.enabled || !runtime.state?.initialized) {
       Tango.GMGN.clearQuickBuy();
@@ -159,8 +191,8 @@
       runtime.lastQuoteWriteAt = Date.now();
       await Tango.Store.saveState(runtime.state);
     }
-    if (runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1, t('paper'));
-    else Tango.GMGN.clearQuickBuy();
+    syncQuickBuyButtons();
+    await syncVisiblePositionMetadata();
     if (previousAddress !== runtime.current?.token?.address || runtime.current) queueRender();
   }
 
@@ -243,9 +275,6 @@
       if (symbol && symbol.length <= 32 && !isPlaceholderTokenLabel(symbol) && isPlaceholderTokenLabel(context.token.symbol)) context.token.symbol = symbol;
       if (name && name.length <= 100 && !isPlaceholderTokenLabel(name) &&
         (isPlaceholderTokenLabel(context.token.name) || context.token.name === context.token.symbol)) context.token.name = name;
-      // A scoped GMGN DOM logo is more reliable than generic image fields in
-      // API payloads, which can describe creators or related tokens.
-      if (quote.logoUrl && !context.token.logoUrl) context.token.logoUrl = String(quote.logoUrl);
     }
     context.quote = {
       ...context.quote,
@@ -916,8 +945,7 @@
       if (mutationTimer) return;
       mutationTimer = setTimeout(() => {
         mutationTimer = null;
-        if (runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1, t('paper'));
-        else Tango.GMGN.clearQuickBuy();
+        syncQuickBuyButtons();
         if (runtime.settings?.enabled && runtime.state?.initialized) {
           renderHeaderAccountSummary({ cashBalanceSol: runtime.state.account.cashBalanceSol });
         }
@@ -925,6 +953,11 @@
       }, 160);
     });
     runtime.observer.observe(document.body, { childList: true, subtree: true });
+    const handleQuickBuyAmountChange = (event) => {
+      if (event.target?.closest?.('[data-sentry-component="BuyAmountInput"]')) queueQuickBuySync();
+    };
+    document.addEventListener('input', handleQuickBuyAmountChange, true);
+    document.addEventListener('change', handleQuickBuyAmountChange, true);
     Tango.Store.subscribe(refresh);
   }
 
