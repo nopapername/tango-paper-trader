@@ -140,6 +140,69 @@ test('detail header accepts a nearby CA leaf in its small exclusive identity con
   }
 });
 
+test('detail scope prefers the current BaseInfoBar when another widget repeats the same CA', () => {
+  const originalDocument = global.document;
+  const body = {};
+  const address = '5eAHabcdefghijkmnopqrstuvwxyz123456789pump';
+  const makeIdentity = () => {
+    const addressNode = { textContent: '5eAH...pump', childElementCount: 0, getAttribute: () => null };
+    const header = { textContent: '', querySelectorAll: () => [] };
+    const container = {
+      tagName: 'DIV', textContent: `Token ${addressNode.textContent}`, parentElement: body,
+      querySelectorAll(selector) {
+        if (selector === '[data-sentry-component="TokenHeader"]') return [header];
+        if (selector === '*') return [header, addressNode];
+        if (selector === 'span,div,p,a,button') return [addressNode];
+        return [];
+      }
+    };
+    header.parentElement = container;
+    addressNode.parentElement = container;
+    return { header, container };
+  };
+  const main = makeIdentity();
+  const unrelated = makeIdentity();
+  const baseInfoBar = {
+    tagName: 'DIV', parentElement: body,
+    getAttribute(attribute) { return attribute === 'data-sentry-component' ? 'BaseInfoBar' : null; },
+    querySelectorAll(selector) {
+      if (selector === '[data-sentry-component="TokenHeader"]') return [main.header];
+      return [];
+    }
+  };
+  main.container.parentElement = baseInfoBar;
+  global.document = {
+    body,
+    querySelectorAll(selector) {
+      if (selector === '[data-sentry-component="BaseInfoBar"]') return [baseInfoBar];
+      if (selector === '[data-sentry-component="TokenHeader"]') return [unrelated.header, main.header];
+      return [];
+    }
+  };
+  try {
+    const detail = GMGN._findTokenDetailScope(address);
+    assert.equal(detail.header, main.header);
+    assert.equal(detail.bindingScope, main.container);
+  } finally {
+    global.document = originalDocument;
+  }
+});
+
+test('a transient empty detail read preserves the verified context for the same route only', () => {
+  const current = { token: { chain: 'sol', address: 'AbC123pump' }, quote: { priceUsd: 1 } };
+  assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/sol/token/AbC123pump'), current);
+  assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/sol/token/Other456pump'), null);
+  assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/?chain=sol'), null);
+});
+
+test('detail context is retried while the current route has not been resolved', () => {
+  const current = { token: { chain: 'sol', address: 'AbC123pump' } };
+  assert.equal(GMGN._needsCurrentTokenRead(null, 'https://gmgn.ai/sol/token/AbC123pump'), true);
+  assert.equal(GMGN._needsCurrentTokenRead(current, 'https://gmgn.ai/sol/token/AbC123pump'), false);
+  assert.equal(GMGN._needsCurrentTokenRead(current, 'https://gmgn.ai/sol/token/Other456pump'), true);
+  assert.equal(GMGN._needsCurrentTokenRead(null, 'https://gmgn.ai/?chain=sol'), false);
+});
+
 test('quick-buy injection is restricted to the Solana trench root', () => {
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=sol'), true);
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/sol/token/AbC123pump'), false);

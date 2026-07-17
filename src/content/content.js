@@ -169,8 +169,10 @@
       Tango.GMGN.clearQuickBuy();
       return;
     }
-    const previousAddress = runtime.current?.token?.address;
-    runtime.current = await Tango.GMGN.readCurrentToken();
+    const previousCurrent = runtime.current;
+    const previousAddress = previousCurrent?.token?.address;
+    const observedCurrent = await Tango.GMGN.readCurrentToken();
+    runtime.current = Tango.GMGN.resolveCurrentTokenRead(previousCurrent, observedCurrent);
     if (runtime.current) {
       const positionPrice = currentPosition()?.lastSolPriceUsd;
       runtime.current.quote.solPriceUsd = Number(runtime.solPriceUsd || positionPrice || 0);
@@ -924,6 +926,10 @@
     runtime.routeTimer = setInterval(() => {
       if (location.href === runtime.lastUrl) return;
       runtime.lastUrl = location.href;
+      if (runtime.current && Tango.GMGN.needsCurrentTokenRead(runtime.current)) {
+        runtime.current = null;
+        queueRender();
+      }
       tickQuote();
     }, 150);
     let mutationTimer;
@@ -938,6 +944,7 @@
         syncQuickBuyButtons();
         if (runtime.settings?.enabled && runtime.state?.initialized) {
           renderHeaderAccountSummary({ cashBalanceSol: runtime.state.account.cashBalanceSol });
+          if (Tango.GMGN.needsCurrentTokenRead(runtime.current)) tickQuote();
         }
         if (document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe')) syncChartMarkers();
       }, 160);

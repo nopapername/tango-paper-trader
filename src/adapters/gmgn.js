@@ -196,22 +196,50 @@
   }
 
   function findTokenDetailScope(address) {
-    const headers = Array.from(document.querySelectorAll('[data-sentry-component="TokenHeader"]'));
-    const directMatches = headers.filter((header) => elementHasTokenAddress(header, address));
-    if (directMatches.length === 1) return { header: directMatches[0], scope: directMatches[0], bindingScope: directMatches[0] };
-    if (directMatches.length > 1) return null;
+    const findMatches = (headers) => {
+      const directMatches = headers.filter((header) => elementHasTokenAddress(header, address));
+      if (directMatches.length === 1) return [{ header: directMatches[0], scope: directMatches[0], bindingScope: directMatches[0] }];
+      if (directMatches.length > 1) return [];
 
-    const localMatches = [];
-    for (const header of headers) {
-      let bindingScope = header.parentElement;
-      for (let depth = 1; depth <= 4 && bindingScope; depth += 1, bindingScope = bindingScope.parentElement) {
-        const addressNode = localDetailAddressEvidence(header, bindingScope, address);
-        if (!addressNode) continue;
-        localMatches.push({ header, scope: header, bindingScope, addressNode });
-        break;
+      const localMatches = [];
+      for (const header of headers) {
+        let bindingScope = header.parentElement;
+        for (let depth = 1; depth <= 5 && bindingScope; depth += 1, bindingScope = bindingScope.parentElement) {
+          const addressNode = localDetailAddressEvidence(header, bindingScope, address);
+          if (!addressNode) continue;
+          localMatches.push({ header, scope: header, bindingScope, addressNode });
+          break;
+        }
       }
+      return localMatches;
+    };
+
+    const baseInfoBars = Array.from(document.querySelectorAll('[data-sentry-component="BaseInfoBar"]'))
+      .filter((bar) => bar.getAttribute?.('data-sentry-component') === 'BaseInfoBar');
+    if (baseInfoBars.length) {
+      const anchoredMatches = baseInfoBars.flatMap((bar) => findMatches(
+        Array.from(bar.querySelectorAll?.('[data-sentry-component="TokenHeader"]') || [])
+      ));
+      return anchoredMatches.length === 1 ? anchoredMatches[0] : null;
     }
+
+    const headers = Array.from(document.querySelectorAll('[data-sentry-component="TokenHeader"]'));
+    const localMatches = findMatches(headers);
     return localMatches.length === 1 ? localMatches[0] : null;
+  }
+
+  function resolveCurrentTokenRead(previous, next, url = location.href) {
+    if (next) return next;
+    if (!isTokenDetailPage(url)) return null;
+    const address = tokenAddressFromUrl(url).toLowerCase();
+    const previousAddress = String(previous?.token?.address || '').toLowerCase();
+    return address && previousAddress === address ? previous : null;
+  }
+
+  function needsCurrentTokenRead(current, url = location.href) {
+    if (!isTokenDetailPage(url)) return false;
+    const address = tokenAddressFromUrl(url).toLowerCase();
+    return !address || String(current?.token?.address || '').toLowerCase() !== address;
   }
 
   function detailTokenIdentity(scope, address) {
@@ -669,10 +697,12 @@
 
   Tango.GMGN = {
     chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, readVisibleTokenMetadata, discoverTokenCards, clearQuickBuy,
+    resolveCurrentTokenRead, needsCurrentTokenRead,
     _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,
     _cardIdentityFromText: cardIdentityFromText, _addressHintMatches: addressHintMatches,
     _cardTokenLogo: cardTokenLogo, _verifiedCardMetadata: verifiedCardMetadata, _detailTokenIdentity: detailTokenIdentity,
     _findTokenDetailScope: findTokenDetailScope, _tokenLogo: tokenLogo,
+    _resolveCurrentTokenRead: resolveCurrentTokenRead, _needsCurrentTokenRead: needsCurrentTokenRead,
     _selectQuickBuyAmount: selectQuickBuyAmount,
     _isTrenchPage: isTrenchPage,
     _isTokenDetailPage: isTokenDetailPage
