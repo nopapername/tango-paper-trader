@@ -1,5 +1,13 @@
 (function initGmgnAdapter(global) {
   const Tango = global.Tango = global.Tango || {};
+  const quickBuyActions = new Map();
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('message', (event) => {
+      if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'PAPER_QUICK_BUY_CLICK') return;
+      quickBuyActions.get(String(event.data.actionId || ''))?.();
+    });
+  }
 
   const SUBSCRIPT_DIGITS = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
 
@@ -224,14 +232,14 @@
       .tango-list-quick-buy {
         align-items: center;
         appearance: none; background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 10%, transparent);
-        border: 0; border-radius: 6px; bottom: 0; box-sizing: border-box; color: var(--customize-button-ultra-color, #00ffee);
-        cursor: pointer; display: flex; font: 700 12px/12px Inter, ui-sans-serif, system-ui, sans-serif; inset: 0;
-        justify-content: center; min-height: 20px; overflow: hidden; padding: 2px 3px; position: absolute; white-space: nowrap; width: 100%; z-index: 50;
+        border: 0; border-radius: 6px; box-sizing: border-box; color: var(--customize-button-ultra-color, #00ffee);
+        cursor: pointer; display: flex; font: 700 12px/12px Inter, ui-sans-serif, system-ui, sans-serif;
+        justify-content: center; min-height: 22px; overflow: hidden; padding: 2px 3px; position: relative; white-space: nowrap; width: 100%; z-index: 50;
       }
       .tango-list-quick-buy:hover { background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 20%, transparent); filter: brightness(1.12); }
       .tango-list-quick-buy:active { opacity: .55; }
       .tango-list-quick-buy:disabled { cursor: wait; opacity: .65; }
-      .tango-paper-hint { background: rgba(155,124,255,.25); border: 1px solid rgba(155,124,255,.7); border-radius: 3px; color: #e3dcff; font-size: 8px; font-weight: 900; left: 2px; line-height: 9px; max-width: 28px; overflow: hidden; padding: 0 2px; position: absolute; text-overflow: clip; top: 1px; }
+      .tango-paper-hint { background: #7756e8; border: 1px solid #ad9aff; border-radius: 3px; color: #fff; font-size: 8px; font-weight: 950; left: 2px; line-height: 10px; max-width: 30px; overflow: hidden; padding: 0 2px; position: absolute; text-overflow: clip; top: 1px; }
       .tango-buy-amount { align-items: center; display: flex; font-size: 14px; font-weight: 950; gap: 2px; letter-spacing: -.02em; padding-top: 7px; text-shadow: 0 0 9px color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 45%, transparent); }
       .tango-buy-amount svg { flex: 0 0 14px; height: 14px; width: 14px; }
       .tango-native-buy-overridden.tango-quick-expanded .tango-paper-hint {
@@ -266,23 +274,37 @@
       const href = cardTokenHref(card);
       if (!href) continue;
       const address = tokenAddressFromUrl(href);
-      const nativeControl = slot.querySelector('[data-testid="quickbuy"]');
-      const amountSol = parseMoney(nativeControl?.textContent || slot.textContent) || Number(defaultAmountSol);
-      if (!address || !nativeControl || !(amountSol > 0)) continue;
+      const existingReplacement = slot.querySelector('.tango-list-quick-buy');
+      let nativeControl = slot.querySelector('[data-testid="quickbuy"]');
+      const amountSol = parseMoney(nativeControl?.textContent || '') || Number(slot.dataset.tangoAmountSol) || Number(defaultAmountSol);
+      if (!address || !(amountSol > 0)) continue;
       const currentMarketCap = cardMarketCap(card.innerText || card.textContent || '');
       if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
       updateQuickBuySizeClass(slot);
-      if (slot.dataset.tangoQuickBuy === '1' && slot.querySelector('.tango-list-quick-buy') &&
+      if (slot.dataset.tangoQuickBuy === '1' && existingReplacement &&
         slot.dataset.tangoTokenAddress === address && Number(slot.dataset.tangoAmountSol) === amountSol &&
-        slot.dataset.tangoPaperLabel === paperLabel) continue;
-      if (slot.dataset.tangoQuickBuy === '1') restoreQuickBuySlot(slot);
+        slot.dataset.tangoPaperLabel === paperLabel) {
+        // GMGN can reconcile the original control back into the slot. Remove it again fail-closed.
+        if (nativeControl) nativeControl.remove();
+        continue;
+      }
+      if (slot.dataset.tangoQuickBuy === '1') {
+        restoreQuickBuySlot(slot);
+        nativeControl = slot.querySelector('[data-testid="quickbuy"]');
+      }
+      if (!nativeControl) continue;
       if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
       const replacement = document.createElement('button');
       replacement.type = 'button';
       replacement.className = 'tango-list-quick-buy';
       replacement.dataset.tangoQuickBuy = '1';
+      replacement.dataset.tangoPaperAction = 'quick-buy';
+      const actionId = `tango-paper-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      replacement.dataset.tangoActionId = actionId;
       replacement.title = `Tango Paper Buy ${amountSol} SOL`;
       replacement.setAttribute('aria-label', `Tango Paper Buy ${amountSol} SOL`);
+      const nativeRect = nativeControl.getBoundingClientRect();
+      replacement.style.height = `${Math.max(22, Math.round(nativeRect.height || 0))}px`;
       const hint = document.createElement('span');
       hint.className = 'tango-paper-hint';
       hint.textContent = paperLabel;
@@ -290,14 +312,7 @@
       amount.className = 'tango-buy-amount';
       amount.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m13.688 8.12-6.471 7.705c-.206.245-.604.061-.55-.255l1.007-5.843-4.617-.061c-.88-.012-1.352-1.038-.79-1.714L8.723.191c.205-.247.605-.063.55.253L8.247 6.399l4.641.003c.888.001 1.371 1.038.8 1.718Z"/></svg><span>' + amountSol + ' SOL</span>';
       replacement.append(hint, amount);
-      const blockNativePointer = (event) => {
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-      };
-      const handleClick = async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+      const handleClick = async () => {
         const now = Date.now();
         if (replacement.disabled || now - Number(replacement.dataset.tangoLastClickAt || 0) < 900) return;
         replacement.dataset.tangoLastClickAt = String(now);
@@ -334,25 +349,12 @@
       slot.dataset.tangoTokenAddress = address;
       slot.dataset.tangoAmountSol = String(amountSol);
       slot.dataset.tangoPaperLabel = paperLabel;
+      slot.dataset.tangoActionId = actionId;
       slot.__tangoOriginalQuickBuy = nativeControl;
       slot.__tangoReplacementQuickBuy = replacement;
       slot.__tangoQuickBuyHandler = handleClick;
-      slot.__tangoPointerBlocker = blockNativePointer;
-      slot.__tangoNativeStyle = {
-        pointerEvents: nativeControl.style.pointerEvents,
-        visibility: nativeControl.style.visibility,
-        ariaHidden: nativeControl.getAttribute('aria-hidden')
-      };
-      nativeControl.style.pointerEvents = 'none';
-      nativeControl.style.visibility = 'hidden';
-      nativeControl.setAttribute('aria-hidden', 'true');
-      replacement.addEventListener('pointerdown', blockNativePointer, true);
-      replacement.addEventListener('mousedown', blockNativePointer, true);
-      replacement.addEventListener('pointerup', blockNativePointer, true);
-      replacement.addEventListener('touchstart', blockNativePointer, { capture: true, passive: false });
-      replacement.addEventListener('touchend', blockNativePointer, { capture: true, passive: false });
-      replacement.addEventListener('click', handleClick, true);
-      slot.appendChild(replacement);
+      quickBuyActions.set(actionId, handleClick);
+      nativeControl.replaceWith(replacement);
       requestAnimationFrame(() => updateQuickBuySizeClass(slot));
       injected += 1;
     }
@@ -369,31 +371,19 @@
   function restoreQuickBuySlot(slot) {
     const replacement = slot.__tangoReplacementQuickBuy;
     const original = slot.__tangoOriginalQuickBuy;
-    if (replacement && slot.__tangoPointerBlocker) {
-      replacement.removeEventListener('pointerdown', slot.__tangoPointerBlocker, true);
-      replacement.removeEventListener('mousedown', slot.__tangoPointerBlocker, true);
-      replacement.removeEventListener('pointerup', slot.__tangoPointerBlocker, true);
-      replacement.removeEventListener('touchstart', slot.__tangoPointerBlocker, true);
-      replacement.removeEventListener('touchend', slot.__tangoPointerBlocker, true);
-    }
-    if (replacement && slot.__tangoQuickBuyHandler) replacement.removeEventListener('click', slot.__tangoQuickBuyHandler, true);
-    if (replacement?.isConnected) replacement.remove();
-    if (original && slot.__tangoNativeStyle) {
-      original.style.pointerEvents = slot.__tangoNativeStyle.pointerEvents;
-      original.style.visibility = slot.__tangoNativeStyle.visibility;
-      if (slot.__tangoNativeStyle.ariaHidden == null) original.removeAttribute('aria-hidden');
-      else original.setAttribute('aria-hidden', slot.__tangoNativeStyle.ariaHidden);
-    }
+    quickBuyActions.delete(String(slot.dataset.tangoActionId || ''));
+    if (replacement?.isConnected && original) replacement.replaceWith(original);
+    else if (replacement?.isConnected) replacement.remove();
+    else if (original && !original.isConnected && slot.isConnected && !slot.querySelector('[data-testid="quickbuy"]')) slot.appendChild(original);
     delete slot.__tangoOriginalQuickBuy;
     delete slot.__tangoReplacementQuickBuy;
     delete slot.__tangoQuickBuyHandler;
-    delete slot.__tangoPointerBlocker;
-    delete slot.__tangoNativeStyle;
     slot.classList.remove('tango-native-buy-overridden', 'tango-quick-expanded', 'tango-quick-narrow');
     delete slot.dataset.tangoQuickBuy;
     delete slot.dataset.tangoTokenAddress;
     delete slot.dataset.tangoAmountSol;
     delete slot.dataset.tangoPaperLabel;
+    delete slot.dataset.tangoActionId;
     delete slot.dataset.tangoMarketCapUsd;
   }
 
