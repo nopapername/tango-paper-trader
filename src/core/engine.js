@@ -207,6 +207,22 @@
     return { state: nextState, trade, position: nextState.positions[key] || null };
   }
 
+  function executeCloseAll(state, orders, settings, now = Date.now()) {
+    let nextState = state;
+    const trades = [];
+    const failures = [];
+    for (const order of orders || []) {
+      try {
+        const result = executeSell(nextState, { ...order, percent: 100 }, settings, now);
+        nextState = result.state;
+        trades.push(result.trade);
+      } catch (error) {
+        failures.push({ order, reason: error?.message || 'invalidQuote' });
+      }
+    }
+    return { state: nextState, trades, failures };
+  }
+
   function markPosition(position, quote) {
     const priceUsd = quote ? effectiveQuotePrice(quote, position) : Number(position.lastPriceUsd || position.averageEntryPriceUsd || 0);
     const solPriceUsd = Number(quote?.solPriceUsd || position.lastSolPriceUsd || 1);
@@ -291,7 +307,7 @@
   }
 
   Tango.Engine = {
-    round, positionKey, validateQuote, executeBuy, executeSell, markPosition,
+    round, positionKey, validateQuote, executeBuy, executeSell, executeCloseAll, markPosition,
     portfolioSummary, updatePositionQuote, breakevenSellPercent
   };
 

@@ -98,10 +98,10 @@
   right: 18px;
   top: 50%;
   transform: translateY(-50%);
-  width: 380px;
+  width: 396px;
 }
 .tango-panel.collapsed { height: 48px; overflow: hidden; }
-.tango-header { align-items: center; border-bottom: 1px solid var(--line); cursor: move; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 0; min-height: 50px; padding: 9px 12px; touch-action: none; }
+.tango-header { align-items: center; background: linear-gradient(90deg,rgba(155,124,255,.08),transparent 45%); border-bottom: 1px solid var(--line); cursor: move; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 0; min-height: 52px; padding: 9px 12px; touch-action: none; }
 .tango-header-actions { display: flex; flex-shrink: 0; gap: 6px; }
 .tango-token { align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; display: flex; gap: 10px; margin-bottom: 10px; padding: 10px; }
 .tango-token-logo { align-items: center; background: linear-gradient(135deg,var(--brand),#3a1c85); border-radius: 50%; display: flex; font-weight: 800; height: 36px; justify-content: center; overflow: hidden; width: 36px; }
@@ -120,7 +120,7 @@
 .tango-section { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
 .tango-section-title { align-items: center; display: flex; font-size: 11px; font-weight: 800; justify-content: space-between; letter-spacing: .06em; margin-bottom: 7px; }
 .tango-preset-grid { display: grid; gap: 5px; grid-template-columns: repeat(4,1fr); }
-.tango-button { background: rgba(255,255,255,.05); padding: 7px 5px; }
+.tango-button { background: rgba(255,255,255,.05); min-height: 31px; padding: 7px 5px; }
 .tango-button:hover { background: rgba(155,124,255,.18); border-color: rgba(155,124,255,.45); }
 .tango-button.primary { background: linear-gradient(135deg,var(--brand),var(--brand-2)); border: 0; font-weight: 800; margin-top: 8px; padding: 10px; width: 100%; }
 .tango-button.sell { background: linear-gradient(135deg,#ff647c,#c73755); }
@@ -137,10 +137,18 @@
   padding: 14px;
   position: fixed;
   right: 0;
-  width: 420px;
+  width: 438px;
 }
 .tango-drawer.hidden { display: none; }
 .tango-drawer-header { align-items: center; cursor: move; display: flex; justify-content: space-between; margin: -4px -2px 10px; padding: 4px 2px 8px; touch-action: none; }
+.tango-drawer-actions { align-items: center; display: flex; gap: 7px; }
+.tango-close-all { border-color: rgba(255,100,124,.42); color: #ff92a2; font-size: 11px; font-weight: 800; min-height: 30px; padding: 5px 9px; }
+.tango-close-all:hover { background: rgba(255,100,124,.12); border-color: rgba(255,100,124,.7); }
+.tango-close-all:disabled { cursor: not-allowed; opacity: .45; }
+.tango-position-total { align-items: end; background: linear-gradient(135deg,rgba(155,124,255,.16),rgba(62,230,160,.07)); border: 1px solid rgba(155,124,255,.32); border-radius: 11px; display: grid; grid-template-columns: 1fr auto; margin-bottom: 12px; padding: 11px 12px; }
+.tango-position-total span { color: #cbbfff; font-size: 10px; font-weight: 800; grid-column: 1; }
+.tango-position-total strong { color: #72f0bd; font-size: 19px; font-weight: 900; grid-column: 1; }
+.tango-position-total small { color: var(--muted); font-size: 10px; grid-column: 2; grid-row: 1 / span 2; }
 .tango-position { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; margin: 9px 0; padding: 11px; }
 .tango-row { align-items: center; display: flex; justify-content: space-between; gap: 8px; }
 .tango-position-title { font-size: 14px; font-weight: 800; }
@@ -176,7 +184,7 @@
 .tango-balance-options { display: grid; gap: 6px; grid-template-columns: repeat(3,1fr); }
 .tango-language { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; margin-top: 8px; }
 
-.tango-trade-body { padding: 0 14px 13px; }
+.tango-trade-body { background: linear-gradient(180deg,rgba(255,255,255,.012),transparent 38%); padding: 0 15px 14px; }
 .tango-trade-block { padding: 12px 0 11px; }
 .tango-trade-block + .tango-trade-block { border-top: 1px solid var(--line); }
 .tango-trade-title { align-items: center; display: flex; font-weight: 800; gap: 9px; margin-bottom: 10px; }
@@ -223,9 +231,32 @@
 .tango-bottom-details { color: var(--muted); display: grid; font-size: 9px; gap: 5px; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 1px 2px 4px; text-align: center; }
 .tango-bottom-details span { min-width: 0; white-space: nowrap; }
 .tango-bottom-details strong { color: #c9cbd3; font-size: 9px; }
+
+.tango-calendar { border-radius: 14px; max-height: calc(100vh - 130px); overflow: auto; padding: 14px; position: fixed; right: 18px; top: 96px; width: 430px; }
+.tango-calendar-header,.tango-calendar-header > div,.tango-calendar-nav { align-items: center; display: flex; }
+.tango-calendar-header { border-bottom: 1px solid var(--line); justify-content: space-between; margin: -2px -2px 12px; padding: 2px 2px 10px; }
+.tango-calendar-header > div { gap: 8px; }
+.tango-calendar-header strong { font-size: 14px; }
+.tango-calendar-summary { display: grid; gap: 8px; grid-template-columns: 1.5fr 1fr; margin-bottom: 12px; }
+.tango-calendar-summary > div { background: rgba(255,255,255,.035); border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; }
+.tango-calendar-summary span { color: var(--muted); display: block; font-size: 9px; margin-bottom: 3px; }
+.tango-calendar-summary strong { font-size: 16px; }
+.tango-calendar-nav { justify-content: space-between; margin-bottom: 9px; }
+.tango-calendar-nav strong { font-size: 12px; }
+.tango-calendar-grid { display: grid; gap: 5px; grid-template-columns: repeat(7,minmax(0,1fr)); }
+.tango-calendar-label { color: var(--muted); font-size: 9px; padding: 3px; text-align: center; }
+.tango-calendar-empty { min-height: 49px; }
+.tango-calendar-day { background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 7px; display: grid; min-height: 49px; padding: 5px; }
+.tango-calendar-day > span { color: var(--muted); font-size: 9px; }
+.tango-calendar-day strong { align-self: end; font-size: 9px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.tango-calendar-day.win { background: rgba(62,230,160,.08); border-color: rgba(62,230,160,.25); }
+.tango-calendar-day.loss { background: rgba(255,100,124,.08); border-color: rgba(255,100,124,.25); }
+.tango-calendar-day.today { box-shadow: inset 0 0 0 1px var(--brand); }
+.tango-calendar-dashboard { border-color: rgba(155,124,255,.38); color: #cbbfff; font-weight: 800; margin-top: 11px; width: 100%; }
 @media (max-width: 760px) {
-  .tango-panel { right: 8px; width: min(380px,calc(100vw - 16px)); }
+  .tango-panel { right: 8px; width: min(396px,calc(100vw - 16px)); }
   .tango-bar .tango-stat.optional { display: none; }
   .tango-bar { min-width: 0; width: calc(100vw - 16px); }
   .tango-drawer { width: min(360px,100vw); }
+  .tango-calendar { right: 8px; top: 72px; width: min(430px,calc(100vw - 16px)); }
 }

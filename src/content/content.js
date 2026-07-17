@@ -8,7 +8,9 @@
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
     presetEditing: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
     solPriceUsd: 0, solPricePromise: null, quoteRequests: new Map(), quoteRetryAt: new Map(),
-    gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null
+    gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
+    markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
+    calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   };
 
   const host = document.createElement('div');
@@ -21,8 +23,13 @@
   shell.className = 'tango-shell';
   shadow.append(stylesheet, shell);
   document.documentElement.appendChild(host);
+  shell.addEventListener('pointerdown', () => { runtime.interactionUntil = Date.now() + 500; }, true);
 
   window.addEventListener('message', (event) => {
+    if (event.data?.source === 'TANGO_PAPER_CHART' && event.data?.type === 'READY') {
+      syncChartMarkers();
+      return;
+    }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
     (event.data.quotes || []).forEach((quote) => {
       if (!quote?.address) return;
@@ -74,6 +81,11 @@
 
   function queueRender() {
     if (runtime.renderQueued) return;
+    if (Date.now() < runtime.interactionUntil) {
+      clearTimeout(runtime.renderDeferralTimer);
+      runtime.renderDeferralTimer = setTimeout(queueRender, Math.max(20, runtime.interactionUntil - Date.now()));
+      return;
+    }
     runtime.renderQueued = true;
     requestAnimationFrame(() => { runtime.renderQueued = false; render(); });
   }
@@ -196,7 +208,9 @@
   }
 
   function openPosition(position) {
-    location.href = positionUrl(position);
+    chrome.runtime.sendMessage({ type: 'TANGO_OPEN_TOKEN', url: positionUrl(position) })
+      .then((response) => { if (!response?.ok) showToast(t('openTokenFailed'), 'error'); })
+      .catch(() => showToast(t('openTokenFailed'), 'error'));
   }
 
   async function handleQuickBuy(context) {
@@ -261,6 +275,8 @@
   }
 
   async function commitBuy(order) {
+    if (runtime.tradePending) return;
+    runtime.tradePending = true;
     try {
       const result = Tango.Engine.executeBuy(runtime.state, order, runtime.settings);
       runtime.state = result.state;
@@ -269,6 +285,7 @@
       playTradeSound('BUY');
       showToast(`${t('buySuccess')} · ${Tango.Format.sol(order.amountSol, language())} ${order.token.symbol}`, 'success');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
+    finally { runtime.tradePending = false; }
   }
 
   async function sell(percent, context = runtime.current) {
@@ -302,6 +319,8 @@
   }
 
   async function commitSell(order) {
+    if (runtime.tradePending) return;
+    runtime.tradePending = true;
     try {
       const result = Tango.Engine.executeSell(runtime.state, order, runtime.settings);
       runtime.state = result.state;
@@ -310,6 +329,48 @@
       playTradeSound('SELL');
       showToast(`${t('sellSuccess')} · ${order.percent}% ${order.token.symbol}`, 'success');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
+    finally { runtime.tradePending = false; }
+  }
+
+  function requestCloseAll() {
+    const positions = Object.values(runtime.state.positions || {});
+    if (!positions.length) return showToast(t('noPositions'), 'error');
+    const summary = Tango.Engine.portfolioSummary(runtime.state);
+    runtime.modal = {
+      type: 'confirm', title: t('closeAllConfirm'),
+      rows: [[t('positions'), positions.length], [t('positionTotal'), accountMoney(summary.positionsValueSol)]],
+      note: t('closeAllHint'),
+      action: commitCloseAll
+    };
+    render();
+  }
+
+  async function commitCloseAll() {
+    if (runtime.tradePending) return;
+    runtime.tradePending = true;
+    try {
+      const orders = Object.values(runtime.state.positions || {}).map((position) => {
+        const currentMatches = runtime.current?.token?.address?.toLowerCase() === position.tokenAddress.toLowerCase();
+        const liveQuote = currentMatches && Tango.Engine.validateQuote(runtime.current?.quote).ok ? runtime.current.quote : null;
+        const quote = liveQuote || {
+          priceUsd: position.lastPriceUsd, marketCapUsd: position.lastMarketCapUsd,
+          solPriceUsd: position.lastSolPriceUsd, observedAt: Date.now()
+        };
+        return {
+          token: { chain: position.chain, address: position.tokenAddress, symbol: position.symbol },
+          quote: { ...quote, observedAt: Date.now() }, sourceUrl: location.href
+        };
+      });
+      const result = Tango.Engine.executeCloseAll(runtime.state, orders, runtime.settings);
+      runtime.state = result.state;
+      runtime.modal = null;
+      await Tango.Store.saveState(runtime.state);
+      const closed = result.trades.length;
+      if (closed) {
+        playTradeSound('SELL');
+        showToast(`${t('closeAllSuccess')} · ${closed}`, 'success');
+      } else showToast(t('invalidQuote'), 'error');
+    } finally { runtime.tradePending = false; }
   }
 
   async function sellBreakeven() {
@@ -393,6 +454,40 @@
     </div>`;
   }
 
+  function calendarDateKey(year, month, day) {
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  function renderPnlCalendar() {
+    if (!runtime.calendarOpen) return '';
+    const date = runtime.calendarMonth;
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const days = new Date(year, month + 1, 0).getDate();
+    const firstDay = new Date(year, month, 1).getDay();
+    const today = new Date();
+    const labels = Array.from({ length: 7 }, (_, index) => new Date(2023, 0, index + 1)
+      .toLocaleDateString(language(), { weekday: 'narrow' }));
+    const cells = Array.from({ length: firstDay }, () => '<span class="tango-calendar-empty"></span>');
+    let monthPnl = 0;
+    let activeDays = 0;
+    for (let day = 1; day <= days; day += 1) {
+      const key = calendarDateKey(year, month, day);
+      const pnl = Number(runtime.state.dailyRealized?.[key] || 0);
+      monthPnl += pnl;
+      if (pnl !== 0) activeDays += 1;
+      const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+      cells.push(`<div class="tango-calendar-day ${pnl > 0 ? 'win' : pnl < 0 ? 'loss' : ''} ${isToday ? 'today' : ''}"><span>${day}</span><strong class="${pnlClass(pnl)}">${pnl ? accountMoney(pnl, true) : '—'}</strong></div>`);
+    }
+    return `<div class="tango-calendar tango-card">
+      <div class="tango-calendar-header"><div><span class="tango-paper-badge">${t('paper')}</span><strong>${t('pnlCalendar')}</strong></div><button class="tango-icon-button" data-action="close-calendar">×</button></div>
+      <div class="tango-calendar-summary"><div><span>${t('totalPnl')}</span><strong class="${pnlClass(monthPnl)}">${accountMoney(monthPnl, true)}</strong></div><div><span>${t('date')}</span><strong>${activeDays}</strong></div></div>
+      <div class="tango-calendar-nav"><button class="tango-icon-button" data-action="calendar-prev">‹</button><strong>${date.toLocaleDateString(language(), { year: 'numeric', month: 'long' })}</strong><button class="tango-icon-button" data-action="calendar-next">›</button></div>
+      <div class="tango-calendar-grid">${labels.map((label) => `<span class="tango-calendar-label">${esc(label)}</span>`).join('')}${cells.join('')}</div>
+      <button class="tango-button tango-calendar-dashboard" data-action="dashboard-calendar">${t('openDashboard')} · ${t('pnlCalendar')} ↗</button>
+    </div>`;
+  }
+
   function clearHeaderAccountSummary() {
     const node = document.querySelector('#tango-header-account-summary');
     node?.parentElement?.classList.remove('tango-wallet-summary-anchor');
@@ -407,13 +502,15 @@
       [data-testid="wallet-connected"].tango-wallet-summary-anchor { overflow: visible !important; position: relative !important; }
       #tango-header-account-summary {
         align-items: center; background: rgba(12,13,18,.96); border: 1px solid rgba(155,124,255,.34);
-        border-radius: 6px; color: #aeb1bd; display: flex; font: 600 11px/22px Inter,ui-sans-serif,system-ui,sans-serif;
-        gap: 8px; padding: 3px 8px; pointer-events: none; position: absolute; right: 0;
+        border-radius: 8px; color: #aeb1bd; cursor: pointer; display: flex; font: 650 12px/24px Inter,ui-sans-serif,system-ui,sans-serif;
+        gap: 8px; padding: 4px 9px; pointer-events: auto; position: absolute; right: 0;
         top: calc(100% + 2px); white-space: nowrap; width: max-content; z-index: 80;
       }
-      #tango-header-account-summary strong { color: #f4f1ff; font-size: 12px; font-weight: 800; }
+      #tango-header-account-summary:hover { background: rgba(25,22,39,.98); border-color: rgba(155,124,255,.65); }
+      #tango-header-account-summary strong { color: #72f0bd; font-size: 14px; font-weight: 900; }
       #tango-header-account-summary i { background: rgba(255,255,255,.12); height: 13px; width: 1px; }
-      #tango-header-account-summary .tango-header-paper-badge { color: #bcaaff; font-size: 9px; font-weight: 800; letter-spacing: .04em; }
+      #tango-header-account-summary .tango-header-paper-badge { color: #c9bcff; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
+      #tango-header-account-summary .tango-header-calendar-link { color: #d8d0ff; font-size: 11px; font-weight: 800; }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -433,9 +530,17 @@
     if (node.parentElement !== wallet) wallet.appendChild(node);
     wallet.classList.add('tango-wallet-summary-anchor');
     const cash = Tango.Format.sol(summary.cashBalanceSol, language());
-    const equity = Tango.Format.sol(summary.equitySol, language());
-    const markup = `<span class="tango-header-paper-badge">${esc(t('paper'))}</span><span>${esc(t('paperBalance'))} <strong>${esc(cash)}</strong></span><i></i><span>${esc(t('totalAssets'))} <strong>${esc(equity)}</strong></span>`;
+    const markup = `<span class="tango-header-paper-badge">${esc(t('paper'))}</span><span>${esc(t('paperBalance'))} <strong>${esc(cash)}</strong></span><i></i><span class="tango-header-calendar-link">▦ ${esc(t('pnlCalendar'))}</span>`;
     if (node.innerHTML !== markup) node.innerHTML = markup;
+    node.setAttribute('role', 'button');
+    node.setAttribute('tabindex', '0');
+    node.title = t('pnlCalendar');
+    node.onpointerdown = (event) => event.stopPropagation();
+    node.onclick = (event) => { event.preventDefault(); event.stopPropagation(); runtime.calendarOpen = !runtime.calendarOpen; render(); };
+    node.onkeydown = (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault(); runtime.calendarOpen = !runtime.calendarOpen; render();
+    };
   }
 
   function renderPresetGrid(side, values) {
@@ -524,14 +629,16 @@
   function renderDrawer() {
     if (!runtime.drawerOpen) return '';
     const positions = Object.values(runtime.state.positions || {});
+    const summary = Tango.Engine.portfolioSummary(runtime.state);
     return `<div class="tango-drawer tango-card" style="${floatingStyle(runtime.settings.drawerPosition)}">
-      <div class="tango-drawer-header" data-drawer-drag><div class="tango-brand"><span class="tango-dot"></span>${t('openPositions')}</div><button class="tango-icon-button" data-action="toggle-drawer">✕</button></div>
+      <div class="tango-drawer-header" data-drawer-drag><div class="tango-brand"><span class="tango-dot"></span>${t('openPositions')}</div><div class="tango-drawer-actions"><button class="tango-button tango-close-all" data-action="close-all" ${positions.length ? '' : 'disabled'}>${t('closeAll')}</button><button class="tango-icon-button" data-action="toggle-drawer">✕</button></div></div>
+      <div class="tango-position-total"><span>${t('positionTotal')}</span><strong>${accountMoney(summary.positionsValueSol)}</strong><small>${positions.length} ${t('positions')}</small></div>
       ${positions.length ? positions.map((position) => {
         const currentMatches = runtime.current?.token?.address?.toLowerCase() === position.tokenAddress.toLowerCase();
         const hasLiveQuote = currentMatches && Tango.Engine.validateQuote(runtime.current?.quote).ok;
         const mark = Tango.Engine.markPosition(position, hasLiveQuote ? runtime.current.quote : null);
         return `<div class="tango-position">
-          <div class="tango-row"><button class="tango-position-link" data-position-open data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}" title="${t('openToken')}">${position.logoUrl ? `<img src="${esc(position.logoUrl)}" alt="">` : `<span class="tango-position-fallback">${esc(position.symbol.slice(0, 1))}</span>`}<span><strong>${esc(position.symbol)}</strong><small>${esc(position.name || position.tokenAddress.slice(0, 8))}</small></span></button><strong class="${pnlClass(mark.unrealizedPnlSol)}">${accountMoney(mark.unrealizedPnlSol, true)} · ${Tango.Format.percent(mark.roi, language(), true)}</strong></div>
+          <div class="tango-row"><button class="tango-position-link" data-position-open data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}" title="${t('openToken')}">${position.logoUrl ? `<img src="${esc(position.logoUrl)}" alt="">` : `<span class="tango-position-fallback">${esc(position.symbol.slice(0, 1))}</span>`}<span><strong>${esc(position.symbol)} ↗</strong><small>${esc(position.name || position.tokenAddress.slice(0, 8))}</small></span></button><strong class="${pnlClass(mark.unrealizedPnlSol)}">${accountMoney(mark.unrealizedPnlSol, true)} · ${Tango.Format.percent(mark.roi, language(), true)}</strong></div>
           <div class="tango-position-meta"><span>${t('value')} ${accountMoney(mark.valueSol)}</span><span>${t('cost')} ${accountMoney(position.costBasisSol)}</span><span>${t('held')} ${Tango.Format.duration(Date.now()-position.openedAt, language())}</span></div>
           <div class="tango-mini-actions">
             <button class="tango-button sell-position" data-position-sell="25" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}">25%</button>
@@ -574,16 +681,17 @@
   }
 
   function syncChartMarkers() {
-    const frame = document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe');
-    frame?.contentWindow?.postMessage({
-      source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: chartMarkerPayload()
-    }, '*');
+    const payload = chartMarkerPayload();
+    document.querySelectorAll('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe').forEach((frame) => {
+      frame.contentWindow?.postMessage({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload }, '*');
+    });
   }
 
   function renderModal() {
     if (!runtime.modal) return '';
     return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3>
       <div class="tango-confirm-list">${runtime.modal.rows.map(([label,value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
+      ${runtime.modal.note ? `<div class="tango-warning">${esc(runtime.modal.note)}</div>` : ''}
       ${runtime.modal.allowSessionSuppress ? `<label class="tango-session-confirm"><input id="tango-skip-session-confirm" type="checkbox"><span>${t('skipConfirmSession')}</span></label>` : ''}
       <div class="tango-modal-actions"><button class="tango-button" data-action="cancel-modal">${t('cancel')}</button><button class="tango-button primary" data-action="confirm-modal">${t('confirm')}</button></div>
     </div></div>`;
@@ -598,7 +706,7 @@
     }
     const summary = Tango.Engine.portfolioSummary(runtime.state);
     renderHeaderAccountSummary(summary);
-    shell.innerHTML = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
+    shell.innerHTML = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     bindEvents();
     syncChartMarkers();
   }
@@ -625,8 +733,17 @@
           .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
           .catch(() => showToast(t('openDashboardFailed'), 'error'));
       }
+      if (action === 'dashboard-calendar') {
+        chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD', tab: 'calendar' })
+          .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
+          .catch(() => showToast(t('openDashboardFailed'), 'error'));
+      }
       if (action === 'toggle-sound') { runtime.settings.soundEnabled = !runtime.settings.soundEnabled; await Tango.Store.saveSettings(runtime.settings); render(); }
       if (action === 'breakeven') await sellBreakeven();
+      if (action === 'close-all') requestCloseAll();
+      if (action === 'close-calendar') { runtime.calendarOpen = false; render(); }
+      if (action === 'calendar-prev') { runtime.calendarMonth = new Date(runtime.calendarMonth.getFullYear(), runtime.calendarMonth.getMonth() - 1, 1); render(); }
+      if (action === 'calendar-next') { runtime.calendarMonth = new Date(runtime.calendarMonth.getFullYear(), runtime.calendarMonth.getMonth() + 1, 1); render(); }
       if (action === 'edit-presets') { runtime.presetEditing = 'all'; render(); }
       if (action === 'save-presets') await savePresetEdits();
       if (action === 'cancel-modal') { runtime.modal = null; render(); }
@@ -691,6 +808,7 @@
     await refresh();
     await tickQuote();
     runtime.quoteTimer = setInterval(tickQuote, 3000);
+    runtime.markerTimer = setInterval(syncChartMarkers, 1000);
     runtime.routeTimer = setInterval(() => {
       if (location.href === runtime.lastUrl) return;
       runtime.lastUrl = location.href;

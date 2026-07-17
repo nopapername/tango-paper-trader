@@ -2,7 +2,8 @@
   const Tango = global.Tango;
   const app = document.querySelector('#app');
   const fileInput = document.querySelector('#import-file');
-  const runtime = { state: null, settings: null, tab: 'overview', month: new Date(), filters: { search: '', side: 'ALL', result: 'ALL', date: '' }, toast: '', solPriceUsd: 0 };
+  const initialTab = ['overview', 'positions', 'history', 'calendar', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+  const runtime = { state: null, settings: null, tab: initialTab, month: new Date(), filters: { search: '', side: 'ALL', result: 'ALL', date: '' }, toast: '', solPriceUsd: 0 };
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   const lang = () => Tango.I18n.resolveLanguage(runtime.settings?.language);
   const t = (key) => Tango.I18n.t(key, runtime.settings?.language);

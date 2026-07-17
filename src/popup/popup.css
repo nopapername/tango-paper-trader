@@ -39,3 +39,4 @@ body{background:var(--bg);color:var(--text);margin:0;width:360px}
 .account-settings[open]{padding-bottom:11px}
 .account-settings .field{margin-top:2px}
 .account-settings .reset-balance{margin-top:0}
+.reset-note{color:#ffbd75;display:block;font-size:10px;line-height:1.45;margin-top:7px}

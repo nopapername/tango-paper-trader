@@ -9,7 +9,10 @@
   const labelsByCanvas = new Map();
   const canvasIds = new WeakMap();
   const canvasRects = new WeakMap();
+  const canvasClearedAt = new WeakMap();
+  const canvasConsumedClearAt = new WeakMap();
   let nextCanvasId = 1;
+  let clearSequence = 0;
   let markerState = null;
   let overlay = null;
   let lastScaleMode = null;
@@ -57,7 +60,12 @@
     const clientY = rect.top + point.y * rect.height / Math.max(1, canvas.height);
     if (!(clientX > innerWidth - 180) || clientY < 35 || clientY > innerHeight - 55) return;
     const id = canvasId(canvas);
-    const records = labelsByCanvas.get(id) || new Map();
+    const clearedAt = canvasClearedAt.get(canvas) || 0;
+    let records = labelsByCanvas.get(id) || new Map();
+    if (clearedAt && canvasConsumedClearAt.get(canvas) !== clearedAt) {
+      records = new Map();
+      canvasConsumedClearAt.set(canvas, clearedAt);
+    }
     records.set(String(text), {
       text: String(text), value, y: clientY, x: clientX, id, updatedAt: Date.now()
     });
@@ -82,6 +90,9 @@
       return originalStrokeText.call(this, text, x, y, ...rest);
     };
     proto.clearRect = function tangoClearRect(x, y, width, height) {
+      if (this.canvas && Number(width) * Number(height) > this.canvas.width * this.canvas.height * 0.45) {
+        canvasClearedAt.set(this.canvas, ++clearSequence);
+      }
       return originalClearRect.call(this, x, y, width, height);
     };
   }
@@ -135,7 +146,7 @@
     const groups = [...labelsByCanvas.values()].map((records) => [...records.values()])
       .map((points) => {
         const deduped = new Map();
-        points.filter((point) => Date.now() - point.updatedAt < 2_500).forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
+        points.filter((point) => Date.now() - point.updatedAt < 120_000).forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
         return [...deduped.values()].sort((a, b) => a.y - b.y);
       }).filter((points) => points.length >= 3 && new Set(points.map((point) => point.value)).size >= 3);
     const modes = [];
@@ -155,7 +166,7 @@
       candidates.push({ ...mode, points, fit, score });
     }));
     const best = candidates.sort((a, b) => a.score - b.score)[0];
-    if (!best || best.score >= 1.6) return null;
+    if (!best || best.score >= 1.6) return stableScale;
     const previous = lastScaleMode && candidates.find((candidate) =>
       candidate.type === lastScaleMode.type && candidate.factor === lastScaleMode.factor && candidate.score < 1.6
     );
@@ -263,6 +274,7 @@
     markerState = nextState;
     renderMarkers();
   });
+  window.parent.postMessage({ source: 'TANGO_PAPER_CHART', type: 'READY' }, '*');
   window.addEventListener('resize', () => {
     stableScale = null;
     stableSignature = '';

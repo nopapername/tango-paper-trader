@@ -48,6 +48,22 @@ test('full sell removes position and updates daily realized pnl', () => {
   assert.ok(Object.values(sold.state.dailyRealized).some((value) => value !== 0));
 });
 
+test('close all settles every valid position and keeps calendar pnl consistent', () => {
+  const otherToken = { ...token, address: 'TokenAddress222', symbol: 'OTHER' };
+  const first = Engine.executeBuy(state(), { token, quote, amountSol: 5 }, settings, 1_000);
+  const second = Engine.executeBuy(first.state, { token: otherToken, quote, amountSol: 5 }, settings, 1_100);
+  const closeQuote = { ...quote, priceUsd: 3, marketCapUsd: 3_000_000, observedAt: 2_000 };
+  const result = Engine.executeCloseAll(second.state, [
+    { token, quote: closeQuote },
+    { token: otherToken, quote: closeQuote }
+  ], settings, 2_000);
+  assert.equal(Object.keys(result.state.positions).length, 0);
+  assert.equal(result.trades.length, 2);
+  assert.equal(result.failures.length, 0);
+  assert.equal(Object.values(result.state.dailyRealized).length, 1);
+  assert.ok(result.state.account.cashBalanceSol > second.state.account.cashBalanceSol);
+});
+
 test('stale and invalid quotes are rejected', () => {
   assert.throws(() => Engine.executeBuy(state(), { token, quote: { ...quote, observedAt: 1 }, amountSol: 1 }, settings, 50_000), /staleQuote/);
   assert.throws(() => Engine.executeBuy(state(), { token, quote: { priceUsd: 0, observedAt: 1_000 }, amountSol: 1 }, settings, 1_000), /invalidQuote/);

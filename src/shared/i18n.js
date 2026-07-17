@@ -25,8 +25,8 @@
       amount: 'Amount', date: 'Date', noTrades: 'No paper trades yet', noPositions: 'No open positions',
       welcome: 'Practice meme trading on real GMGN charts', startingBalance: 'Starting Balance',
       startPaperTrading: 'Start Paper Trading', paperOnly: 'No wallet. No real funds.',
-      resetWarning: 'This permanently deletes all local paper trades and positions.',
-      resetConfirm: 'Reset all paper trading data?', dataImported: 'Data imported', importFailed: 'Invalid backup file',
+      resetWarning: 'This permanently deletes all local paper trades, positions, and PnL calendar records.',
+      resetConfirm: 'Reset the account and clear all trades, positions, and PnL calendar records?', dataImported: 'Data imported', importFailed: 'Invalid backup file',
       share: 'Share', downloadPng: 'Download PNG', copyImage: 'Copy image', simulatedTrade: 'SIMULATED TRADE · NO REAL FUNDS',
       gmgnOnly: 'Open a GMGN Solana token page to paper trade.', auto: 'Auto', chinese: '简体中文', english: 'English',
       safe: 'Safe', advanced: 'Advanced', closed: 'Closed', totalBuy: 'Total Buy', totalSell: 'Total Sell',
@@ -39,10 +39,13 @@
       customBalance: 'Custom balance', buySuccess: 'Paper buy successful', sellSuccess: 'Paper sell successful',
       sound: 'Trade sounds', setupInPopup: 'Open the Tango extension popup to finish setup.',
       accountSettings: 'Language & paper principal', resetWithBalance: 'Reset with this balance',
-      resetBalanceConfirm: 'Reset the paper account and delete all trades?', openDashboardFailed: 'Could not open the dashboard',
+      resetBalanceConfirm: 'Reset the paper principal and clear all trades, positions, and PnL calendar records?', openDashboardFailed: 'Could not open the dashboard', openTokenFailed: 'Could not open the GMGN token tab',
       dragToMove: 'Drag to move', openToken: 'Open token on GMGN', clickForPositions: 'Click to view positions', hideChartLine: 'Hide paper trade line',
       quoteLoading: 'Quote is updating. Please try again.',
-      lastKnownPrice: 'This page cannot read the token’s live GMGN price. A sell will use the most recently recorded price.'
+      lastKnownPrice: 'This page cannot read the token’s live GMGN price. A sell will use the most recently recorded price.',
+      pnlCalendar: 'PnL Calendar', positionTotal: 'Position Total', closeAll: 'Close All',
+      closeAllConfirm: 'Close all paper positions?', closeAllHint: 'Positions without a live quote will use their latest recorded price.',
+      closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
       paper: '模拟盘', paperBuy: '虚拟买入', paperSell: '虚拟卖出', balance: '虚拟余额', equity: '账户净值', todayPnl: '今日盈亏',
@@ -67,8 +70,8 @@
       amount: '金额', date: '日期', noTrades: '暂无模拟交易', noPositions: '暂无持仓',
       welcome: '在真实 GMGN 行情中练习 Meme 交易', startingBalance: '初始虚拟余额',
       startPaperTrading: '开始模拟交易', paperOnly: '无需钱包，不动真金',
-      resetWarning: '此操作会永久删除本地模拟交易和持仓。',
-      resetConfirm: '确认重置全部模拟交易数据？', dataImported: '数据导入成功', importFailed: '备份文件无效',
+      resetWarning: '此操作会永久删除本地模拟交易、持仓和盈亏日历记录。',
+      resetConfirm: '确认重置账户并清空全部交易、持仓和盈亏日历记录？', dataImported: '数据导入成功', importFailed: '备份文件无效',
       share: '分享', downloadPng: '下载 PNG', copyImage: '复制图片', simulatedTrade: '模拟交易 · 无真实资金',
       gmgnOnly: '请打开 GMGN Solana 代币页面进行模拟交易。', auto: '自动', chinese: '简体中文', english: 'English',
       safe: '安全', advanced: '高级', closed: '关闭', totalBuy: '总买入', totalSell: '总卖出',
@@ -81,10 +84,13 @@
       customBalance: '自定义本金', buySuccess: '模拟买入成功', sellSuccess: '模拟卖出成功',
       sound: '交易提示音', setupInPopup: '请点击浏览器工具栏中的 Tango 扩展完成首次设置。',
       accountSettings: '语言与虚拟本金', resetWithBalance: '按此本金重置账户',
-      resetBalanceConfirm: '确定重置虚拟账户并删除所有交易记录吗？', openDashboardFailed: '无法打开数据面板',
+      resetBalanceConfirm: '确定重置虚拟本金并清空全部交易、持仓和盈亏日历记录吗？', openDashboardFailed: '无法打开数据面板', openTokenFailed: '无法打开 GMGN 代币新标签页',
       dragToMove: '拖拽移动', openToken: '在 GMGN 打开此代币', clickForPositions: '点击查看持仓', hideChartLine: '隐藏虚拟交易横线',
       quoteLoading: '行情正在更新，请稍后重试。',
-      lastKnownPrice: '当前页面无法读取该代币的 GMGN 实时价格；卖出将按最近记录价格模拟成交。'
+      lastKnownPrice: '当前页面无法读取该代币的 GMGN 实时价格；卖出将按最近记录价格模拟成交。',
+      pnlCalendar: '盈亏日历', positionTotal: '持仓总额', closeAll: '一键清仓',
+      closeAllConfirm: '确认清仓全部虚拟持仓？', closeAllHint: '无法读取实时行情的持仓将按最近记录价格模拟平仓。',
+      closeAllSuccess: '全部虚拟持仓已清仓', calendarClearedOnReset: '重置本金会同时清空盈亏日历'
     }
   };
 

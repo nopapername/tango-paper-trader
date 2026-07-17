@@ -38,6 +38,7 @@
           <label class="field"><span>${t('language')}</span><select id="account-language"><option value="zh-CN" ${language() === 'zh-CN' ? 'selected' : ''}>简体中文</option><option value="en" ${language() === 'en' ? 'selected' : ''}>English</option></select></label>
           <label class="field"><span>${t('startingBalance')}</span><input class="input" id="reset-balance" type="number" min="0.01" step="0.01" value="${esc(settings.initialBalanceSol)}"></label>
           <button class="button secondary reset-balance" id="reset-balance-button">${t('resetWithBalance')}</button>
+          <small class="reset-note">${t('calendarClearedOnReset')}</small>
         </details>
         <button class="button" id="dashboard">${t('openDashboard')}</button><button class="button secondary" id="gmgn">GMGN ↗</button>
       </div>`;

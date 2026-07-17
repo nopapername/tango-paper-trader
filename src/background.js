@@ -3,7 +3,22 @@ const tokenQuoteCache = new Map();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'TANGO_OPEN_DASHBOARD') {
-    chrome.runtime.openOptionsPage()
+    const openDashboard = message.tab
+      ? chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard.html#${encodeURIComponent(message.tab)}`) })
+      : chrome.runtime.openOptionsPage();
+    openDashboard
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.type === 'TANGO_OPEN_TOKEN') {
+    let url;
+    try { url = new URL(String(message.url || '')); } catch { url = null; }
+    if (!url || url.origin !== 'https://gmgn.ai' || !/^\/sol\/token\//i.test(url.pathname)) {
+      sendResponse({ ok: false, error: 'Invalid GMGN token URL' });
+      return false;
+    }
+    chrome.tabs.create({ url: url.href })
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
