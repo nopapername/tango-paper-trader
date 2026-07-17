@@ -732,10 +732,9 @@
     return `left:${Math.max(0, position.x)}px;top:${Math.max(0, position.y)}px;right:auto;bottom:auto;transform:none;`;
   }
 
-  function renderDrawer() {
+  function renderDrawer(summary) {
     if (!runtime.drawerOpen) return '';
     const positions = Object.values(runtime.state.positions || {});
-    const summary = Tango.Engine.portfolioSummary(runtime.state);
     return `<div class="tango-drawer tango-card" style="${floatingStyle(runtime.settings.drawerPosition)}">
       <div class="tango-drawer-header" data-drawer-drag><div class="tango-brand"><span class="tango-dot"></span>${t('openPositions')}</div><div class="tango-drawer-actions"><button class="tango-button tango-close-all" data-action="close-all" ${positions.length ? '' : 'disabled'}>${t('closeAll')}</button><button class="tango-icon-button" data-action="toggle-drawer">✕</button></div></div>
       <div class="tango-position-total"><span>${t('positionTotal')}</span><strong>${accountMoney(summary.positionsValueSol)}</strong><small>${positions.length} ${t('positions')}</small></div>
@@ -758,38 +757,20 @@
 
   function chartMarkerPayload() {
     if (!runtime.current?.token) return { markers: [] };
-    const address = runtime.current.token.address.toLowerCase();
-    const tokenTrades = (runtime.state.trades || []).filter((trade) =>
-      trade.chain === runtime.current.token.chain && trade.tokenAddress.toLowerCase() === address && Number(trade.marketCapUsd) > 0
-    );
-    const position = currentPosition();
-    const currentPrice = Number(runtime.current.quote.priceUsd || 0);
-    const currentMarketCap = Number(runtime.current.quote.marketCapUsd || 0);
-    const priceAtMarketCap = (marketCap, recordedPrice = 0) => Number(recordedPrice) > 0
-      ? Number(recordedPrice)
-      : currentPrice > 0 && currentMarketCap > 0
-        ? currentPrice * Number(marketCap) / currentMarketCap
-        : 0;
-    const markers = [];
-    const entryMarketCap = Number(position?.averageEntryMarketCap || tokenTrades.find((trade) => trade.side === 'BUY')?.marketCapUsd || 0);
-    if (entryMarketCap > 0) markers.push({
-      id: `entry:${address}`, side: 'BUY', marketCap: entryMarketCap,
-      price: priceAtMarketCap(entryMarketCap, position?.averageEntryPriceUsd), label: t('paperBuy'), closeLabel: t('hideChartLine')
+    return Tango.Markers.buildPayload({
+      current: runtime.current,
+      position: currentPosition(),
+      trades: runtime.state.trades || [],
+      labels: { entry: t('paperBuy'), exit: t('paperSell'), hide: t('hideChartLine') }
     });
-    const latestSellTrades = tokenTrades.filter((trade) => trade.side === 'SELL').slice(0, 4);
-    latestSellTrades.forEach((trade) => {
-      markers.push({
-        id: `sell:${trade.id || `${trade.executedAt}:${trade.marketCapUsd}`}`, side: 'SELL', marketCap: Number(trade.marketCapUsd),
-        price: priceAtMarketCap(trade.marketCapUsd, trade.observedPriceUsd), label: t('paperSell'), closeLabel: t('hideChartLine')
-      });
-    });
-    return { tokenAddress: address, currentPrice, currentMarketCap, markers };
   }
 
   function syncChartMarkers(force = false) {
+    const frames = document.querySelectorAll('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe');
+    if (!frames.length) return;
     const payload = chartMarkerPayload();
     const signature = JSON.stringify(payload);
-    document.querySelectorAll('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe').forEach((frame) => {
+    frames.forEach((frame) => {
       if (!force && runtime.markerPayloads.get(frame) === signature) return;
       runtime.markerPayloads.set(frame, signature);
       frame.contentWindow?.postMessage({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload }, '*');
@@ -816,7 +797,7 @@
     }
     const summary = Tango.Engine.portfolioSummary(runtime.state);
     renderHeaderAccountSummary(summary);
-    const markup = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
+    const markup = `${renderBar(summary)}${renderPanel()}${renderDrawer(summary)}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     if (runtime.renderedMarkup !== markup) {
       shell.innerHTML = markup;
       runtime.renderedMarkup = markup;

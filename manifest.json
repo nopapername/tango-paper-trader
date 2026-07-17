@@ -38,6 +38,7 @@
         "src/core/engine.js",
         "src/core/storage.js",
         "src/adapters/gmgn.js",
+        "src/content/markers.js",
         "src/content/content.js"
       ],
       "run_at": "document_idle"
