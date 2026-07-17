@@ -183,6 +183,7 @@ test('detail scope prefers the current BaseInfoBar when another widget repeats t
     const detail = GMGN._findTokenDetailScope(address);
     assert.equal(detail.header, main.header);
     assert.equal(detail.bindingScope, main.container);
+    assert.equal(detail.identityScope, main.container);
   } finally {
     global.document = originalDocument;
   }
@@ -244,6 +245,29 @@ test('detail identity parses a combined title and accepts a numeric token symbol
   });
   assert.deepEqual(GMGN._detailTokenIdentity(scopeFor('80'), '5eAHabcdefghijkmnopqrstuvwxyz123456789pump'), {
     symbol: '80', name: '80'
+  });
+});
+
+test('detail identity reads the GMGN symbol and original name from the bound info row', () => {
+  const originalName = { textContent: 'Runner Exchange' };
+  const identityRow = {
+    querySelector(selector) {
+      return selector === '[translate="yes"]' ? originalName : null;
+    }
+  };
+  const symbolParent = { parentElement: identityRow };
+  const symbolNode = {
+    textContent: 'RE', parentElement: symbolParent,
+    getAttribute(attribute) { return attribute === 'data-symbol' ? 'RE' : null; }
+  };
+  const identityScope = {
+    querySelector(selector) {
+      if (selector === '[data-testid="token-detail-symbol"]') return symbolNode;
+      return null;
+    }
+  };
+  assert.deepEqual(GMGN._detailTokenIdentity(identityScope, '5eAHabcdefghijkmnopqrstuvwxyz123456789pump'), {
+    symbol: 'RE', name: 'Runner Exchange'
   });
 });
 

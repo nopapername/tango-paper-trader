@@ -198,7 +198,14 @@
   function findTokenDetailScope(address) {
     const findMatches = (headers) => {
       const directMatches = headers.filter((header) => elementHasTokenAddress(header, address));
-      if (directMatches.length === 1) return [{ header: directMatches[0], scope: directMatches[0], bindingScope: directMatches[0] }];
+      if (directMatches.length === 1) {
+        return [{
+          header: directMatches[0],
+          scope: directMatches[0],
+          identityScope: directMatches[0],
+          bindingScope: directMatches[0]
+        }];
+      }
       if (directMatches.length > 1) return [];
 
       const localMatches = [];
@@ -207,7 +214,7 @@
         for (let depth = 1; depth <= 5 && bindingScope; depth += 1, bindingScope = bindingScope.parentElement) {
           const addressNode = localDetailAddressEvidence(header, bindingScope, address);
           if (!addressNode) continue;
-          localMatches.push({ header, scope: header, bindingScope, addressNode });
+          localMatches.push({ header, scope: header, identityScope: bindingScope, bindingScope, addressNode });
           break;
         }
       }
@@ -243,10 +250,17 @@
   }
 
   function detailTokenIdentity(scope, address) {
-    const directSymbol = firstText([
+    const gmgnSymbolNode = scope?.querySelector?.('[data-testid="token-detail-symbol"]')
+      || scope?.querySelector?.('#token-base-symbol[data-symbol]');
+    const directSymbol = String(
+      gmgnSymbolNode?.getAttribute?.('data-symbol')
+      || gmgnSymbolNode?.textContent
+      || firstText([
       '[data-testid="token-symbol"]', '[data-token-symbol]', '[class*="token-symbol"]',
       '[class*="TokenSymbol"]'
-    ], scope)?.text;
+      ], scope)?.text
+      || ''
+    ).trim();
     const heading = firstText(['h1', 'h2'], scope)?.text;
     const title = String(directSymbol || heading || '').replace(/\s+/g, ' ').trim();
     if (!title || addressHintMatches(title, address)) return { symbol: 'TOKEN', name: 'Token' };
@@ -262,8 +276,11 @@
       }
     }
 
-    const explicitName = firstText([
-      '[data-testid="token-name"]', '[data-token-name]', '[class*="token-name"]', '[class*="TokenName"]'
+    const symbolRow = gmgnSymbolNode?.parentElement?.parentElement;
+    const originalName = firstText(['[translate="yes"]'], symbolRow)?.text;
+    const explicitName = originalName || firstText([
+      '[data-testid="token-detail-name"]', '[data-testid="token-name"]', '[data-token-name]',
+      '[class*="token-name"]', '[class*="TokenName"]'
     ], scope)?.text;
     const nameCandidate = String(explicitName || '').replace(/\s+/g, ' ').trim();
     if (nameCandidate && nameCandidate.length <= 100 && !addressHintMatches(nameCandidate, address)) {
@@ -296,18 +313,18 @@
     let detail = findTokenDetailScope(address);
     if (!detail) return null;
     if (detail.bindingScope !== detail.header) {
-      const firstIdentity = detailTokenIdentity(detail.header, address);
+      const firstIdentity = detailTokenIdentity(detail.identityScope || detail.scope, address);
       const firstFingerprint = `${firstIdentity.symbol}\u0000${firstIdentity.name}\u0000${tokenLogo(detail.header)}`;
       await new Promise((resolve) => setTimeout(resolve, 48));
       if (tokenAddressFromUrl() !== address || chainFromUrl() !== chain) return null;
       const confirmed = findTokenDetailScope(address);
       if (!confirmed) return null;
-      const confirmedIdentity = detailTokenIdentity(confirmed.header, address);
+      const confirmedIdentity = detailTokenIdentity(confirmed.identityScope || confirmed.scope, address);
       const confirmedFingerprint = `${confirmedIdentity.symbol}\u0000${confirmedIdentity.name}\u0000${tokenLogo(confirmed.header)}`;
       if (confirmedFingerprint !== firstFingerprint) return null;
       detail = confirmed;
     }
-    const identity = detailTokenIdentity(detail.scope, address);
+    const identity = detailTokenIdentity(detail.identityScope || detail.scope, address);
     const priceUsd = findPrice();
     const baseInfo = document.querySelector('[data-sentry-component="BaseInfoPriceView"]');
     const baseItems = baseInfo ? Array.from(baseInfo.querySelectorAll('[data-sentry-component="InfoItem"]')) : [];
