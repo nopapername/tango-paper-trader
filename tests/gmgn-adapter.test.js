@@ -26,6 +26,81 @@ test('extracts symbol and name from a trench title without opening token detail'
   assert.deepEqual(GMGN._tokenIdentityFromText(text), { symbol: 'Cogito', name: '我认为 ITS LITERALLY FINE' });
 });
 
+test('trench identity starts after the card address instead of avatar badge counts', () => {
+  const gayCard = '3\n3\n9W2o...pump\nC GAY\nC GAY\n47m\nMC\n$24.5K';
+  const rumpCard = '4\n4\nDgMN...pump\nRUMP Official Rump Coin\n5m\nMC\n$18K';
+  assert.deepEqual(GMGN._cardIdentityFromText(gayCard), { symbol: 'C', name: 'GAY' });
+  assert.deepEqual(GMGN._cardIdentityFromText(rumpCard), { symbol: 'RUMP', name: 'Official Rump Coin' });
+});
+
+test('a numeric token name remains valid when it appears after the card address', () => {
+  const text = '6\n6\nAbCd...pump\n80\n80\n1m\nMC\n$8K';
+  assert.deepEqual(GMGN._cardIdentityFromText(text), { symbol: '80', name: '80' });
+});
+
+test('detail address hints accept the matching abbreviated CA only', () => {
+  const address = '5eAHabcdefghijkmnopqrstuvwxyz123456789pump';
+  assert.equal(GMGN._addressHintMatches('5eAH...pump', address), true);
+  assert.equal(GMGN._addressHintMatches('9W2o...pump', address), false);
+});
+
+test('trench identity is bound to the expected CA when another truncated value appears first', () => {
+  const address = '5eAHabcdefghijkmnopqrstuvwxyz123456789pump';
+  const text = 'description...\n9W2o...pump\nWRONG Wrong Token\n5eAH...pump\nBULLTABLE 可抵御 The Bull Table 牛市\n19m\nMC\n$11.4K';
+  assert.deepEqual(GMGN._cardIdentityFromText(text, address), {
+    symbol: 'BULLTABLE', name: '可抵御 The Bull Table 牛市'
+  });
+});
+
+test('a card whose href CA is ahead of its visible DOM fails closed without reading its old logo', () => {
+  const newAddress = '5eAHabcdefghijkmnopqrstuvwxyz123456789pump';
+  let logoReads = 0;
+  const staleCard = {
+    innerText: '9W2o...pump\nWRONG Wrong Token\n19m\nMC\n$11.4K',
+    firstElementChild: {
+      querySelector() { logoReads += 1; return { src: 'https://gmgn.ai/external-res/old-token.webp' }; }
+    },
+    querySelectorAll: () => []
+  };
+  assert.equal(GMGN._cardIdentityFromText(staleCard.innerText, newAddress), null);
+  assert.equal(GMGN._verifiedCardMetadata(staleCard, newAddress), null);
+  assert.equal(logoReads, 0);
+});
+
+test('trench logo comes from the card avatar group rather than nested token images', () => {
+  const avatarLogo = { src: 'https://gmgn.ai/external-res/avatar.webp' };
+  const unrelatedLogo = { src: 'https://gmgn.ai/external-res/unrelated.webp' };
+  const card = {
+    firstElementChild: {
+      querySelector(selector) { return selector === 'img[alt="logo"]' ? avatarLogo : null; }
+    },
+    querySelectorAll: () => [avatarLogo, unrelatedLogo]
+  };
+  assert.equal(GMGN._cardTokenLogo(card), avatarLogo.src);
+});
+
+test('a stale detail header is rejected until its CA matches the new SPA route', () => {
+  const originalDocument = global.document;
+  const body = {};
+  const sharedContainer = {
+    textContent: 'OldToken OLD 9W2o...pump New route 5eAH...pump', parentElement: body,
+    querySelectorAll: () => [{ getAttribute: () => '/sol/token/5eAHabcdefghijkmnopqrstuvwxyz123456789pump' }]
+  };
+  const oldHeader = {
+    textContent: 'OldToken OLD 9W2o...pump', parentElement: sharedContainer,
+    querySelectorAll: () => []
+  };
+  global.document = { body, querySelectorAll: () => [oldHeader] };
+  try {
+    assert.equal(GMGN._findTokenDetailScope('5eAHabcdefghijkmnopqrstuvwxyz123456789pump'), null);
+    const matching = GMGN._findTokenDetailScope('9W2oabcdefghijkmnopqrstuvwxyz123456789pump');
+    assert.equal(matching.header, oldHeader);
+    assert.equal(matching.scope, oldHeader);
+  } finally {
+    global.document = originalDocument;
+  }
+});
+
 test('quick-buy injection is restricted to the Solana trench root', () => {
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=sol'), true);
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/sol/token/AbC123pump'), false);
@@ -43,20 +118,31 @@ test('trading panel is restricted to an exact Solana token detail route', () => 
 });
 
 test('detail token logo ignores unrelated token images elsewhere on the page', () => {
-  const originalDocument = global.document;
   const correctLogo = 'https://gmgn.ai/external-res/correct-token.webp';
-  global.document = {
+  const unrelatedLogo = { src: 'https://gmgn.ai/external-res/unrelated-token.webp' };
+  const verifiedHeader = {
     querySelector(selector) {
-      if (selector === '[data-sentry-component="TokenHeader"] img[alt="logo"]') return { src: correctLogo };
-      if (selector.includes('[class*="token"]')) return { src: 'https://gmgn.ai/external-res/unrelated-token.webp' };
+      return selector === 'img[alt="logo"]' ? { src: correctLogo } : null;
+    },
+    querySelectorAll: () => [unrelatedLogo, { src: correctLogo }]
+  };
+  assert.equal(GMGN._tokenLogo(verifiedHeader), correctLogo);
+  assert.equal(GMGN._tokenLogo(null), '');
+});
+
+test('detail identity parses a combined title and accepts a numeric token symbol', () => {
+  const scopeFor = (heading) => ({
+    querySelector(selector) {
+      if (selector === 'h1') return { textContent: heading };
       return null;
     }
-  };
-  try {
-    assert.equal(GMGN._tokenLogo(), correctLogo);
-  } finally {
-    global.document = originalDocument;
-  }
+  });
+  assert.deepEqual(GMGN._detailTokenIdentity(scopeFor('BULLTABLE 可抵御 The Bull Table 牛市'), '5eAHabcdefghijkmnopqrstuvwxyz123456789pump'), {
+    symbol: 'BULLTABLE', name: '可抵御 The Bull Table 牛市'
+  });
+  assert.deepEqual(GMGN._detailTokenIdentity(scopeFor('80'), '5eAHabcdefghijkmnopqrstuvwxyz123456789pump'), {
+    symbol: '80', name: '80'
+  });
 });
 
 test('trench column amount takes priority over the replaced native button amount', () => {

@@ -45,14 +45,12 @@
         currentQuoteChanged = true;
       }
       const position = positionsByAddress.get(address);
-      if (position && (quote.symbol || quote.name || quote.logoUrl)) {
-        const metadata = isCurrentToken ? runtime.current.token : quote;
+      if (position && isCurrentToken && runtime.current?.token?.metadataVerified) {
+        const metadata = runtime.current.token;
         enrichedState = Tango.Engine.updatePositionMetadata(enrichedState, {
           chain: position.chain, address: position.tokenAddress,
-          symbol: metadata.symbol, name: metadata.name,
-          // Network payloads can contain creator/related-token image fields.
-          // Only the current detail DOM is trusted as a position logo source.
-          logoUrl: isCurrentToken ? metadata.logoUrl : ''
+          symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
+          metadataVerified: true, metadataSource: metadata.metadataSource
         });
       }
     });
@@ -269,13 +267,6 @@
 
   function mergeQuote(context, quote) {
     if (!quote) return context.quote;
-    if (context?.token) {
-      const symbol = String(quote.symbol || '').replace(/^\$/, '').trim();
-      const name = String(quote.name || '').trim();
-      if (symbol && symbol.length <= 32 && !isPlaceholderTokenLabel(symbol) && isPlaceholderTokenLabel(context.token.symbol)) context.token.symbol = symbol;
-      if (name && name.length <= 100 && !isPlaceholderTokenLabel(name) &&
-        (isPlaceholderTokenLabel(context.token.name) || context.token.name === context.token.symbol)) context.token.name = name;
-    }
     context.quote = {
       ...context.quote,
       ...quote,
@@ -298,9 +289,8 @@
     let networkQuote = freshGmgnQuote(context.token.address);
     if (networkQuote) mergeQuote(context, networkQuote);
     let hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
-    const needsMetadata = isPlaceholderTokenLabel(context.token.symbol) || isPlaceholderTokenLabel(context.token.name);
-    if (!hasTokenValue || needsMetadata) {
-      networkQuote = await waitForGmgnQuote(context.token.address, 900, needsMetadata);
+    if (!hasTokenValue) {
+      networkQuote = await waitForGmgnQuote(context.token.address, 900, false);
       if (networkQuote) mergeQuote(context, networkQuote);
       hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
     }

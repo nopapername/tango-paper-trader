@@ -61,9 +61,9 @@
     return Number(value.toPrecision(15));
   }
 
-  function firstText(selectors) {
+  function firstText(selectors, root = document) {
     for (const selector of selectors) {
-      const element = document.querySelector(selector);
+      const element = root?.querySelector?.(selector);
       const text = element?.textContent?.trim();
       if (text) return { text, element };
     }
@@ -122,41 +122,81 @@
     return candidates.length ? candidates[0] : 0;
   }
 
-  function tokenSymbol() {
-    const direct = firstText([
-      '[data-testid="token-symbol"]', '[data-token-symbol]', '[class*="token-symbol"]',
-      '[class*="TokenSymbol"]', '[class*="text-xl"][class*="font-semibold"]', 'h1'
-    ]);
-    if (direct?.text) {
-      const symbol = direct.text.replace(/^\$/, '').split(/[\s/|]/)[0];
-      if (symbol && symbol.length <= 20) return symbol;
+  function addressHintMatches(text, address) {
+    const source = String(text || '').replace(/\s+/g, '');
+    const target = String(address || '').trim();
+    if (!source || target.length < 8) return false;
+    if (source.toLowerCase().includes(target.toLowerCase())) return true;
+    const prefix = target.slice(0, 4).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const suffix = target.slice(-4).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`${prefix}.{0,8}${suffix}`, 'i').test(source);
+  }
+
+  function elementHasTokenAddress(element, address) {
+    if (!element) return false;
+    const text = String(element.textContent || '');
+    // Avoid accepting a page-wide ancestor merely because another widget happens
+    // to contain the new route address while GMGN is still rendering the old header.
+    if (text.length <= 4_000 && addressHintMatches(text, address)) return true;
+    const nodes = [element, ...Array.from(element.querySelectorAll?.('a[href], [title], [data-address], [data-token-address], [data-mint], [data-ca]') || []).slice(0, 80)];
+    return nodes.some((node) => ['href', 'title', 'data-address', 'data-token-address', 'data-mint', 'data-ca']
+      .some((attribute) => String(node.getAttribute?.(attribute) || '').toLowerCase().includes(String(address).toLowerCase())));
+  }
+
+  function findTokenDetailScope(address) {
+    const headers = document.querySelectorAll('[data-sentry-component="TokenHeader"]');
+    for (const header of headers) {
+      // The CA must belong to TokenHeader itself. Walking into a shared ancestor
+      // can combine GMGN's stale header A with the new route/address B.
+      if (elementHasTokenAddress(header, address)) return { header, scope: header };
     }
-    const title = document.title.split(/[|·\-]/)[0].trim();
-    return title.split(/\s+/)[0].replace(/^\$/, '').slice(0, 20) || 'TOKEN';
+    return null;
   }
 
-  function tokenName(symbol) {
-    const heading = document.querySelector('h1')?.textContent?.trim();
-    return heading && heading.length < 80 ? heading : symbol;
+  function detailTokenIdentity(scope, address) {
+    const directSymbol = firstText([
+      '[data-testid="token-symbol"]', '[data-token-symbol]', '[class*="token-symbol"]',
+      '[class*="TokenSymbol"]'
+    ], scope)?.text;
+    const heading = firstText(['h1', 'h2'], scope)?.text;
+    const title = String(directSymbol || heading || '').replace(/\s+/g, ' ').trim();
+    if (!title || addressHintMatches(title, address)) return { symbol: 'TOKEN', name: 'Token' };
+    let identity;
+    if (/^\$?\d+(?:\.\d+)?$/.test(title)) {
+      const numeric = title.replace(/^\$/, '');
+      identity = { symbol: numeric, name: numeric };
+    } else {
+      identity = tokenIdentityFromText(title);
+      if (identity.symbol === 'TOKEN') {
+        const fallback = title.replace(/^\$/, '').slice(0, 32);
+        identity = { symbol: fallback || 'TOKEN', name: fallback || 'Token' };
+      }
+    }
+
+    const explicitName = firstText([
+      '[data-testid="token-name"]', '[data-token-name]', '[class*="token-name"]', '[class*="TokenName"]'
+    ], scope)?.text;
+    const nameCandidate = String(explicitName || '').replace(/\s+/g, ' ').trim();
+    if (nameCandidate && nameCandidate.length <= 100 && !addressHintMatches(nameCandidate, address)) {
+      identity.name = nameCandidate;
+    } else if (heading && heading !== title) {
+      const headingIdentity = tokenIdentityFromText(heading);
+      if (headingIdentity.symbol === identity.symbol && headingIdentity.name !== headingIdentity.symbol) identity.name = headingIdentity.name;
+    }
+    return identity;
   }
 
-  function tokenLogo() {
+  function tokenLogo(header) {
     const selectors = [
-      '[data-sentry-component="TokenHeader"] img[alt="logo"]',
-      '[data-sentry-component="TokenHeader"] img',
-      '[data-sentry-component="BaseProgress"] img[alt="logo"]',
-      '[data-testid="token-logo"] img',
-      'img[data-testid="token-logo"]',
-      '[data-token-logo] img',
-      'img[data-token-logo]'
+      '[data-testid="token-logo"] img', 'img[data-testid="token-logo"]',
+      '[data-token-logo] img', 'img[data-token-logo]', 'img[alt="logo"]'
     ];
     for (const selector of selectors) {
-      const source = document.querySelector(selector)?.src;
+      const source = header?.querySelector?.(selector)?.src;
       if (source) return source;
     }
-    // GMGN is a SPA, so og:image can briefly belong to the previously viewed
-    // token. An empty logo is safer and will be filled from TokenHeader later.
-    return '';
+    const images = Array.from(header?.querySelectorAll?.('img') || []);
+    return images.length === 1 ? images[0].src || '' : '';
   }
 
   async function readCurrentToken() {
@@ -164,7 +204,9 @@
     const address = tokenAddressFromUrl();
     const chain = chainFromUrl();
     if (!address || chain !== 'sol') return null;
-    const symbol = tokenSymbol();
+    const detail = findTokenDetailScope(address);
+    if (!detail) return null;
+    const identity = detailTokenIdentity(detail.scope, address);
     const priceUsd = findPrice();
     const baseInfo = document.querySelector('[data-sentry-component="BaseInfoPriceView"]');
     const baseItems = baseInfo ? Array.from(baseInfo.querySelectorAll('[data-sentry-component="InfoItem"]')) : [];
@@ -173,7 +215,10 @@
     const marketCapUsd = unlabeledMarketCap || scanLabeledValue(['mc', 'market cap', 'mcap', '市值']) || (/pump$/i.test(address) ? priceUsd * 1_000_000_000 : 0);
     const liquidityUsd = parseMoney(labeledLiquidity?.querySelector('.info-item-value')?.textContent) || scanLabeledValue(['liq', 'liquidity', '流动性', '池子', 'pool']);
     return {
-      token: { chain, address, symbol, name: tokenName(symbol), logoUrl: tokenLogo() },
+      token: {
+        chain, address, symbol: identity.symbol, name: identity.name, logoUrl: tokenLogo(detail.header),
+        metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+      },
       quote: {
         priceUsd,
         marketCapUsd,
@@ -221,25 +266,86 @@
       const match = line.match(/^\$?([\p{L}\p{N}_][\p{L}\p{N}_.$-]{0,19})(?:\s+(.+))?$/u);
       if (!match) continue;
       const symbol = match[1].replace(/^\$/, '');
-      if (reserved.has(symbol.toUpperCase()) || /^\d+(?:s|m|h|d|w|mo|y)$/i.test(symbol) || symbol.includes('...')) continue;
+      if (reserved.has(symbol.toUpperCase()) || /^\d+(?:\.\d+)?(?:s|m|h|d|w|mo|y)?$/i.test(symbol) || symbol.includes('...')) continue;
       const rawName = String(match[2] || '').replace(/\s+(?:MC|V|TX|DS|P[123])\b.*$/i, '').trim();
       return { symbol, name: rawName && rawName.length <= 80 ? rawName : symbol };
     }
     return { symbol: 'TOKEN', name: 'Token' };
   }
 
-  function cardTokenIdentity(card) {
-    const selectors = [
-      '[data-testid="token-symbol"]', '[data-token-symbol]', '[class*="token-symbol"]',
-      'a[href*="/sol/token/"]', 'a[href*="pump.fun/coin/"]'
-    ];
+  function tokenAddressLine(line) {
+    const text = String(line || '').trim();
+    return /(?:\.{3}|…)/.test(text) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text);
+  }
+
+  function validCardMetadataLine(value) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text || text.length > 100 || tokenAddressLine(text)) return false;
+    if (/^(?:MC|V|F|N|TX|DS|SOL|USD|P[123]|LIVE|OG|TANGO|PAPER|BUY|SELL|模拟盘|虚拟买入)$/i.test(text)) return false;
+    if (/^(?:[+\-$]\d[\d,.]*(?:[%KMBT])?|\d[\d,.]*[%KMBT]|\d{1,3}(?:,\d{3})+)$/i.test(text)) return false;
+    if (/^\d+(?:\.\d+)?(?:ms|s|m|h|d|w|mo|y)$/i.test(text)) return false;
+    if (/^(?:MC|V|F|N|TX|DS)\s*[:：]?/i.test(text)) return false;
+    return /[\p{L}\p{N}]/u.test(text);
+  }
+
+  function cardIdentityFromText(text, expectedAddress = '') {
+    const lines = String(text || '').split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const addressIndex = expectedAddress
+      ? lines.findIndex((line) => addressHintMatches(line, expectedAddress))
+      : lines.findIndex(tokenAddressLine);
+    if (addressIndex < 0) return expectedAddress ? null : tokenIdentityFromText(text);
+    const candidates = lines.slice(addressIndex + 1, addressIndex + 14).filter(validCardMetadataLine);
+    if (!candidates.length) return { symbol: 'TOKEN', name: 'Token' };
+
+    const first = candidates[0].replace(/^\$/, '');
+    if (/^\d+(?:\.\d+)?$/.test(first)) {
+      const numericName = candidates.find((line, index) => index > 0 && line !== first) || first;
+      return { symbol: first, name: numericName };
+    }
+    const parsed = tokenIdentityFromText(first);
+    if (parsed.symbol === 'TOKEN') return { symbol: first.slice(0, 32), name: first.slice(0, 100) };
+    const separateName = candidates.find((line, index) => index > 0 && line !== first);
+    return {
+      symbol: parsed.symbol,
+      name: parsed.name !== parsed.symbol ? parsed.name : (separateName || parsed.symbol)
+    };
+  }
+
+  function cardTokenIdentity(card, expectedAddress = '') {
+    const fromCard = cardIdentityFromText(card?.innerText || card?.textContent || '', expectedAddress);
+    if (!fromCard) return null;
+    if (fromCard.symbol !== 'TOKEN') return fromCard;
+    const selectors = ['[data-testid="token-symbol"]', '[data-token-symbol]', '[class*="token-symbol"]'];
     for (const selector of selectors) {
       for (const element of card?.querySelectorAll?.(selector) || []) {
         const identity = tokenIdentityFromText(element.innerText || element.textContent || '');
         if (identity.symbol !== 'TOKEN') return identity;
       }
     }
-    return tokenIdentityFromText(card?.innerText || card?.textContent || '');
+    return fromCard;
+  }
+
+  function verifiedCardMetadata(card, address) {
+    const identity = cardTokenIdentity(card, address);
+    if (!identity) return null;
+    return { ...identity, logoUrl: cardTokenLogo(card) };
+  }
+
+  function cardTokenLogo(card) {
+    const avatarRoot = card?.firstElementChild;
+    const selectors = [
+      '[data-testid="token-logo"] img', 'img[data-testid="token-logo"]',
+      '[data-token-logo] img', 'img[data-token-logo]', 'img[alt="logo"]'
+    ];
+    let avatarLogo = '';
+    for (const selector of selectors) {
+      avatarLogo = avatarRoot?.querySelector?.(selector)?.src || '';
+      if (avatarLogo) break;
+    }
+    if (avatarLogo) return avatarLogo;
+    const logos = Array.from(card?.querySelectorAll?.('img[alt="logo"]') || []);
+    return logos.length === 1 ? logos[0].src || '' : '';
   }
 
   function cardSymbol(text) {
@@ -254,7 +360,17 @@
   function cardTokenHref(card) {
     const directHref = card?.getAttribute?.('href');
     if (directHref?.includes('/sol/token/')) return new URL(directHref, location.origin).href;
-    return card?.querySelector?.('a[href*="pump.fun/coin/"], a[href*="/sol/token/"]')?.href || '';
+    const lines = String(card?.innerText || card?.textContent || '').split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const candidates = Array.from(card?.querySelectorAll?.('a[href*="pump.fun/coin/"], a[href*="/sol/token/"]') || [])
+      .map((link) => {
+        const href = link.href || link.getAttribute?.('href') || '';
+        const address = href ? tokenAddressFromUrl(new URL(href, location.origin).href) : '';
+        return { href, address, addressIndex: lines.findIndex((line) => addressHintMatches(line, address)) };
+      })
+      .filter((candidate) => candidate.address && candidate.addressIndex >= 0)
+      .sort((left, right) => left.addressIndex - right.addressIndex);
+    return candidates[0]?.href || '';
   }
 
   async function latestCardMarketCap(card, slot) {
@@ -289,19 +405,21 @@
     const requested = new Set((addresses || []).map((address) => String(address || '').toLowerCase()).filter(Boolean));
     if (!requested.size) return [];
     const found = new Map();
-    const links = document.querySelectorAll('a[href*="pump.fun/coin/"], a[href*="/sol/token/"]');
-    for (const link of links) {
+    const cards = document.querySelectorAll('[class~="group/a"]');
+    for (const card of cards) {
       if (found.size >= requested.size) break;
-      const address = tokenAddressFromUrl(link.href);
+      const href = cardTokenHref(card);
+      if (!href) continue;
+      const address = tokenAddressFromUrl(href);
       const normalized = String(address || '').toLowerCase();
       if (!requested.has(normalized) || found.has(normalized)) continue;
-      const card = link.closest('[class~="group/a"]');
-      if (!card || !trenchColumn(card)) continue;
-      const identity = cardTokenIdentity(card);
+      if (!trenchColumn(card)) continue;
+      const metadata = verifiedCardMetadata(card, address);
+      if (!metadata) continue;
       found.set(normalized, {
         chain: 'sol', address,
-        symbol: identity.symbol, name: identity.name,
-        logoUrl: card.querySelector('img[alt="logo"]')?.src || ''
+        symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
+        metadataVerified: true, metadataSource: 'GMGN_TRENCH'
       });
     }
     return [...found.values()];
@@ -361,7 +479,7 @@
       const existingReplacement = slot.querySelector('.tango-list-quick-buy');
       let nativeControl = slot.querySelector('[data-testid="quickbuy"]');
       const amountSol = cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol);
-      if (!address || !(amountSol > 0)) continue;
+      if (!address || !(amountSol > 0) || !verifiedCardMetadata(card, address)) continue;
       const currentMarketCap = cardMarketCap(card.innerText || card.textContent || '');
       if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
       if (slot.dataset.tangoQuickBuy === '1' && existingReplacement &&
@@ -403,18 +521,21 @@
         try {
           const activeHref = cardTokenHref(card);
           const activeAddress = activeHref ? tokenAddressFromUrl(activeHref) : null;
-          if (activeAddress !== address) return;
+          if (activeAddress !== address || !verifiedCardMetadata(card, address)) return;
           const marketCapUsd = await latestCardMarketCap(card, slot);
           const latestHref = cardTokenHref(card);
           const latestAddress = latestHref ? tokenAddressFromUrl(latestHref) : null;
           if (latestAddress !== address) return;
-          const identity = cardTokenIdentity(card);
-          const symbol = identity.symbol;
+          const metadata = verifiedCardMetadata(card, address);
+          if (!metadata) return;
+          const symbol = metadata.symbol;
           const isPumpToken = /pump$/i.test(address);
           const priceUsd = marketCapUsd > 0 ? marketCapUsd / 1_000_000_000 : 0;
-          const logoUrl = card.querySelector('img[alt="logo"]')?.src || '';
           await onQuickBuy({
-            token: { chain: chainFromUrl(href) || 'sol', address, symbol, name: identity.name, logoUrl },
+            token: {
+              chain: chainFromUrl(href) || 'sol', address, symbol, name: metadata.name, logoUrl: metadata.logoUrl,
+              metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+            },
             quote: {
               priceUsd, marketCapUsd, liquidityUsd: 0, solPriceUsd: 0,
               source: isPumpToken ? 'GMGN_TRENCH_MC' : 'GMGN_LIST_MC',
@@ -476,7 +597,9 @@
   Tango.GMGN = {
     chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, readVisibleTokenMetadata, discoverTokenCards, clearQuickBuy,
     _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,
-    _tokenLogo: tokenLogo,
+    _cardIdentityFromText: cardIdentityFromText, _addressHintMatches: addressHintMatches,
+    _cardTokenLogo: cardTokenLogo, _verifiedCardMetadata: verifiedCardMetadata, _detailTokenIdentity: detailTokenIdentity,
+    _findTokenDetailScope: findTokenDetailScope, _tokenLogo: tokenLogo,
     _selectQuickBuyAmount: selectQuickBuyAmount,
     _isTrenchPage: isTrenchPage,
     _isTokenDetailPage: isTokenDetailPage

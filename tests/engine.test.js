@@ -12,7 +12,10 @@ function state(balance = 100) {
 }
 
 const settings = { slippageBps: 100, platformFeeBps: 100, networkFeeSol: 0.001 };
-const token = { chain: 'sol', address: 'TokenAddress111', symbol: 'TANGO', name: 'Tango' };
+const token = {
+  chain: 'sol', address: 'TokenAddress111', symbol: 'TANGO', name: 'Tango',
+  metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+};
 const quote = { priceUsd: 2, marketCapUsd: 2_000_000, liquidityUsd: 500_000, solPriceUsd: 100, observedAt: 1_000 };
 
 test('buy reduces cash and creates a weighted position', () => {
@@ -118,7 +121,8 @@ test('detail metadata replaces a trench placeholder without changing balances', 
   const bought = Engine.executeBuy(state(), { token: placeholder, quote, amountSol: 1 }, settings, 1_000);
   const key = Engine.positionKey(token.chain, token.address);
   const enriched = Engine.updatePositionMetadata(bought.state, {
-    ...token, symbol: 'Cogito', name: '我认为', logoUrl: 'https://example.com/cogito.png'
+    ...token, symbol: 'Cogito', name: '我认为', logoUrl: 'https://example.com/cogito.png',
+    metadataVerified: true, metadataSource: 'GMGN_DETAIL'
   });
   assert.equal(enriched.positions[key].symbol, 'Cogito');
   assert.equal(enriched.positions[key].name, '我认为');
@@ -135,11 +139,92 @@ test('buying on a detail page cannot change another position logo', () => {
     token: { ...detailToken, logoUrl: 'https://example.com/detail-new.png' }, quote, amountSol: 1
   }, settings, 1_200);
   assert.equal(detailRebuy.state.positions[Engine.positionKey('sol', trenchToken.address)].logoUrl, trenchToken.logoUrl);
-  assert.equal(detailRebuy.state.positions[Engine.positionKey('sol', detailToken.address)].logoUrl, 'https://example.com/detail-new.png');
+  assert.equal(detailRebuy.state.positions[Engine.positionKey('sol', detailToken.address)].logoUrl, detailToken.logoUrl);
 
-  const detailRebuyBeforeLogoLoads = Engine.executeBuy(detailRebuy.state, {
+  const verifiedLogoRefresh = Engine.updatePositionMetadata(detailRebuy.state, {
+    ...detailToken, logoUrl: 'https://example.com/detail-new.png',
+    metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+  });
+  const detailRebuyBeforeLogoLoads = Engine.executeBuy(verifiedLogoRefresh, {
     token: { ...detailToken, logoUrl: '' }, quote, amountSol: 1
   }, settings, 1_300);
   assert.equal(detailRebuyBeforeLogoLoads.state.positions[Engine.positionKey('sol', trenchToken.address)].logoUrl, trenchToken.logoUrl);
   assert.equal(detailRebuyBeforeLogoLoads.state.positions[Engine.positionKey('sol', detailToken.address)].logoUrl, 'https://example.com/detail-new.png');
+});
+
+test('trading one of several positions cannot replace any existing token identity', () => {
+  const tokens = [
+    { ...token, address: 'AddressA111', symbol: 'AAA', name: 'Alpha', logoUrl: 'https://example.com/a.png', metadataSource: 'GMGN_TRENCH' },
+    { ...token, address: 'AddressB222', symbol: 'BBB', name: 'Beta', logoUrl: 'https://example.com/b.png', metadataSource: 'GMGN_TRENCH' },
+    { ...token, address: 'AddressC333', symbol: 'CCC', name: 'Gamma', logoUrl: 'https://example.com/c.png', metadataSource: 'GMGN_TRENCH' }
+  ];
+  let next = state();
+  tokens.forEach((item, index) => {
+    next = Engine.executeBuy(next, { token: item, quote: { ...quote, observedAt: 1_000 + index }, amountSol: 1 }, settings, 1_000 + index).state;
+  });
+  const identitiesBefore = Object.fromEntries(Object.entries(next.positions).map(([key, position]) => [key, {
+    symbol: position.symbol, name: position.name, logoUrl: position.logoUrl, metadataSource: position.metadataSource
+  }]));
+
+  const staleHeaderForB = {
+    ...tokens[1], symbol: tokens[0].symbol, name: tokens[0].name, logoUrl: tokens[0].logoUrl,
+    metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+  };
+  const afterRebuy = Engine.executeBuy(next, {
+    token: staleHeaderForB, quote: { ...quote, observedAt: 2_000 }, amountSol: 1
+  }, settings, 2_000).state;
+  const identitiesAfter = Object.fromEntries(Object.entries(afterRebuy.positions).map(([key, position]) => [key, {
+    symbol: position.symbol, name: position.name, logoUrl: position.logoUrl, metadataSource: position.metadataSource
+  }]));
+  assert.deepEqual(identitiesAfter, identitiesBefore);
+});
+
+test('only verified address-bound metadata can repair a position and detail outranks trench', () => {
+  const trenchToken = {
+    ...token, symbol: 'TOKEN', name: 'Token', logoUrl: '',
+    metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+  };
+  const bought = Engine.executeBuy(state(), { token: trenchToken, quote, amountSol: 1 }, settings, 1_000);
+  const key = Engine.positionKey(token.chain, token.address);
+  const ignoredNetwork = Engine.updatePositionMetadata(bought.state, {
+    ...token, symbol: 'WRONG', name: 'Wrong', logoUrl: 'https://example.com/wrong.png',
+    metadataVerified: false, metadataSource: 'GMGN_NETWORK'
+  });
+  assert.equal(ignoredNetwork, bought.state);
+
+  const detail = Engine.updatePositionMetadata(bought.state, {
+    ...token, symbol: 'RIGHT', name: 'Right Token', logoUrl: 'https://example.com/right.png',
+    metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+  });
+  assert.equal(detail.positions[key].symbol, 'RIGHT');
+  assert.equal(detail.positions[key].logoUrl, 'https://example.com/right.png');
+
+  const staleTrench = Engine.updatePositionMetadata(detail, {
+    ...token, symbol: 'STALE', name: 'Stale', logoUrl: 'https://example.com/stale.png',
+    metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+  });
+  assert.equal(staleTrench, detail);
+});
+
+test('an unverified new order cannot seed a borrowed name or logo', () => {
+  const borrowed = {
+    ...token, address: 'NewAddress444', symbol: 'AAA', name: 'Alpha', logoUrl: 'https://example.com/a.png',
+    metadataVerified: false, metadataSource: 'GMGN_NETWORK'
+  };
+  const bought = Engine.executeBuy(state(), { token: borrowed, quote, amountSol: 1 }, settings, 1_000);
+  assert.equal(bought.position.symbol, 'TOKEN');
+  assert.equal(bought.position.name, 'TOKEN');
+  assert.equal(bought.position.logoUrl, '');
+});
+
+test('a repeat buy does not promote the source rank of legacy identity data', () => {
+  const bought = Engine.executeBuy(state(), { token, quote, amountSol: 1 }, settings, 1_000);
+  const key = Engine.positionKey(token.chain, token.address);
+  const legacy = structuredClone(bought.state);
+  delete legacy.positions[key].metadataSource;
+  legacy.positions[key].symbol = '3';
+  legacy.positions[key].name = '3';
+  const repeated = Engine.executeBuy(legacy, { token, quote: { ...quote, observedAt: 2_000 }, amountSol: 1 }, settings, 2_000);
+  assert.equal(repeated.position.symbol, '3');
+  assert.equal(repeated.position.metadataSource, '');
 });

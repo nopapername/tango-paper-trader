@@ -1,5 +1,6 @@
 (function initEngine(global) {
   const Tango = global.Tango = global.Tango || {};
+  const METADATA_SOURCE_RANK = Object.freeze({ GMGN_TRENCH: 20, GMGN_DETAIL: 30 });
 
   function round(value, digits = 12) {
     const factor = 10 ** digits;
@@ -8,6 +9,16 @@
 
   function positionKey(chain, tokenAddress) {
     return `${String(chain || '').toLowerCase()}:${String(tokenAddress || '').toLowerCase()}`;
+  }
+
+  function trustedMetadataSource(token) {
+    const source = String(token?.metadataSource || '').toUpperCase();
+    return token?.metadataVerified === true && METADATA_SOURCE_RANK[source] ? source : '';
+  }
+
+  function validIdentityText(value, maxLength) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    return text && text.length <= maxLength && !/^(TOKEN|UNKNOWN|N\/A)$/i.test(text) ? text : '';
   }
 
   function usesMarketCapValuation(position) {
@@ -80,14 +91,22 @@
     const averageEntryMarketCap = nextCost > 0
       ? ((existingCost * Number(existing?.averageEntryMarketCap || order.quote.marketCapUsd || 0)) + (amountSol * Number(order.quote.marketCapUsd || 0))) / nextCost
       : Number(order.quote.marketCapUsd || 0);
+    // A trade changes quantities and balances, never the identity of an existing
+    // position. Identity repair is handled separately from an address-verified
+    // GMGN detail header or trench card.
+    const orderMetadataSource = trustedMetadataSource(order.token);
+    const positionSymbol = existing?.symbol || (orderMetadataSource && validIdentityText(order.token.symbol, 32)) || 'TOKEN';
+    const positionName = existing?.name || (orderMetadataSource && validIdentityText(order.token.name, 100)) || positionSymbol || 'Token';
+    const positionLogoUrl = existing?.logoUrl || (orderMetadataSource && String(order.token.logoUrl || '').trim()) || '';
+    const metadataSource = existing ? (existing.metadataSource || '') : orderMetadataSource;
 
     const trade = {
       id: cryptoId(now),
       chain: order.token.chain,
       tokenAddress: order.token.address,
-      symbol: order.token.symbol || 'TOKEN',
-      name: order.token.name || order.token.symbol || 'Token',
-      logoUrl: order.token.logoUrl || existing?.logoUrl || '',
+      symbol: positionSymbol,
+      name: positionName,
+      logoUrl: positionLogoUrl,
       side: 'BUY',
       quantity: round(quantity),
       amountSol: round(amountSol),
@@ -108,11 +127,13 @@
     nextState.account.cashBalanceSol = round(Number(state.account.cashBalanceSol) - amountSol);
     nextState.account.updatedAt = now;
     nextState.positions[key] = {
+      ...(existing || {}),
       chain: order.token.chain,
       tokenAddress: order.token.address,
-      symbol: order.token.symbol || 'TOKEN',
-      name: order.token.name || order.token.symbol || 'Token',
-      logoUrl: order.token.logoUrl || existing?.logoUrl || '',
+      symbol: positionSymbol,
+      name: positionName,
+      logoUrl: positionLogoUrl,
+      metadataSource,
       quantity: round(nextQuantity),
       costBasisSol: round(nextCost),
       averageEntryPriceUsd: round(averageEntryPriceUsd),
@@ -294,15 +315,25 @@
     const key = positionKey(token?.chain, token?.address);
     const existing = state.positions[key];
     if (!existing) return state;
-    const symbol = String(token.symbol || '').trim();
-    const name = String(token.name || '').trim();
-    const nextSymbol = symbol && !/^(TOKEN|UNKNOWN|N\/A)$/i.test(symbol) ? symbol : existing.symbol;
-    const nextName = name && !/^(TOKEN|UNKNOWN|N\/A)$/i.test(name) ? name : existing.name;
-    const nextLogoUrl = String(token.logoUrl || existing.logoUrl || '');
-    if (nextSymbol === existing.symbol && nextName === existing.name && nextLogoUrl === existing.logoUrl) return state;
+    const source = trustedMetadataSource(token);
+    if (!source) return state;
+    const sourceRank = METADATA_SOURCE_RANK[source];
+    const existingSource = String(existing.metadataSource || '').toUpperCase();
+    const existingRank = METADATA_SOURCE_RANK[existingSource] || 0;
+    if (sourceRank < existingRank) return state;
+
+    const symbol = validIdentityText(token.symbol, 32);
+    const name = validIdentityText(token.name, 100);
+    const logoUrl = String(token.logoUrl || '').trim();
+    if (!symbol && !name && !logoUrl) return state;
+    const nextSymbol = symbol || existing.symbol;
+    const nextName = name || existing.name;
+    const nextLogoUrl = logoUrl || existing.logoUrl || '';
+    if (nextSymbol === existing.symbol && nextName === existing.name && nextLogoUrl === existing.logoUrl && source === existingSource) return state;
     const nextState = structuredCloneSafe(state);
     nextState.positions[key] = {
-      ...nextState.positions[key], symbol: nextSymbol, name: nextName, logoUrl: nextLogoUrl, updatedAt: Date.now()
+      ...nextState.positions[key], symbol: nextSymbol, name: nextName, logoUrl: nextLogoUrl,
+      metadataSource: source, metadataUpdatedAt: Date.now(), updatedAt: Date.now()
     };
     return nextState;
   }
