@@ -1,5 +1,8 @@
 let solPriceCache = { price: 0, fetchedAt: 0 };
+let solPriceRequest = null;
 const tokenQuoteCache = new Map();
+const tokenQuoteRequests = new Map();
+const TOKEN_QUOTE_CACHE_MS = 15_000;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'TANGO_OPEN_DASHBOARD') {
@@ -50,9 +53,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function getSolPrice() {
-  if (solPriceCache.price > 0 && Date.now() - solPriceCache.fetchedAt < 30_000) {
-    return solPriceCache.price;
-  }
+  if (solPriceCache.price > 0 && Date.now() - solPriceCache.fetchedAt < 30_000) return solPriceCache.price;
+  if (solPriceRequest) return solPriceRequest;
+  solPriceRequest = fetchSolPrice().finally(() => { solPriceRequest = null; });
+  return solPriceRequest;
+}
+
+async function fetchSolPrice() {
   let price = 0;
   try {
     const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd', {
@@ -75,8 +82,19 @@ async function getSolPrice() {
 async function getTokenQuote(chain, address) {
   if (String(chain || '').toLowerCase() !== 'sol' || !address) return null;
   const key = String(address).toLowerCase();
+  const now = Date.now();
+  tokenQuoteCache.forEach((entry, cachedKey) => {
+    if (now - entry.fetchedAt >= TOKEN_QUOTE_CACHE_MS) tokenQuoteCache.delete(cachedKey);
+  });
   const cached = tokenQuoteCache.get(key);
-  if (cached && Date.now() - cached.fetchedAt < 15_000) return cached.quote;
+  if (cached) return cached.quote;
+  if (tokenQuoteRequests.has(key)) return tokenQuoteRequests.get(key);
+  const request = fetchTokenQuote(address, key).finally(() => tokenQuoteRequests.delete(key));
+  tokenQuoteRequests.set(key, request);
+  return request;
+}
+
+async function fetchTokenQuote(address, key) {
   const response = await fetch(`https://api.dexscreener.com/tokens/v1/solana/${encodeURIComponent(address)}`, {
     headers: { accept: 'application/json' }
   });
@@ -96,4 +114,8 @@ async function getTokenQuote(chain, address) {
   } : null;
   tokenQuoteCache.set(key, { quote, fetchedAt: Date.now() });
   return quote;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { getSolPrice, getTokenQuote, _tokenQuoteCache: tokenQuoteCache };
 }
