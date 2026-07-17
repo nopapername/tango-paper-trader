@@ -143,14 +143,75 @@
       .some((attribute) => String(node.getAttribute?.(attribute) || '').toLowerCase().includes(String(address).toLowerCase())));
   }
 
-  function findTokenDetailScope(address) {
-    const headers = document.querySelectorAll('[data-sentry-component="TokenHeader"]');
-    for (const header of headers) {
-      // The CA must belong to TokenHeader itself. Walking into a shared ancestor
-      // can combine GMGN's stale header A with the new route/address B.
-      if (elementHasTokenAddress(header, address)) return { header, scope: header };
+  function visibleSolAddressHint(value) {
+    const text = String(value || '').replace(/\s+/g, '').trim();
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text)) return text;
+    if (/^[1-9A-HJ-NP-Za-km-z]{3,8}(?:\.{3}|…)[1-9A-HJ-NP-Za-km-z]{3,8}$/.test(text)) return text;
+    return '';
+  }
+
+  function distanceToAncestor(node, ancestor) {
+    let current = node;
+    for (let distance = 0; distance <= 8 && current; distance += 1, current = current.parentElement) {
+      if (current === ancestor) return distance;
     }
-    return null;
+    return Infinity;
+  }
+
+  function localDetailAddressEvidence(header, scope, address) {
+    if (!scope || /^(?:HTML|BODY|MAIN)$/.test(String(scope.tagName || '').toUpperCase())) return null;
+    const headers = Array.from(scope.querySelectorAll?.('[data-sentry-component="TokenHeader"]') || []);
+    if (headers.length !== 1 || headers[0] !== header) return null;
+    const descendants = Array.from(scope.querySelectorAll?.('*') || []);
+    if (descendants.length > 600 || String(scope.textContent || '').length > 6_000) return null;
+
+    const leafNodes = Array.from(scope.querySelectorAll?.('span,div,p,a,button') || [])
+      .filter((node) => Number(node.childElementCount || 0) === 0 && String(node.textContent || '').length <= 128);
+    const attributeNodes = Array.from(scope.querySelectorAll?.('[data-address], [data-token-address], [data-mint], [data-ca]') || []);
+    const evidence = [];
+    leafNodes.forEach((node) => {
+      const hint = visibleSolAddressHint(node.textContent);
+      if (hint) evidence.push({ node, hint });
+    });
+    attributeNodes.forEach((node) => {
+      ['data-address', 'data-token-address', 'data-mint', 'data-ca'].forEach((attribute) => {
+        const hint = visibleSolAddressHint(node.getAttribute?.(attribute));
+        if (hint) evidence.push({ node, hint });
+      });
+    });
+    if (!evidence.length || evidence.some((item) => !addressHintMatches(item.hint, address))) return null;
+
+    const addressNode = evidence.find((item) => addressHintMatches(item.hint, address))?.node;
+    const distance = distanceToAncestor(header, scope) + distanceToAncestor(addressNode, scope);
+    if (!addressNode || distance > 8) return null;
+
+    const linkedAddresses = Array.from(scope.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || [])
+      .map((link) => {
+        try { return tokenAddressFromUrl(new URL(link.href || link.getAttribute?.('href') || '', location.origin).href); }
+        catch { return ''; }
+      })
+      .filter(Boolean);
+    if (linkedAddresses.some((linkedAddress) => String(linkedAddress).toLowerCase() !== String(address).toLowerCase())) return null;
+    return addressNode;
+  }
+
+  function findTokenDetailScope(address) {
+    const headers = Array.from(document.querySelectorAll('[data-sentry-component="TokenHeader"]'));
+    const directMatches = headers.filter((header) => elementHasTokenAddress(header, address));
+    if (directMatches.length === 1) return { header: directMatches[0], scope: directMatches[0], bindingScope: directMatches[0] };
+    if (directMatches.length > 1) return null;
+
+    const localMatches = [];
+    for (const header of headers) {
+      let bindingScope = header.parentElement;
+      for (let depth = 1; depth <= 4 && bindingScope; depth += 1, bindingScope = bindingScope.parentElement) {
+        const addressNode = localDetailAddressEvidence(header, bindingScope, address);
+        if (!addressNode) continue;
+        localMatches.push({ header, scope: header, bindingScope, addressNode });
+        break;
+      }
+    }
+    return localMatches.length === 1 ? localMatches[0] : null;
   }
 
   function detailTokenIdentity(scope, address) {
@@ -204,8 +265,20 @@
     const address = tokenAddressFromUrl();
     const chain = chainFromUrl();
     if (!address || chain !== 'sol') return null;
-    const detail = findTokenDetailScope(address);
+    let detail = findTokenDetailScope(address);
     if (!detail) return null;
+    if (detail.bindingScope !== detail.header) {
+      const firstIdentity = detailTokenIdentity(detail.header, address);
+      const firstFingerprint = `${firstIdentity.symbol}\u0000${firstIdentity.name}\u0000${tokenLogo(detail.header)}`;
+      await new Promise((resolve) => setTimeout(resolve, 48));
+      if (tokenAddressFromUrl() !== address || chainFromUrl() !== chain) return null;
+      const confirmed = findTokenDetailScope(address);
+      if (!confirmed) return null;
+      const confirmedIdentity = detailTokenIdentity(confirmed.header, address);
+      const confirmedFingerprint = `${confirmedIdentity.symbol}\u0000${confirmedIdentity.name}\u0000${tokenLogo(confirmed.header)}`;
+      if (confirmedFingerprint !== firstFingerprint) return null;
+      detail = confirmed;
+    }
     const identity = detailTokenIdentity(detail.scope, address);
     const priceUsd = findPrice();
     const baseInfo = document.querySelector('[data-sentry-component="BaseInfoPriceView"]');

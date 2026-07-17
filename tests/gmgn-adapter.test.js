@@ -82,20 +82,59 @@ test('trench logo comes from the card avatar group rather than nested token imag
 test('a stale detail header is rejected until its CA matches the new SPA route', () => {
   const originalDocument = global.document;
   const body = {};
+  const oldAddressNode = { textContent: '9W2o...pump', childElementCount: 0, getAttribute: () => null };
+  const newAddressNode = { textContent: '5eAH...pump', childElementCount: 0, getAttribute: () => null };
   const sharedContainer = {
+    tagName: 'DIV',
     textContent: 'OldToken OLD 9W2o...pump New route 5eAH...pump', parentElement: body,
-    querySelectorAll: () => [{ getAttribute: () => '/sol/token/5eAHabcdefghijkmnopqrstuvwxyz123456789pump' }]
+    querySelectorAll(selector) {
+      if (selector === '[data-sentry-component="TokenHeader"]') return [oldHeader];
+      if (selector === '*') return [oldHeader, oldAddressNode, newAddressNode];
+      if (selector === 'span,div,p,a,button') return [oldAddressNode, newAddressNode];
+      return [];
+    }
   };
   const oldHeader = {
     textContent: 'OldToken OLD 9W2o...pump', parentElement: sharedContainer,
     querySelectorAll: () => []
   };
+  oldAddressNode.parentElement = sharedContainer;
+  newAddressNode.parentElement = sharedContainer;
   global.document = { body, querySelectorAll: () => [oldHeader] };
   try {
     assert.equal(GMGN._findTokenDetailScope('5eAHabcdefghijkmnopqrstuvwxyz123456789pump'), null);
     const matching = GMGN._findTokenDetailScope('9W2oabcdefghijkmnopqrstuvwxyz123456789pump');
     assert.equal(matching.header, oldHeader);
     assert.equal(matching.scope, oldHeader);
+  } finally {
+    global.document = originalDocument;
+  }
+});
+
+test('detail header accepts a nearby CA leaf in its small exclusive identity container', () => {
+  const originalDocument = global.document;
+  const body = {};
+  const address = '5eAHabcdefghijkmnopqrstuvwxyz123456789pump';
+  const addressNode = { textContent: '5eAH...pump', childElementCount: 0, getAttribute: () => null };
+  const header = { textContent: 'BULLTABLE 可抵御 The Bull Table 牛市', querySelectorAll: () => [] };
+  const identityContainer = {
+    tagName: 'DIV', textContent: `${header.textContent} ${addressNode.textContent}`, parentElement: body,
+    querySelectorAll(selector) {
+      if (selector === '[data-sentry-component="TokenHeader"]') return [header];
+      if (selector === '*') return [header, addressNode];
+      if (selector === 'span,div,p,a,button') return [addressNode];
+      return [];
+    }
+  };
+  header.parentElement = identityContainer;
+  addressNode.parentElement = identityContainer;
+  global.document = { body, querySelectorAll: () => [header] };
+  try {
+    const detail = GMGN._findTokenDetailScope(address);
+    assert.equal(detail.header, header);
+    assert.equal(detail.scope, header);
+    assert.equal(detail.bindingScope, identityContainer);
+    assert.equal(detail.addressNode, addressNode);
   } finally {
     global.document = originalDocument;
   }
