@@ -141,8 +141,20 @@
   }
 
   function tokenLogo() {
-    const image = document.querySelector('[data-testid*="token"] img, [class*="token"] img, h1 img');
-    return image?.src || document.querySelector('meta[property="og:image"]')?.content || '';
+    const selectors = [
+      '[data-sentry-component="TokenHeader"] img[alt="logo"]',
+      '[data-sentry-component="TokenHeader"] img',
+      '[data-sentry-component="BaseProgress"] img[alt="logo"]',
+      '[data-testid="token-logo"] img',
+      'img[data-testid="token-logo"]',
+      '[data-token-logo] img',
+      'img[data-token-logo]'
+    ];
+    for (const selector of selectors) {
+      const source = document.querySelector(selector)?.src;
+      if (source) return source;
+    }
+    return document.querySelector('meta[property="og:image"]')?.content || '';
   }
 
   async function readCurrentToken() {
@@ -430,6 +442,7 @@
   Tango.GMGN = {
     chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, discoverTokenCards, clearQuickBuy,
     _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,
+    _tokenLogo: tokenLogo,
     _isTrenchPage: isTrenchPage,
     _isTokenDetailPage: isTokenDetailPage
   };

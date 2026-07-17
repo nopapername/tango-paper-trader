@@ -41,3 +41,20 @@ test('trading panel is restricted to an exact Solana token detail route', () => 
   assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/monitor?chain=sol&token=AbC123pump'), false);
   assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/bsc/token/0x123'), false);
 });
+
+test('detail token logo ignores unrelated token images elsewhere on the page', () => {
+  const originalDocument = global.document;
+  const correctLogo = 'https://gmgn.ai/external-res/correct-token.webp';
+  global.document = {
+    querySelector(selector) {
+      if (selector === '[data-sentry-component="TokenHeader"] img[alt="logo"]') return { src: correctLogo };
+      if (selector.includes('[class*="token"]')) return { src: 'https://gmgn.ai/external-res/unrelated-token.webp' };
+      return null;
+    }
+  };
+  try {
+    assert.equal(GMGN._tokenLogo(), correctLogo);
+  } finally {
+    global.document = originalDocument;
+  }
+});

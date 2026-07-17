@@ -39,15 +39,17 @@
       if (!quote?.address) return;
       const address = String(quote.address).toLowerCase();
       runtime.gmgnQuotes.set(address, quote);
-      if (runtime.current?.token?.address?.toLowerCase() === address) {
+      const isCurrentToken = runtime.current?.token?.address?.toLowerCase() === address;
+      if (isCurrentToken) {
         mergeQuote(runtime.current, quote);
         currentQuoteChanged = true;
       }
       const position = positionsByAddress.get(address);
       if (position && (quote.symbol || quote.name || quote.logoUrl)) {
+        const metadata = isCurrentToken ? runtime.current.token : quote;
         enrichedState = Tango.Engine.updatePositionMetadata(enrichedState, {
           chain: position.chain, address: position.tokenAddress,
-          symbol: quote.symbol, name: quote.name, logoUrl: quote.logoUrl
+          symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl
         });
       }
     });
@@ -241,7 +243,9 @@
       if (symbol && symbol.length <= 32 && !isPlaceholderTokenLabel(symbol) && isPlaceholderTokenLabel(context.token.symbol)) context.token.symbol = symbol;
       if (name && name.length <= 100 && !isPlaceholderTokenLabel(name) &&
         (isPlaceholderTokenLabel(context.token.name) || context.token.name === context.token.symbol)) context.token.name = name;
-      if (quote.logoUrl) context.token.logoUrl = String(quote.logoUrl);
+      // A scoped GMGN DOM logo is more reliable than generic image fields in
+      // API payloads, which can describe creators or related tokens.
+      if (quote.logoUrl && !context.token.logoUrl) context.token.logoUrl = String(quote.logoUrl);
     }
     context.quote = {
       ...context.quote,
