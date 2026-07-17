@@ -198,15 +198,21 @@
   }
 
   async function latestCardMarketCap(card, slot) {
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
       const value = cardMarketCap(card?.innerText || card?.textContent || '');
       if (value > 0) {
         slot.dataset.tangoMarketCapUsd = String(value);
         return value;
       }
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      await new Promise((resolve) => setTimeout(resolve, 75));
     }
     return Number(slot.dataset.tangoMarketCapUsd || 0);
+  }
+
+  function updateQuickBuySizeClass(slot) {
+    const rect = slot.getBoundingClientRect();
+    slot.classList.toggle('tango-quick-expanded', rect.height >= 36);
+    slot.classList.toggle('tango-quick-narrow', rect.width <= 72);
   }
 
   function ensureQuickBuyStyle() {
@@ -214,30 +220,32 @@
     const style = document.createElement('style');
     style.id = 'tango-trench-buy-style';
     style.textContent = `
-      .BuyButton-continer.tango-native-buy-overridden { container: tango-quick / size; min-width: 58px; position: relative !important; }
+      .BuyButton-continer.tango-native-buy-overridden { isolation: isolate; min-width: 58px; position: relative !important; }
       .tango-list-quick-buy {
         align-items: center;
         appearance: none; background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 10%, transparent);
         border: 0; border-radius: 6px; bottom: 0; box-sizing: border-box; color: var(--customize-button-ultra-color, #00ffee);
-        cursor: pointer; display: flex; font: 700 12px/12px Inter, ui-sans-serif, system-ui, sans-serif; gap: 4px; inset: 0;
-        justify-content: center; overflow: hidden; padding: 2px 4px; position: absolute; white-space: nowrap; width: 100%; z-index: 50;
+        cursor: pointer; display: flex; font: 700 12px/12px Inter, ui-sans-serif, system-ui, sans-serif; inset: 0;
+        justify-content: center; min-height: 20px; overflow: hidden; padding: 2px 3px; position: absolute; white-space: nowrap; width: 100%; z-index: 50;
       }
       .tango-list-quick-buy:hover { background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 20%, transparent); filter: brightness(1.12); }
       .tango-list-quick-buy:active { opacity: .55; }
       .tango-list-quick-buy:disabled { cursor: wait; opacity: .65; }
-      .tango-paper-hint { background: rgba(155,124,255,.2); border: 1px solid rgba(155,124,255,.6); border-radius: 4px; color: #d8ceff; flex: 0 1 auto; font-size: 10px; font-weight: 850; line-height: 14px; min-width: 0; overflow: hidden; padding: 0 3px; text-overflow: clip; }
-      .tango-buy-amount { align-items: center; display: flex; flex: 0 0 auto; font-size: 14px; font-weight: 900; gap: 3px; letter-spacing: -.02em; text-shadow: 0 0 9px color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 45%, transparent); }
+      .tango-paper-hint { background: rgba(155,124,255,.25); border: 1px solid rgba(155,124,255,.7); border-radius: 3px; color: #e3dcff; font-size: 8px; font-weight: 900; left: 2px; line-height: 9px; max-width: 28px; overflow: hidden; padding: 0 2px; position: absolute; text-overflow: clip; top: 1px; }
+      .tango-buy-amount { align-items: center; display: flex; font-size: 14px; font-weight: 950; gap: 2px; letter-spacing: -.02em; padding-top: 7px; text-shadow: 0 0 9px color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 45%, transparent); }
       .tango-buy-amount svg { flex: 0 0 14px; height: 14px; width: 14px; }
-      @container tango-quick (min-height: 40px) {
-        .tango-paper-hint { font-size: 11px; left: 6px; line-height: 15px; padding: 0 4px; position: absolute; top: 5px; }
-        .tango-buy-amount { bottom: 7px; font-size: 15px; position: absolute; right: 9px; }
-        .tango-buy-amount svg { height: 15px; width: 15px; }
+      .tango-native-buy-overridden.tango-quick-expanded .tango-paper-hint {
+        font-size: 10px; left: 5px; line-height: 13px; max-width: none; padding: 0 3px; top: 4px;
       }
-      @container tango-quick (max-width: 72px) {
-        .tango-list-quick-buy { gap: 2px; padding-inline: 2px; }
-        .tango-paper-hint { font-size: 9px; padding-inline: 2px; }
-        .tango-buy-amount { font-size: 12px; gap: 1px; }
-        .tango-buy-amount svg { height: 11px; width: 11px; }
+      .tango-native-buy-overridden.tango-quick-expanded .tango-buy-amount {
+        bottom: 6px; font-size: 15px; padding-top: 0; position: absolute; right: 8px;
+      }
+      .tango-native-buy-overridden.tango-quick-expanded .tango-buy-amount svg { height: 15px; width: 15px; }
+      .tango-native-buy-overridden.tango-quick-narrow .tango-list-quick-buy { padding-inline: 2px; }
+      .tango-native-buy-overridden.tango-quick-narrow .tango-buy-amount { font-size: 13px; gap: 1px; }
+      .tango-native-buy-overridden.tango-quick-narrow .tango-buy-amount svg { height: 12px; width: 12px; }
+      .tango-native-buy-overridden.tango-quick-narrow.tango-quick-expanded .tango-buy-amount {
+        bottom: 5px; font-size: 14px; right: 5px;
       }
     `;
     (document.head || document.documentElement).appendChild(style);
@@ -263,6 +271,7 @@
       if (!address || !nativeControl || !(amountSol > 0)) continue;
       const currentMarketCap = cardMarketCap(card.innerText || card.textContent || '');
       if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
+      updateQuickBuySizeClass(slot);
       if (slot.dataset.tangoQuickBuy === '1' && slot.querySelector('.tango-list-quick-buy') &&
         slot.dataset.tangoTokenAddress === address && Number(slot.dataset.tangoAmountSol) === amountSol &&
         slot.dataset.tangoPaperLabel === paperLabel) continue;
@@ -344,6 +353,7 @@
       replacement.addEventListener('touchend', blockNativePointer, { capture: true, passive: false });
       replacement.addEventListener('click', handleClick, true);
       slot.appendChild(replacement);
+      requestAnimationFrame(() => updateQuickBuySizeClass(slot));
       injected += 1;
     }
     return injected;
@@ -379,7 +389,7 @@
     delete slot.__tangoQuickBuyHandler;
     delete slot.__tangoPointerBlocker;
     delete slot.__tangoNativeStyle;
-    slot.classList.remove('tango-native-buy-overridden');
+    slot.classList.remove('tango-native-buy-overridden', 'tango-quick-expanded', 'tango-quick-narrow');
     delete slot.dataset.tangoQuickBuy;
     delete slot.dataset.tangoTokenAddress;
     delete slot.dataset.tangoAmountSol;

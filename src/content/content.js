@@ -166,6 +166,17 @@
     return quote && Date.now() - Number(quote.observedAt || 0) <= maxAgeMs ? quote : null;
   }
 
+  async function waitForGmgnQuote(address, timeoutMs = 900) {
+    window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const quote = freshGmgnQuote(address);
+      if (Number(quote?.priceUsd) > 0 || Number(quote?.marketCapUsd) > 0) return quote;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return null;
+  }
+
   function mergeQuote(context, quote) {
     if (!quote) return context.quote;
     context.quote = {
@@ -187,12 +198,17 @@
   }
 
   async function resolveQuickBuyQuote(context) {
-    const networkQuote = freshGmgnQuote(context.token.address);
+    let networkQuote = freshGmgnQuote(context.token.address);
     if (networkQuote) mergeQuote(context, networkQuote);
-    const hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
+    let hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
+    if (!hasTokenValue) {
+      networkQuote = await waitForGmgnQuote(context.token.address);
+      if (networkQuote) mergeQuote(context, networkQuote);
+      hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
+    }
     const tokenRequest = hasTokenValue ? Promise.resolve(null) : sharedQuoteRequest({
       type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address: context.token.address
-    });
+    }, 1800);
     const solRequest = context.quote.solPriceUsd > 0
       ? Promise.resolve(null)
       : sharedQuoteRequest({ type: 'TANGO_GET_SOL_PRICE' });
