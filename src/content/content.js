@@ -10,7 +10,8 @@
     solPriceUsd: 0, solPricePromise: null, quoteRequests: new Map(), quoteRetryAt: new Map(),
     gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
-    calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    renderedMarkup: null, markerPayloads: new WeakMap()
   };
 
   const host = document.createElement('div');
@@ -27,20 +28,22 @@
 
   window.addEventListener('message', (event) => {
     if (event.data?.source === 'TANGO_PAPER_CHART' && event.data?.type === 'READY') {
-      syncChartMarkers();
+      syncChartMarkers(true);
       return;
     }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
     let enrichedState = runtime.state;
+    const positionsByAddress = new Map(Object.values(enrichedState?.positions || {}).map((position) => [position.tokenAddress?.toLowerCase(), position]));
+    let currentQuoteChanged = false;
     (event.data.quotes || []).forEach((quote) => {
       if (!quote?.address) return;
       const address = String(quote.address).toLowerCase();
       runtime.gmgnQuotes.set(address, quote);
       if (runtime.current?.token?.address?.toLowerCase() === address) {
         mergeQuote(runtime.current, quote);
-        queueRender();
+        currentQuoteChanged = true;
       }
-      const position = Object.values(enrichedState?.positions || {}).find((item) => item.tokenAddress?.toLowerCase() === address);
+      const position = positionsByAddress.get(address);
       if (position && (quote.symbol || quote.name || quote.logoUrl)) {
         enrichedState = Tango.Engine.updatePositionMetadata(enrichedState, {
           chain: position.chain, address: position.tokenAddress,
@@ -48,6 +51,11 @@
         });
       }
     });
+    if (runtime.gmgnQuotes.size > 2000) {
+      const overflow = runtime.gmgnQuotes.size - 2000;
+      [...runtime.gmgnQuotes.keys()].slice(0, overflow).forEach((key) => runtime.gmgnQuotes.delete(key));
+    }
+    if (currentQuoteChanged) queueRender();
     if (enrichedState && enrichedState !== runtime.state) {
       runtime.state = enrichedState;
       Tango.Store.saveState(runtime.state).catch(() => null);
@@ -76,7 +84,26 @@
     return !runtime.settings.fastMode && runtime.settings.confirmationEnabled && !runtime.suppressConfirmForSession;
   }
 
-  async function refresh() {
+  function coalesceAsync(task) {
+    let active = null;
+    let queued = false;
+    return function run() {
+      if (active) {
+        queued = true;
+        return active;
+      }
+      active = task().finally(() => {
+        active = null;
+        if (queued) {
+          queued = false;
+          run();
+        }
+      });
+      return active;
+    };
+  }
+
+  async function performRefresh() {
     const previousSettings = runtime.settings;
     const data = await Tango.Store.getAll();
     runtime.state = data.state;
@@ -92,6 +119,8 @@
     queueRender();
   }
 
+  const refresh = coalesceAsync(performRefresh);
+
   function queueRender() {
     if (runtime.renderQueued) return;
     if (Date.now() < runtime.interactionUntil) {
@@ -103,7 +132,7 @@
     requestAnimationFrame(() => { runtime.renderQueued = false; render(); });
   }
 
-  async function tickQuote() {
+  async function performQuoteTick() {
     if (!runtime.settings?.enabled || !runtime.state?.initialized) {
       Tango.GMGN.clearQuickBuy();
       return;
@@ -121,7 +150,6 @@
         }
       }
     }
-    queueRender();
     ensureSolPrice(runtime.current);
     ensureTokenQuote(runtime.current);
     if ((runtime.current?.quote?.priceUsd > 0 || runtime.current?.quote?.marketCapUsd > 0) && currentPosition() && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
@@ -133,6 +161,8 @@
     else Tango.GMGN.clearQuickBuy();
     if (previousAddress !== runtime.current?.token?.address || runtime.current) queueRender();
   }
+
+  const tickQuote = coalesceAsync(performQuoteTick);
 
   function ensureSolPrice(context) {
     if (!context || context.quote.solPriceUsd > 0 || runtime.solPricePromise) return;
@@ -577,21 +607,21 @@
     if (!node) {
       node = document.createElement('div');
       node.id = 'tango-header-account-summary';
+      node.setAttribute('role', 'button');
+      node.setAttribute('tabindex', '0');
+      node.onpointerdown = (event) => event.stopPropagation();
+      node.onclick = (event) => { event.preventDefault(); event.stopPropagation(); runtime.calendarOpen = !runtime.calendarOpen; render(); };
+      node.onkeydown = (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault(); runtime.calendarOpen = !runtime.calendarOpen; render();
+      };
     }
     if (node.parentElement !== wallet) wallet.appendChild(node);
     wallet.classList.add('tango-wallet-summary-anchor');
     const cash = Tango.Format.sol(summary.cashBalanceSol, language());
     const markup = `<span class="tango-header-paper-badge">${esc(t('paper'))}</span><span>${esc(t('paperBalance'))} <strong>${esc(cash)}</strong></span><i></i><span class="tango-header-calendar-link">▦ ${esc(t('pnlCalendar'))}</span>`;
     if (node.innerHTML !== markup) node.innerHTML = markup;
-    node.setAttribute('role', 'button');
-    node.setAttribute('tabindex', '0');
     node.title = t('pnlCalendar');
-    node.onpointerdown = (event) => event.stopPropagation();
-    node.onclick = (event) => { event.preventDefault(); event.stopPropagation(); runtime.calendarOpen = !runtime.calendarOpen; render(); };
-    node.onkeydown = (event) => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault(); runtime.calendarOpen = !runtime.calendarOpen; render();
-    };
   }
 
   function renderPresetGrid(side, values) {
@@ -731,9 +761,12 @@
     return { tokenAddress: address, currentPrice, currentMarketCap, markers };
   }
 
-  function syncChartMarkers() {
+  function syncChartMarkers(force = false) {
     const payload = chartMarkerPayload();
+    const signature = JSON.stringify(payload);
     document.querySelectorAll('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe').forEach((frame) => {
+      if (!force && runtime.markerPayloads.get(frame) === signature) return;
+      runtime.markerPayloads.set(frame, signature);
       frame.contentWindow?.postMessage({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload }, '*');
     });
   }
@@ -751,14 +784,19 @@
   function render() {
     if (!runtime.state || !runtime.settings) return;
     if (!runtime.settings.enabled || !runtime.state.initialized) {
-      shell.innerHTML = '';
+      if (runtime.renderedMarkup !== '') shell.innerHTML = '';
+      runtime.renderedMarkup = '';
       clearHeaderAccountSummary();
       return;
     }
     const summary = Tango.Engine.portfolioSummary(runtime.state);
     renderHeaderAccountSummary(summary);
-    shell.innerHTML = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
-    bindEvents();
+    const markup = `${renderBar(summary)}${renderPanel()}${renderDrawer()}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
+    if (runtime.renderedMarkup !== markup) {
+      shell.innerHTML = markup;
+      runtime.renderedMarkup = markup;
+      bindEvents();
+    }
     syncChartMarkers();
   }
 
@@ -876,7 +914,9 @@
         mutationTimer = null;
         if (runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) Tango.GMGN.discoverTokenCards(handleQuickBuy, runtime.settings.buyPresets?.[0] || 0.1, t('paper'));
         else Tango.GMGN.clearQuickBuy();
-        if (runtime.settings?.enabled && runtime.state?.initialized) renderHeaderAccountSummary(Tango.Engine.portfolioSummary(runtime.state));
+        if (runtime.settings?.enabled && runtime.state?.initialized) {
+          renderHeaderAccountSummary({ cashBalanceSol: runtime.state.account.cashBalanceSol });
+        }
         if (document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe')) syncChartMarkers();
       }, 160);
     });

@@ -43,14 +43,16 @@
 
   async function saveState(state) {
     await writeRaw({ [Tango.STORAGE_KEY]: state });
-    notify();
+    // chrome.storage emits onChanged for this write. Notify directly only for
+    // the localStorage fallback so subscribers receive exactly one refresh.
+    if (!global.chrome?.storage?.local) notify();
     return state;
   }
 
   async function saveSettings(settings) {
     const next = normalizeSettings(settings);
     await writeRaw({ [Tango.SETTINGS_KEY]: next });
-    notify();
+    if (!global.chrome?.storage?.local) notify();
     return next;
   }
 
@@ -60,7 +62,7 @@
     const state = Tango.createInitialState(nextSettings.initialBalanceSol);
     state.initialized = true;
     await writeRaw({ [Tango.STORAGE_KEY]: state, [Tango.SETTINGS_KEY]: nextSettings });
-    notify();
+    if (!global.chrome?.storage?.local) notify();
     return { state, settings: nextSettings };
   }
 
@@ -85,7 +87,7 @@
     const state = normalizeState(payload.state, settings);
     state.initialized = true;
     await writeRaw({ [Tango.STORAGE_KEY]: state, [Tango.SETTINGS_KEY]: settings });
-    notify();
+    if (!global.chrome?.storage?.local) notify();
     return { state, settings };
   }
 

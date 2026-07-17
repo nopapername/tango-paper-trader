@@ -19,6 +19,7 @@
   let stableScale = null;
   let scaleUpdatedAt = 0;
   let stableSignature = '';
+  let renderedSignature = '';
   const hiddenMarkerIds = new Set();
   const markerPositions = new Map();
 
@@ -143,24 +144,27 @@
 
   function selectScale() {
     if (!markerState) return null;
+    const now = Date.now();
     const groups = [...labelsByCanvas.values()].map((records) => [...records.values()])
       .map((points) => {
         const deduped = new Map();
-        points.filter((point) => Date.now() - point.updatedAt < 120_000).forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
+        points.filter((point) => now - point.updatedAt < 120_000).forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
         return [...deduped.values()].sort((a, b) => a.y - b.y);
-      }).filter((points) => points.length >= 3 && new Set(points.map((point) => point.value)).size >= 3);
+      }).filter((points) => points.length >= 3 && new Set(points.map((point) => point.value)).size >= 3)
+      .map((points) => {
+        const linear = robustFit(points, false);
+        const logarithmic = robustFit(points, true);
+        const fit = !linear ? logarithmic : !logarithmic ? linear : linear.error <= logarithmic.error ? linear : logarithmic;
+        return { points, fit };
+      }).filter((group) => group.fit);
     const modes = [];
     if (Number(markerState.currentPrice) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(markerState.currentPrice) });
     if (Number(markerState.currentMarketCap) > 0) {
       [1, 1e3, 1e6, 1e9].forEach((factor) => modes.push({ type: 'MARKET_CAP', factor, current: Number(markerState.currentMarketCap) / factor }));
     }
     const candidates = [];
-    groups.forEach((points) => modes.forEach((mode) => {
+    groups.forEach(({ points, fit }) => modes.forEach((mode) => {
       const nearest = Math.min(...points.map((point) => Math.abs(Math.log(point.value / mode.current))));
-      const linear = robustFit(points, false);
-      const logarithmic = robustFit(points, true);
-      const fit = !linear ? logarithmic : !logarithmic ? linear : linear.error <= logarithmic.error ? linear : logarithmic;
-      if (!fit) return;
       const span = Math.max(1, points.at(-1).y - points[0].y);
       const score = nearest + Math.min(2, fit.error / span * 8);
       candidates.push({ ...mode, points, fit, score });
@@ -205,14 +209,19 @@
     const root = ensureOverlay();
     const visibleMarkers = (markerState?.markers || []).filter((marker) => !hiddenMarkerIds.has(marker.id));
     if (!visibleMarkers.length) {
-      root.replaceChildren();
+      if (root.childElementCount) root.replaceChildren();
+      renderedSignature = '';
       return;
     }
     const scale = selectScale();
     if (!scale) {
-      root.replaceChildren();
+      if (root.childElementCount) root.replaceChildren();
+      renderedSignature = '';
       return;
     }
+    const nextSignature = `${stableSignature}:${innerWidth}:${innerHeight}:${visibleMarkers.map((marker) =>
+      `${marker.id}:${marker.side}:${marker.marketCap}:${marker.price}:${marker.label}:${marker.closeLabel || ''}`).join('|')}`;
+    if (renderedSignature === nextSignature) return;
     const nodes = [];
     visibleMarkers.forEach((marker) => {
       const rawValue = scale.type === 'MARKET_CAP'
@@ -259,6 +268,7 @@
       nodes.push(line);
     });
     root.replaceChildren(...nodes);
+    renderedSignature = nextSignature;
   }
 
   window.addEventListener('message', (event) => {
@@ -268,6 +278,7 @@
       lastScaleMode = null;
       stableScale = null;
       stableSignature = '';
+      renderedSignature = '';
       hiddenMarkerIds.clear();
       markerPositions.clear();
     }
@@ -278,6 +289,7 @@
   window.addEventListener('resize', () => {
     stableScale = null;
     stableSignature = '';
+    renderedSignature = '';
     markerPositions.clear();
     renderMarkers();
   }, { passive: true });

@@ -1,6 +1,10 @@
 (function initGmgnAdapter(global) {
   const Tango = global.Tango = global.Tango || {};
   const quickBuyActions = new Map();
+  const trenchColumns = new WeakMap();
+  const quickBuyResizeObserver = typeof global.ResizeObserver === 'function'
+    ? new global.ResizeObserver((entries) => entries.forEach((entry) => updateQuickBuySizeClass(entry.target)))
+    : null;
 
   if (typeof window !== 'undefined') {
     window.addEventListener('message', (event) => {
@@ -178,12 +182,17 @@
   }
 
   function trenchColumn(card) {
+    const cached = trenchColumns.get(card);
+    if (cached?.isConnected && cached.contains(card)) return cached;
     const headings = ['新创建', '即将打满', '已开盘', 'new creation', 'about to graduate', 'launched'];
     let candidate = card?.parentElement;
     for (let depth = 0; depth < 8 && candidate; depth += 1, candidate = candidate.parentElement) {
       const text = (candidate.textContent || '').trim().toLowerCase();
       const hasHeading = headings.some((heading) => text.startsWith(heading) || text.includes(`${heading}\n`));
-      if (hasHeading && candidate.querySelectorAll('[class~="group/a"]').length > 0) return candidate;
+      if (hasHeading && candidate.querySelector('[class~="group/a"]')) {
+        trenchColumns.set(card, candidate);
+        return candidate;
+      }
     }
     return null;
   }
@@ -309,7 +318,6 @@
       if (!address || !(amountSol > 0)) continue;
       const currentMarketCap = cardMarketCap(card.innerText || card.textContent || '');
       if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
-      updateQuickBuySizeClass(slot);
       if (slot.dataset.tangoQuickBuy === '1' && existingReplacement &&
         slot.dataset.tangoTokenAddress === address && Number(slot.dataset.tangoAmountSol) === amountSol &&
         slot.dataset.tangoPaperLabel === paperLabel) {
@@ -385,7 +393,8 @@
       slot.__tangoQuickBuyHandler = handleClick;
       quickBuyActions.set(actionId, handleClick);
       nativeControl.replaceWith(replacement);
-      requestAnimationFrame(() => updateQuickBuySizeClass(slot));
+      if (quickBuyResizeObserver) quickBuyResizeObserver.observe(slot);
+      else requestAnimationFrame(() => updateQuickBuySizeClass(slot));
       injected += 1;
     }
     return injected;
@@ -402,6 +411,7 @@
     const replacement = slot.__tangoReplacementQuickBuy;
     const original = slot.__tangoOriginalQuickBuy;
     quickBuyActions.delete(String(slot.dataset.tangoActionId || ''));
+    quickBuyResizeObserver?.unobserve(slot);
     if (replacement?.isConnected && original) replacement.replaceWith(original);
     else if (replacement?.isConnected) replacement.remove();
     else if (original && !original.isConnected && slot.isConnected && !slot.querySelector('[data-testid="quickbuy"]')) slot.appendChild(original);

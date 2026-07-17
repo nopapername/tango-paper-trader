@@ -18,6 +18,12 @@
     const lastDispatchAt = Number(paperActionDispatchAt.get(actionId) || 0);
     if (!actionId || Date.now() - lastDispatchAt < 700) return;
     paperActionDispatchAt.set(actionId, Date.now());
+    if (paperActionDispatchAt.size > 500) {
+      const expiresBefore = Date.now() - 60_000;
+      paperActionDispatchAt.forEach((dispatchedAt, key) => {
+        if (dispatchedAt < expiresBefore) paperActionDispatchAt.delete(key);
+      });
+    }
     window.postMessage({ source: 'TANGO_GMGN_PAGE', type: 'PAPER_QUICK_BUY_CLICK', actionId }, '*');
   }
   paperTradeEvents.forEach((type) => window.addEventListener(type, blockGmgnPaperAction, { capture: true, passive: false }));
@@ -66,12 +72,16 @@
   function extractQuotes(payload) {
     const found = new Map();
     const queue = [payload];
+    const seen = new WeakSet();
+    const observedAt = Date.now();
     let queueIndex = 0;
     let visited = 0;
     while (queueIndex < queue.length && visited < 8000) {
       const value = queue[queueIndex++];
       visited += 1;
       if (!value || typeof value !== 'object') continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
       if (Array.isArray(value)) {
         value.slice(0, 500).forEach((item) => queue.push(item));
         continue;
@@ -96,7 +106,7 @@
             symbol: symbol || previous.symbol || '',
             name: name || previous.name || '',
             logoUrl: logoUrl || previous.logoUrl || '',
-            observedAt: Date.now(),
+            observedAt,
             source: 'GMGN_NETWORK'
           });
         }
