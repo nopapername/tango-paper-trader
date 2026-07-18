@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["https://gmgn.ai/*"],
-      "js": ["src/content/page-main.js"],
+      "js": ["src/core/chains.js", "src/content/page-main.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -32,6 +32,7 @@
       "matches": ["https://gmgn.ai/*"],
       "css": ["src/content/content.css"],
       "js": [
+        "src/core/chains.js",
         "src/shared/constants.js",
         "src/shared/i18n.js",
         "src/shared/format.js",

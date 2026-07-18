@@ -35,6 +35,13 @@ test('content script order reports a swapped marker dependency', () => {
   assert.match(errors[0], /dependency order/);
 });
 
+test('content script order requires the chain registry before every isolated consumer', () => {
+  const scripts = REQUIRED_ISOLATED_ORDER.filter((file) => file !== 'src/core/chains.js');
+  const errors = contentScriptOrderErrors([{ js: scripts }]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /src\/core\/chains\.js/);
+});
+
 test('JavaScript syntax validation reports the exact broken file', () => {
   const errors = javascriptSyntaxErrors([
     { file: 'valid.js', source: 'const value = 1;' },

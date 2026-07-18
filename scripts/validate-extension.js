@@ -3,6 +3,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const REQUIRED_ISOLATED_ORDER = [
+  'src/core/chains.js',
   'src/shared/constants.js',
   'src/shared/i18n.js',
   'src/shared/format.js',
