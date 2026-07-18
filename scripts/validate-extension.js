@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const REQUIRED_ISOLATED_ORDER = [
   'src/core/chains.js',
   'src/shared/constants.js',
+  'src/core/state.js',
   'src/shared/i18n.js',
   'src/shared/format.js',
   'src/core/engine.js',
@@ -13,6 +14,7 @@ const REQUIRED_ISOLATED_ORDER = [
   'src/content/markers.js',
   'src/content/content.js'
 ];
+const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 6);
 
 function versionConsistencyErrors({ packageVersion, manifestVersion, constantsSource }) {
   const constantsVersion = String(constantsSource || '').match(/Tango\.VERSION\s*=\s*['\"]([^'\"]+)['\"]/)?.[1] || '';
@@ -30,6 +32,15 @@ function contentScriptOrderErrors(contentScripts) {
   const indexes = REQUIRED_ISOLATED_ORDER.map((file) => script.js.indexOf(file));
   const ordered = indexes.every((index, position) => position === 0 || indexes[position - 1] < index);
   return ordered ? [] : [`Invalid isolated content script dependency order: ${REQUIRED_ISOLATED_ORDER.join(' -> ')}`];
+}
+
+function htmlScriptOrderErrors(html, file) {
+  const scripts = [...String(html || '').matchAll(/<script\s+[^>]*src="([^"]+)"/g)].map((match) => match[1]);
+  const missing = REQUIRED_PAGE_ORDER.filter((script) => !scripts.includes(script));
+  if (missing.length) return [`Missing ${file} script dependencies: ${missing.join(', ')}`];
+  const indexes = REQUIRED_PAGE_ORDER.map((script) => scripts.indexOf(script));
+  const ordered = indexes.every((index, position) => position === 0 || indexes[position - 1] < index);
+  return ordered ? [] : [`Invalid ${file} script dependency order: ${REQUIRED_PAGE_ORDER.join(' -> ')}`];
 }
 
 function javascriptSyntaxErrors(sources) {
@@ -87,6 +98,7 @@ function validateExtension(root = path.resolve(__dirname, '..')) {
       .map((match) => match[1]).filter((item) => !item.startsWith('http'));
     const missingAssets = assets.filter((file) => !fs.existsSync(path.join(root, file)));
     if (missingAssets.length) errors.push(`${htmlFile} references missing files: ${missingAssets.join(', ')}`);
+    errors.push(...htmlScriptOrderErrors(html, htmlFile));
   }
 
   errors.push(...versionConsistencyErrors({
@@ -114,5 +126,6 @@ module.exports = {
   validateExtension,
   versionConsistencyErrors,
   contentScriptOrderErrors,
+  htmlScriptOrderErrors,
   javascriptSyntaxErrors
 };

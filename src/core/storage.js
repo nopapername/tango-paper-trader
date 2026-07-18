@@ -18,20 +18,11 @@
   }
 
   function normalizeSettings(settings) {
-    return { ...Tango.DEFAULT_SETTINGS, ...(settings || {}) };
+    return Tango.State.normalizeSettings(settings);
   }
 
   function normalizeState(state, settings) {
-    const base = Tango.createInitialState(settings.initialBalanceSol);
-    if (!state || Number(state.schemaVersion) !== 1) return base;
-    return {
-      ...base,
-      ...state,
-      account: { ...base.account, ...(state.account || {}) },
-      positions: state.positions || {},
-      trades: Array.isArray(state.trades) ? state.trades.slice(0, Tango.MAX_TRADES) : [],
-      dailyRealized: state.dailyRealized || {}
-    };
+    return Tango.State.normalizeState(state, settings);
   }
 
   async function getAll() {
@@ -42,11 +33,12 @@
   }
 
   async function saveState(state) {
-    await writeRaw({ [Tango.STORAGE_KEY]: state });
+    const next = normalizeState(state, normalizeSettings({}));
+    await writeRaw({ [Tango.STORAGE_KEY]: next });
     // chrome.storage emits onChanged for this write. Notify directly only for
     // the localStorage fallback so subscribers receive exactly one refresh.
     if (!global.chrome?.storage?.local) notify();
-    return state;
+    return next;
   }
 
   async function saveSettings(settings) {
@@ -56,22 +48,27 @@
     return next;
   }
 
-  async function initialize(initialBalanceSol, language) {
+  async function initialize(defaultBalanceNative = 10, language) {
     const { settings } = await getAll();
-    const nextSettings = normalizeSettings({ ...settings, initialBalanceSol: Number(initialBalanceSol), language });
-    const state = Tango.createInitialState(nextSettings.initialBalanceSol);
+    const nextSettings = Tango.State.normalizeSettings({ ...settings, language });
+    const initialBalances = Object.fromEntries(Tango.Chains.all().map((chain) => [chain.id, Number(defaultBalanceNative)]));
+    const state = Tango.State.createInitialState({ initialBalances });
     state.initialized = true;
     await writeRaw({ [Tango.STORAGE_KEY]: state, [Tango.SETTINGS_KEY]: nextSettings });
     if (!global.chrome?.storage?.local) notify();
     return { state, settings: nextSettings };
   }
 
-  async function reset() {
+  async function resetChain(chain, balanceNative = 10) {
+    const { state } = await getAll();
+    const next = Tango.State.resetChain(state, chain, balanceNative, Date.now());
+    await saveState(next); return next;
+  }
+
+  async function resetAll() {
     const { settings } = await getAll();
-    const state = Tango.createInitialState(settings.initialBalanceSol);
-    state.initialized = true;
-    await saveState(state);
-    return state;
+    const next = Tango.State.resetAll(settings, Date.now());
+    await saveState(next); return next;
   }
 
   async function exportData() {
@@ -84,7 +81,7 @@
       throw new Error('importFailed');
     }
     const settings = normalizeSettings(payload.settings);
-    const state = normalizeState(payload.state, settings);
+    const state = Tango.State.normalizeState(payload.state, settings, { strict: true });
     state.initialized = true;
     await writeRaw({ [Tango.STORAGE_KEY]: state, [Tango.SETTINGS_KEY]: settings });
     if (!global.chrome?.storage?.local) notify();
@@ -106,5 +103,5 @@
     });
   }
 
-  Tango.Store = { getAll, saveState, saveSettings, initialize, reset, exportData, importData, subscribe };
+  Tango.Store = { getAll, saveState, saveSettings, initialize, resetChain, resetAll, reset: resetAll, exportData, importData, subscribe };
 })(globalThis);

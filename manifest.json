@@ -34,6 +34,7 @@
       "js": [
         "src/core/chains.js",
         "src/shared/constants.js",
+        "src/core/state.js",
         "src/shared/i18n.js",
         "src/shared/format.js",
         "src/core/engine.js",

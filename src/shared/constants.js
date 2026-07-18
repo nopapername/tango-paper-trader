@@ -30,6 +30,8 @@
     initialBalanceSol: 100
   });
 
+  // state.js replaces this v1-shaped constructor in extension contexts. Keep it
+  // here for engine-only compatibility until the engine migration lands.
   Tango.createInitialState = function createInitialState(initialBalanceSol) {
     const balance = Number.isFinite(Number(initialBalanceSol)) && Number(initialBalanceSol) > 0
       ? Number(initialBalanceSol)

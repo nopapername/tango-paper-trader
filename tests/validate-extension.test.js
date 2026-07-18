@@ -6,6 +6,7 @@ const {
   validateExtension,
   versionConsistencyErrors,
   contentScriptOrderErrors,
+  htmlScriptOrderErrors,
   javascriptSyntaxErrors,
   REQUIRED_ISOLATED_ORDER
 } = require('../scripts/validate-extension.js');
@@ -40,6 +41,20 @@ test('content script order requires the chain registry before every isolated con
   const errors = contentScriptOrderErrors([{ js: scripts }]);
   assert.equal(errors.length, 1);
   assert.match(errors[0], /src\/core\/chains\.js/);
+});
+
+test('content script order requires state after constants and before helpers', () => {
+  const scripts = REQUIRED_ISOLATED_ORDER.filter((file) => file !== 'src/core/state.js');
+  const errors = contentScriptOrderErrors([{ js: scripts }]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /src\/core\/state\.js/);
+});
+
+test('page script order requires state after constants and before the engine', () => {
+  const html = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/engine.js"></script><script src="src/core/storage.js"></script>';
+  const errors = htmlScriptOrderErrors(html, 'popup.html');
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /src\/core\/state\.js/);
 });
 
 test('JavaScript syntax validation reports the exact broken file', () => {
