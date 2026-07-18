@@ -11,6 +11,18 @@
     return `${String(chain || '').toLowerCase()}:${String(tokenAddress || '').toLowerCase()}`;
   }
 
+  function chainAccount(state, chain) {
+    const account = state.accounts?.[chain];
+    if (!account) throw new Error('unsupportedChain');
+    return account;
+  }
+
+  function tradeSettings(settings, chain) {
+    const normalized = Tango.State?.normalizeSettings ? Tango.State.normalizeSettings(settings) : (settings || {});
+    return settings?.chainSettings?.[chain] || settings?.chains?.[chain]
+      || normalized.chainSettings?.[chain] || normalized.chains?.[chain] || {};
+  }
+
   function trustedMetadataSource(token) {
     const source = String(token?.metadataSource || '').toUpperCase();
     return token?.metadataVerified === true && METADATA_SOURCE_RANK[source] ? source : '';
@@ -47,31 +59,36 @@
   }
 
   function validateQuote(quote, now = Date.now(), staleMs) {
-    if (!quote || !(effectiveQuotePrice(quote) > 0)) return { ok: false, reason: 'invalidQuote' };
-    if (!(Number(quote.solPriceUsd) > 0)) return { ok: false, reason: 'invalidQuote' };
+    if (!quote || !(effectiveQuotePrice(quote) > 0) || !(Number(quote.nativePriceUsd) > 0)) return { ok: false, reason: 'invalidQuote' };
     const maxAge = Number(staleMs || Tango.QUOTE_STALE_MS || 15_000);
     if (!quote.observedAt || now - Number(quote.observedAt) > maxAge) return { ok: false, reason: 'staleQuote' };
     return { ok: true };
   }
 
-  function feeFor(amountSol, settings) {
-    return Number(amountSol) * Number(settings.platformFeeBps || 0) / 10_000;
+  function feeFor(amountNative, settings) {
+    return Number(amountNative) * Number(settings.platformFeeBps || 0) / 10_000;
+  }
+
+  function nativeSymbol(chain) {
+    return Tango.Chains?.get(chain)?.nativeSymbol || 'NATIVE';
   }
 
   function executeBuy(state, order, settings, now = Date.now()) {
     const quoteValidation = validateQuote(order.quote, now, order.staleMs);
     if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
-    const amountSol = Number(order.amountSol);
-    if (!(amountSol > 0)) throw new Error('invalidAmount');
-    if (amountSol > Number(state.account.cashBalanceSol) + 1e-12) throw new Error('insufficientBalance');
+    const chain = order.token.chain;
+    const account = chainAccount(state, chain);
+    const amountNative = Number(order.amountNative);
+    if (!(amountNative > 0)) throw new Error('invalidAmount');
+    if (amountNative > Number(account.cashBalanceNative) + 1e-12) throw new Error('insufficientBalance');
 
     const slippage = Number(settings.slippageBps || 0) / 10_000;
-    const platformFeeSol = feeFor(amountSol, settings);
-    const networkFeeSol = Number(settings.networkFeeSol || 0);
-    const netInvestmentSol = amountSol - platformFeeSol - networkFeeSol;
-    if (!(netInvestmentSol > 0)) throw new Error('invalidAmount');
+    const networkFeeNative = Number(tradeSettings(settings, chain).networkFeeNative || 0);
+    const platformFeeNative = feeFor(amountNative, settings);
+    const netInvestmentNative = amountNative - platformFeeNative - networkFeeNative;
+    if (!(netInvestmentNative > 0)) throw new Error('invalidAmount');
 
-    const key = positionKey(order.token.chain, order.token.address);
+    const key = positionKey(chain, order.token.address);
     const existing = state.positions[key];
     const valuationMode = existing
       ? (usesMarketCapValuation(existing) ? 'MARKET_CAP' : 'PRICE')
@@ -79,21 +96,18 @@
     const marketCapDivisor = Number(existing?.marketCapDivisor || order.quote.marketCapDivisor || 1_000_000_000);
     const valuationContext = existing || (valuationMode === 'MARKET_CAP' ? { valuationMode, marketCapDivisor } : null);
     const executionPriceUsd = effectiveQuotePrice(order.quote, valuationContext) * (1 + slippage);
-    const solPriceUsd = Number(order.quote.solPriceUsd || 1);
-    const quantity = netInvestmentSol * solPriceUsd / executionPriceUsd;
+    const nativePriceUsd = Number(order.quote.nativePriceUsd);
+    const quantity = netInvestmentNative * nativePriceUsd / executionPriceUsd;
     const existingQuantity = Number(existing?.quantity || 0);
-    const existingCost = Number(existing?.costBasisSol || 0);
+    const existingCost = Number(existing?.costBasisNative || 0);
     const nextQuantity = existingQuantity + quantity;
-    const nextCost = existingCost + amountSol;
+    const nextCost = existingCost + amountNative;
     const averageEntryPriceUsd = nextQuantity > 0
       ? ((existingQuantity * Number(existing?.averageEntryPriceUsd || 0)) + (quantity * executionPriceUsd)) / nextQuantity
       : executionPriceUsd;
     const averageEntryMarketCap = nextCost > 0
-      ? ((existingCost * Number(existing?.averageEntryMarketCap || order.quote.marketCapUsd || 0)) + (amountSol * Number(order.quote.marketCapUsd || 0))) / nextCost
+      ? ((existingCost * Number(existing?.averageEntryMarketCap || order.quote.marketCapUsd || 0)) + (amountNative * Number(order.quote.marketCapUsd || 0))) / nextCost
       : Number(order.quote.marketCapUsd || 0);
-    // A trade changes quantities and balances, never the identity of an existing
-    // position. Identity repair is handled separately from an address-verified
-    // GMGN detail header or trench card.
     const orderMetadataSource = trustedMetadataSource(order.token);
     const positionSymbol = existing?.symbol || (orderMetadataSource && validIdentityText(order.token.symbol, 32)) || 'TOKEN';
     const positionName = existing?.name || (orderMetadataSource && validIdentityText(order.token.name, 100)) || positionSymbol || 'Token';
@@ -101,52 +115,25 @@
     const metadataSource = existing ? (existing.metadataSource || '') : orderMetadataSource;
 
     const trade = {
-      id: cryptoId(now),
-      chain: order.token.chain,
-      tokenAddress: order.token.address,
-      symbol: positionSymbol,
-      name: positionName,
-      logoUrl: positionLogoUrl,
-      side: 'BUY',
-      quantity: round(quantity),
-      amountSol: round(amountSol),
-      observedPriceUsd: effectiveQuotePrice(order.quote, valuationContext),
-      executionPriceUsd: round(executionPriceUsd),
-      marketCapUsd: Number(order.quote.marketCapUsd || 0),
-      liquidityUsd: Number(order.quote.liquidityUsd || 0),
-      solPriceUsd,
-      slippageBps: Number(settings.slippageBps || 0),
-      platformFeeSol: round(platformFeeSol),
-      networkFeeSol: round(networkFeeSol),
-      realizedPnlSol: 0,
-      sourceUrl: order.sourceUrl || '',
-      executedAt: now
+      id: cryptoId(now), chain, tokenAddress: order.token.address, symbol: positionSymbol, name: positionName, logoUrl: positionLogoUrl,
+      side: 'BUY', quantity: round(quantity), amountNative: round(amountNative),
+      observedPriceUsd: effectiveQuotePrice(order.quote, valuationContext), executionPriceUsd: round(executionPriceUsd),
+      marketCapUsd: Number(order.quote.marketCapUsd || 0), liquidityUsd: Number(order.quote.liquidityUsd || 0), nativePriceUsd,
+      nativeSymbol: nativeSymbol(chain), slippageBps: Number(settings.slippageBps || 0),
+      platformFeeNative: round(platformFeeNative), networkFeeNative: round(networkFeeNative),
+      realizedPnlNative: 0, realizedPnlUsd: 0, sourceUrl: order.sourceUrl || '', executedAt: now
     };
 
     const nextState = structuredCloneSafe(state);
-    nextState.account.cashBalanceSol = round(Number(state.account.cashBalanceSol) - amountSol);
-    nextState.account.updatedAt = now;
+    nextState.accounts[chain].cashBalanceNative = round(Number(account.cashBalanceNative) - amountNative);
+    nextState.accounts[chain].updatedAt = now;
     nextState.positions[key] = {
-      ...(existing || {}),
-      chain: order.token.chain,
-      tokenAddress: order.token.address,
-      symbol: positionSymbol,
-      name: positionName,
-      logoUrl: positionLogoUrl,
-      metadataSource,
-      quantity: round(nextQuantity),
-      costBasisSol: round(nextCost),
-      averageEntryPriceUsd: round(averageEntryPriceUsd),
-      averageEntryMarketCap: round(averageEntryMarketCap),
-      realizedPnlSol: Number(existing?.realizedPnlSol || 0),
-      lastPriceUsd: effectiveQuotePrice(order.quote, valuationContext),
-      lastMarketCapUsd: Number(order.quote.marketCapUsd || 0),
-      lastSolPriceUsd: solPriceUsd,
-      quoteObservedAt: Number(order.quote.observedAt),
-      openedAt: existing?.openedAt || now,
-      updatedAt: now,
-      valuationMode,
-      marketCapDivisor
+      ...(existing || {}), chain, tokenAddress: order.token.address, symbol: positionSymbol, name: positionName, logoUrl: positionLogoUrl,
+      metadataSource, quantity: round(nextQuantity), costBasisNative: round(nextCost), averageEntryPriceUsd: round(averageEntryPriceUsd),
+      averageEntryMarketCap: round(averageEntryMarketCap), realizedPnlNative: Number(existing?.realizedPnlNative || 0),
+      lastPriceUsd: effectiveQuotePrice(order.quote, valuationContext), lastMarketCapUsd: Number(order.quote.marketCapUsd || 0),
+      lastNativePriceUsd: nativePriceUsd, quoteObservedAt: Number(order.quote.observedAt), openedAt: existing?.openedAt || now,
+      updatedAt: now, valuationMode, marketCapDivisor
     };
     nextState.trades = [trade, ...(state.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
     return { state: nextState, trade, position: nextState.positions[key] };
@@ -155,84 +142,73 @@
   function executeSell(state, order, settings, now = Date.now()) {
     const quoteValidation = validateQuote(order.quote, now, order.staleMs);
     if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
-    const key = positionKey(order.token.chain, order.token.address);
+    const chain = order.token.chain;
+    const account = chainAccount(state, chain);
+    const key = positionKey(chain, order.token.address);
     const existing = state.positions[key];
     if (!existing || !(Number(existing.quantity) > 0)) throw new Error('noPosition');
 
     const percent = Number(order.percent || 0);
-    const requestedQuantity = order.quantity == null
-      ? Number(existing.quantity) * percent / 100
-      : Number(order.quantity);
+    const requestedQuantity = order.quantity == null ? Number(existing.quantity) * percent / 100 : Number(order.quantity);
     const quantity = Math.min(Number(existing.quantity), requestedQuantity);
     if (!(quantity > 0)) throw new Error('invalidAmount');
 
     const slippage = Number(settings.slippageBps || 0) / 10_000;
     const executionPriceUsd = effectiveQuotePrice(order.quote, existing) * (1 - slippage);
-    const solPriceUsd = Number(order.quote.solPriceUsd || existing.lastSolPriceUsd || 1);
-    const grossProceedsSol = quantity * executionPriceUsd / solPriceUsd;
-    const platformFeeSol = feeFor(grossProceedsSol, settings);
-    const networkFeeSol = Number(settings.networkFeeSol || 0);
-    const netProceedsSol = Math.max(0, grossProceedsSol - platformFeeSol - networkFeeSol);
-    const costShare = Number(existing.costBasisSol) * quantity / Number(existing.quantity);
-    const realizedPnlSol = netProceedsSol - costShare;
+    const nativePriceUsd = Number(order.quote.nativePriceUsd);
+    const grossProceedsNative = quantity * executionPriceUsd / nativePriceUsd;
+    const platformFeeNative = feeFor(grossProceedsNative, settings);
+    const networkFeeNative = Number(tradeSettings(settings, chain).networkFeeNative || 0);
+    const netProceedsNative = Math.max(0, grossProceedsNative - platformFeeNative - networkFeeNative);
+    const costShareNative = Number(existing.costBasisNative) * quantity / Number(existing.quantity);
+    const realizedPnlNative = netProceedsNative - costShareNative;
+    const realizedPnlUsd = realizedPnlNative * nativePriceUsd;
     const remainingQuantity = Math.max(0, Number(existing.quantity) - quantity);
-    const remainingCost = Math.max(0, Number(existing.costBasisSol) - costShare);
+    const remainingCost = Math.max(0, Number(existing.costBasisNative) - costShareNative);
 
     const trade = {
-      id: cryptoId(now),
-      chain: order.token.chain,
-      tokenAddress: order.token.address,
-      symbol: existing.symbol,
-      name: existing.name,
-      logoUrl: existing.logoUrl || '',
-      side: 'SELL',
-      quantity: round(quantity),
-      amountSol: round(netProceedsSol),
-      observedPriceUsd: effectiveQuotePrice(order.quote, existing),
-      executionPriceUsd: round(executionPriceUsd),
-      marketCapUsd: Number(order.quote.marketCapUsd || 0),
-      liquidityUsd: Number(order.quote.liquidityUsd || 0),
-      entryMarketCapUsd: Number(existing.averageEntryMarketCap || 0),
-      solPriceUsd,
-      slippageBps: Number(settings.slippageBps || 0),
-      platformFeeSol: round(platformFeeSol),
-      networkFeeSol: round(networkFeeSol),
-      realizedPnlSol: round(realizedPnlSol),
-      sourceUrl: order.sourceUrl || '',
-      heldMs: now - Number(existing.openedAt || now),
-      executedAt: now
+      id: cryptoId(now), chain, tokenAddress: order.token.address, symbol: existing.symbol, name: existing.name, logoUrl: existing.logoUrl || '',
+      side: 'SELL', quantity: round(quantity), amountNative: round(netProceedsNative),
+      observedPriceUsd: effectiveQuotePrice(order.quote, existing), executionPriceUsd: round(executionPriceUsd),
+      marketCapUsd: Number(order.quote.marketCapUsd || 0), liquidityUsd: Number(order.quote.liquidityUsd || 0),
+      entryMarketCapUsd: Number(existing.averageEntryMarketCap || 0), nativePriceUsd, nativeSymbol: nativeSymbol(chain),
+      slippageBps: Number(settings.slippageBps || 0), platformFeeNative: round(platformFeeNative), networkFeeNative: round(networkFeeNative),
+      realizedPnlNative: round(realizedPnlNative), realizedPnlUsd: round(realizedPnlUsd), sourceUrl: order.sourceUrl || '',
+      heldMs: now - Number(existing.openedAt || now), executedAt: now
     };
 
     const nextState = structuredCloneSafe(state);
-    nextState.account.cashBalanceSol = round(Number(state.account.cashBalanceSol) + netProceedsSol);
-    nextState.account.realizedPnlSol = round(Number(state.account.realizedPnlSol || 0) + realizedPnlSol);
-    nextState.account.updatedAt = now;
-    if (remainingQuantity <= 1e-12) {
-      delete nextState.positions[key];
-    } else {
+    nextState.accounts[chain].cashBalanceNative = round(Number(account.cashBalanceNative) + netProceedsNative);
+    nextState.accounts[chain].realizedPnlNative = round(Number(account.realizedPnlNative || 0) + realizedPnlNative);
+    nextState.accounts[chain].updatedAt = now;
+    if (remainingQuantity <= 1e-12) delete nextState.positions[key];
+    else {
       nextState.positions[key] = {
-        ...existing,
-        quantity: round(remainingQuantity),
-        costBasisSol: round(remainingCost),
-        realizedPnlSol: round(Number(existing.realizedPnlSol || 0) + realizedPnlSol),
-        lastPriceUsd: effectiveQuotePrice(order.quote, existing),
-        lastMarketCapUsd: Number(order.quote.marketCapUsd || 0),
-        lastSolPriceUsd: solPriceUsd,
-        quoteObservedAt: Number(order.quote.observedAt),
-        updatedAt: now
+        ...existing, quantity: round(remainingQuantity), costBasisNative: round(remainingCost),
+        realizedPnlNative: round(Number(existing.realizedPnlNative || 0) + realizedPnlNative),
+        lastPriceUsd: effectiveQuotePrice(order.quote, existing), lastMarketCapUsd: Number(order.quote.marketCapUsd || 0),
+        lastNativePriceUsd: nativePriceUsd, quoteObservedAt: Number(order.quote.observedAt), updatedAt: now
       };
     }
     nextState.trades = [trade, ...(state.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
     const dayKey = localDateKey(now);
-    nextState.dailyRealized[dayKey] = round(Number(nextState.dailyRealized[dayKey] || 0) + realizedPnlSol);
+    const day = nextState.dailyRealizedByChain[chain][dayKey] || { native: 0, usdAtExecution: 0 };
+    nextState.dailyRealizedByChain[chain][dayKey] = {
+      native: round(day.native + realizedPnlNative), usdAtExecution: round(day.usdAtExecution + realizedPnlUsd)
+    };
     return { state: nextState, trade, position: nextState.positions[key] || null };
   }
 
-  function executeCloseAll(state, orders, settings, now = Date.now()) {
+  function executeCloseAll(state, chain, orders, settings, now = Date.now()) {
+    chainAccount(state, chain);
     let nextState = state;
     const trades = [];
     const failures = [];
     for (const order of orders || []) {
+      if (order?.token?.chain !== chain) {
+        failures.push({ order, reason: 'wrongChain' });
+        continue;
+      }
       try {
         const result = executeSell(nextState, { ...order, percent: 100 }, settings, now);
         nextState = result.state;
@@ -246,11 +222,12 @@
 
   function markPosition(position, quote) {
     const priceUsd = quote ? effectiveQuotePrice(quote, position) : Number(position.lastPriceUsd || position.averageEntryPriceUsd || 0);
-    const solPriceUsd = Number(quote?.solPriceUsd || position.lastSolPriceUsd || 1);
-    const valueSol = priceUsd > 0 ? Number(position.quantity) * priceUsd / solPriceUsd : Number(position.costBasisSol);
-    const unrealizedPnlSol = valueSol - Number(position.costBasisSol);
-    const roi = Number(position.costBasisSol) > 0 ? unrealizedPnlSol / Number(position.costBasisSol) * 100 : 0;
-    return { valueSol, unrealizedPnlSol, roi, priceUsd, solPriceUsd };
+    const nativePriceUsd = Number(quote?.nativePriceUsd || position.lastNativePriceUsd || 0);
+    const valueNative = priceUsd > 0 && nativePriceUsd > 0
+      ? Number(position.quantity) * priceUsd / nativePriceUsd : Number(position.costBasisNative);
+    const unrealizedPnlNative = valueNative - Number(position.costBasisNative);
+    const roi = Number(position.costBasisNative) > 0 ? unrealizedPnlNative / Number(position.costBasisNative) * 100 : 0;
+    return { valueNative, unrealizedPnlNative, roi, priceUsd, nativePriceUsd };
   }
 
   function breakevenSellPercent(position, quote, settings) {
@@ -258,42 +235,45 @@
     const slippage = Number(settings.slippageBps || 0) / 10_000;
     const feeRate = Number(settings.platformFeeBps || 0) / 10_000;
     const executionPriceUsd = effectiveQuotePrice(quote, position) * (1 - slippage);
-    const grossFullValueSol = Number(position.quantity) * executionPriceUsd / Number(quote.solPriceUsd);
-    const targetGrossSol = (Number(position.costBasisSol) + Number(settings.networkFeeSol || 0)) / Math.max(1e-9, 1 - feeRate);
-    const percent = targetGrossSol / grossFullValueSol * 100;
+    const grossFullValueNative = Number(position.quantity) * executionPriceUsd / Number(quote.nativePriceUsd);
+    const targetGrossNative = (Number(position.costBasisNative) + Number(tradeSettings(settings, position.chain).networkFeeNative || 0)) / Math.max(1e-9, 1 - feeRate);
+    const percent = targetGrossNative / grossFullValueNative * 100;
     return percent > 0 && percent <= 100 ? Math.min(100, round(percent, 4)) : null;
   }
 
-  function portfolioSummary(state) {
-    let positionsValueSol = 0;
-    let unrealizedPnlSol = 0;
-    Object.values(state.positions || {}).forEach((position) => {
-      const mark = markPosition(position);
-      positionsValueSol += mark.valueSol;
-      unrealizedPnlSol += mark.unrealizedPnlSol;
-    });
-    const equitySol = Number(state.account.cashBalanceSol) + positionsValueSol;
-    const totalPnlSol = equitySol - Number(state.account.initialBalanceSol);
-    const closed = (state.trades || []).filter((trade) => trade.side === 'SELL');
-    const wins = closed.filter((trade) => Number(trade.realizedPnlSol) > 0);
-    const grossProfit = wins.reduce((sum, trade) => sum + Number(trade.realizedPnlSol), 0);
-    const grossLoss = Math.abs(closed.filter((trade) => Number(trade.realizedPnlSol) < 0)
-      .reduce((sum, trade) => sum + Number(trade.realizedPnlSol), 0));
-    const todayKey = localDateKey(Date.now());
+  function portfolioSummary(state, chain) {
+    const account = chainAccount(state, chain);
+    const positions = Object.values(state.positions || {}).filter((position) => position.chain === chain);
+    const trades = (state.trades || []).filter((trade) => trade.chain === chain);
+    const marks = positions.map((position) => markPosition(position));
+    const positionsValueNative = marks.reduce((sum, mark) => sum + mark.valueNative, 0);
+    const unrealizedPnlNative = marks.reduce((sum, mark) => sum + mark.unrealizedPnlNative, 0);
+    const equityNative = Number(account.cashBalanceNative) + positionsValueNative;
+    const totalPnlNative = equityNative - Number(account.initialBalanceNative);
+    const closed = trades.filter((trade) => trade.side === 'SELL');
+    const wins = closed.filter((trade) => Number(trade.realizedPnlNative) > 0);
+    const grossProfit = wins.reduce((sum, trade) => sum + Number(trade.realizedPnlNative), 0);
+    const grossLoss = Math.abs(closed.filter((trade) => Number(trade.realizedPnlNative) < 0).reduce((sum, trade) => sum + Number(trade.realizedPnlNative), 0));
     return {
-      cashBalanceSol: Number(state.account.cashBalanceSol),
-      positionsValueSol,
-      equitySol,
-      realizedPnlSol: Number(state.account.realizedPnlSol || 0),
-      unrealizedPnlSol,
-      totalPnlSol,
-      todayPnlSol: Number(state.dailyRealized?.[todayKey] || 0),
-      positionCount: Object.keys(state.positions || {}).length,
-      totalTrades: (state.trades || []).length,
-      closedTrades: closed.length,
+      cashBalanceNative: Number(account.cashBalanceNative), positionsValueNative, equityNative,
+      realizedPnlNative: Number(account.realizedPnlNative || 0), unrealizedPnlNative, totalPnlNative,
+      todayPnlNative: Number(state.dailyRealizedByChain?.[chain]?.[localDateKey(Date.now())]?.native || 0),
+      positionCount: positions.length, totalTrades: trades.length, closedTrades: closed.length,
       winRate: closed.length ? wins.length / closed.length * 100 : 0,
       profitFactor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0
     };
+  }
+
+  function globalUsdSummary(state, nativePricesByChain) {
+    let assetsUsd = 0; let pnlUsd = 0; const missingChains = [];
+    Tango.Chains.all().forEach((chain) => {
+      const price = Number(nativePricesByChain?.[chain.id] || 0);
+      if (!(price > 0)) { missingChains.push(chain.id); return; }
+      const summary = portfolioSummary(state, chain.id);
+      assetsUsd += summary.equityNative * price;
+      pnlUsd += summary.totalPnlNative * price;
+    });
+    return { assetsUsd, pnlUsd, complete: missingChains.length === 0, missingChains };
   }
 
   function updatePositionQuote(state, token, quote) {
@@ -301,12 +281,10 @@
     if (!state.positions[key] || !validateQuote(quote, Number(quote.observedAt), Infinity).ok) return state;
     const nextState = structuredCloneSafe(state);
     nextState.positions[key] = {
-      ...nextState.positions[key],
-      lastPriceUsd: effectiveQuotePrice(quote, nextState.positions[key]),
+      ...nextState.positions[key], lastPriceUsd: effectiveQuotePrice(quote, nextState.positions[key]),
       lastMarketCapUsd: Number(quote.marketCapUsd || nextState.positions[key].lastMarketCapUsd || 0),
-      lastSolPriceUsd: Number(quote.solPriceUsd || nextState.positions[key].lastSolPriceUsd || 1),
-      quoteObservedAt: Number(quote.observedAt),
-      updatedAt: Date.now()
+      lastNativePriceUsd: Number(quote.nativePriceUsd || nextState.positions[key].lastNativePriceUsd || 0),
+      quoteObservedAt: Number(quote.observedAt), updatedAt: Date.now()
     };
     return nextState;
   }
@@ -321,7 +299,6 @@
     const existingSource = String(existing.metadataSource || '').toUpperCase();
     const existingRank = METADATA_SOURCE_RANK[existingSource] || 0;
     if (sourceRank < existingRank) return state;
-
     const symbol = validIdentityText(token.symbol, 32);
     const name = validIdentityText(token.name, 100);
     const logoUrl = String(token.logoUrl || '').trim();
@@ -349,15 +326,12 @@
   }
 
   function structuredCloneSafe(value) {
-    return typeof global.structuredClone === 'function'
-      ? global.structuredClone(value)
-      : JSON.parse(JSON.stringify(value));
+    return typeof global.structuredClone === 'function' ? global.structuredClone(value) : JSON.parse(JSON.stringify(value));
   }
 
   Tango.Engine = {
     round, positionKey, validateQuote, executeBuy, executeSell, executeCloseAll, markPosition,
-    portfolioSummary, updatePositionQuote, updatePositionMetadata, breakevenSellPercent
+    portfolioSummary, globalUsdSummary, updatePositionQuote, updatePositionMetadata, breakevenSellPercent
   };
-
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Engine;
 })(globalThis);
