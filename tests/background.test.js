@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../src/background.js'), 'utf8');
+const chainsSource = fs.readFileSync(path.resolve(__dirname, '../src/core/chains.js'), 'utf8');
 const ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 const WRAPPED_SOL = 'So11111111111111111111111111111111111111112';
 
@@ -21,9 +22,13 @@ function jsonResponse(body, { ok = true, status = 200 } = {}) {
 
 function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
   const listeners = [];
+  const fetchCalls = [];
   class FakeDate extends Date { static now() { return clock.now; } }
   const context = {
-    fetch: fetchImpl,
+    fetch: (...args) => {
+      fetchCalls.push(args);
+      return fetchImpl(...args);
+    },
     Date: FakeDate,
     URL,
     encodeURIComponent,
@@ -39,9 +44,29 @@ function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
       storage: { session: { get: async () => ({}), set: async () => undefined } }
     }
   };
+  vm.runInNewContext(chainsSource, context, { filename: 'src/core/chains.js' });
   vm.runInNewContext(source, context, { filename: 'src/background.js' });
-  return { context, api: context.module.exports, listeners, clock };
+  return { context, api: context.module.exports, listeners, clock, fetchCalls };
 }
+
+test('ETH native requests coalesce across Ethereum and Base', async () => {
+  const loaded = loadBackground(async () => jsonResponse({ ethereum: { usd: 2500 } }));
+  const [eth, base] = await Promise.all([loaded.context.getNativePrice('eth'), loaded.context.getNativePrice('base')]);
+  assert.equal(eth, 2500); assert.equal(base, 2500); assert.equal(loaded.fetchCalls.length, 1);
+});
+
+test('the same EVM address uses independent DEX requests per chain', async () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const loaded = loadBackground(async (url) => jsonResponse([{ baseToken: { address }, priceUsd: url.includes('/base/') ? 2 : 1, liquidity: { usd: 10 } }]));
+  const [eth, base] = await Promise.all([loaded.context.getTokenQuote('eth', address), loaded.context.getTokenQuote('base', address)]);
+  assert.equal(eth.priceUsd, 1); assert.equal(base.priceUsd, 2); assert.equal(loaded.fetchCalls.length, 2);
+});
+
+test('a chain without verified DEX mapping fails closed without fetch', async () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  assert.equal(await loaded.context.getTokenQuote('robinhood', '0x1111111111111111111111111111111111111111'), null);
+  assert.equal(loaded.fetchCalls.length, 0);
+});
 
 test('concurrent SOL requests share one fetch and preserve the 30 second cache', async () => {
   const gate = deferred();
