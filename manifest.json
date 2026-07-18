@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["https://gmgn.ai/*"],
-      "js": ["src/core/chains.js", "src/content/page-main.js"],
+      "js": ["src/core/chains.js", "src/adapters/gmgn-quotes.js", "src/content/page-main.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },

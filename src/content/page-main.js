@@ -29,106 +29,24 @@
   paperTradeEvents.forEach((type) => window.addEventListener(type, blockGmgnPaperAction, { capture: true, passive: false }));
 
   const quoteCache = new Map();
-  const ADDRESS_KEYS = ['address', 'token_address', 'tokenAddress', 'mint', 'mint_address', 'contract_address', 'contractAddress', 'ca'];
-  const PRICE_KEYS = ['price_usd', 'priceUsd', 'usd_price', 'usdPrice', 'price'];
-  const MC_KEYS = ['market_cap', 'marketCap', 'market_cap_usd', 'marketCapUsd', 'mc', 'fdv'];
-  const LIQUIDITY_KEYS = ['liquidity_usd', 'liquidityUsd', 'liquidity'];
-  const SYMBOL_KEYS = ['symbol', 'token_symbol', 'tokenSymbol', 'ticker'];
-  const NAME_KEYS = ['name', 'token_name', 'tokenName'];
-  const LOGO_KEYS = ['logo', 'logo_url', 'logoUrl', 'image', 'image_url', 'imageUrl'];
 
-  function numberFrom(value) {
-    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-    if (value && typeof value === 'object') return numberFrom(value.usd ?? value.value ?? value.amount ?? 0);
-    if (typeof value !== 'string') return 0;
-    const cleaned = value.replaceAll(',', '').replace(/[^0-9eE.+\-KMBTkmbt]/g, '');
-    const match = cleaned.match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/);
-    if (!match) return 0;
-    let number = Number(match[0]);
-    const suffix = cleaned.slice(-1).toUpperCase();
-    if (suffix === 'K') number *= 1e3;
-    if (suffix === 'M') number *= 1e6;
-    if (suffix === 'B') number *= 1e9;
-    if (suffix === 'T') number *= 1e12;
-    return Number.isFinite(number) ? number : 0;
-  }
-
-  function firstValue(object, keys) {
-    for (const key of keys) {
-      if (object?.[key] != null) return object[key];
-    }
-    return null;
-  }
-
-  function metadataText(value, maxLength) {
-    if (typeof value !== 'string' && typeof value !== 'number') return '';
-    return String(value).trim().slice(0, maxLength);
-  }
-
-  function validSolanaAddress(value) {
-    return typeof value === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
-  }
-
-  function extractQuotes(payload) {
-    const found = new Map();
-    const queue = [payload];
-    const seen = new WeakSet();
-    const observedAt = Date.now();
-    let queueIndex = 0;
-    let visited = 0;
-    while (queueIndex < queue.length && visited < 8000) {
-      const value = queue[queueIndex++];
-      visited += 1;
-      if (!value || typeof value !== 'object') continue;
-      if (seen.has(value)) continue;
-      seen.add(value);
-      if (Array.isArray(value)) {
-        value.slice(0, 500).forEach((item) => queue.push(item));
-        continue;
-      }
-      const address = firstValue(value, ADDRESS_KEYS);
-      if (validSolanaAddress(address)) {
-        const priceUsd = numberFrom(firstValue(value, PRICE_KEYS));
-        const marketCapUsd = numberFrom(firstValue(value, MC_KEYS));
-        const rawLiquidity = firstValue(value, LIQUIDITY_KEYS);
-        const liquidityUsd = numberFrom(typeof rawLiquidity === 'object' ? rawLiquidity?.usd : rawLiquidity);
-        const symbol = metadataText(firstValue(value, SYMBOL_KEYS), 32).replace(/^\$/, '');
-        const name = metadataText(firstValue(value, NAME_KEYS), 100);
-        const logoUrl = metadataText(firstValue(value, LOGO_KEYS), 1000);
-        if (priceUsd > 0 || marketCapUsd > 0) {
-          const key = address.toLowerCase();
-          const previous = found.get(key) || quoteCache.get(key) || {};
-          found.set(key, {
-            address,
-            priceUsd: priceUsd || previous.priceUsd || 0,
-            marketCapUsd: marketCapUsd || previous.marketCapUsd || 0,
-            liquidityUsd: liquidityUsd || previous.liquidityUsd || 0,
-            symbol: symbol || previous.symbol || '',
-            name: name || previous.name || '',
-            logoUrl: logoUrl || previous.logoUrl || '',
-            observedAt,
-            source: 'GMGN_NETWORK'
-          });
-        }
-      }
-      Object.values(value).slice(0, 300).forEach((item) => {
-        if (item && typeof item === 'object') queue.push(item);
-      });
-    }
-    return [...found.values()];
+  function responseChain(url) {
+    return Tango.Chains.fromUrl(url)?.id || Tango.Chains.fromUrl(location.href)?.id || null;
   }
 
   function publish(quotes) {
     if (!quotes.length) return;
-    quotes.forEach((quote) => quoteCache.set(quote.address.toLowerCase(), quote));
+    quotes.forEach((quote) => quoteCache.set(`${quote.chain}:${quote.address}`, quote));
     if (quoteCache.size > 2000) {
       [...quoteCache.keys()].slice(0, quoteCache.size - 2000).forEach((key) => quoteCache.delete(key));
     }
     window.postMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes }, '*');
   }
 
-  function inspectPayload(payload) {
-    try { publish(extractQuotes(payload)); } catch {}
+  function inspectPayload(payload, url = location.href) {
+    const chain = responseChain(url);
+    if (!chain) return;
+    try { publish(Tango.GMGNQuotes.extract(payload, chain, Date.now())); } catch {}
   }
 
   function shouldInspectResponse(url, contentType) {
@@ -148,7 +66,7 @@
         request.then((response) => {
           const contentType = response?.headers?.get('content-type') || '';
           if (response?.ok && shouldInspectResponse(response.url, contentType)) {
-            response.clone().json().then(inspectPayload).catch(() => null);
+            response.clone().json().then((payload) => inspectPayload(payload, response.url)).catch(() => null);
           }
         }).catch(() => null);
         return request;
@@ -167,7 +85,7 @@
     this.addEventListener('load', () => {
       const contentType = this.getResponseHeader('content-type') || '';
       if (this.status >= 200 && this.status < 300 && shouldInspectResponse(this.__tangoRequestUrl, contentType)) {
-        try { inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText)); } catch {}
+        try { inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText), this.__tangoRequestUrl); } catch {}
       }
     }, { once: true });
     return xhrSend.apply(this, args);

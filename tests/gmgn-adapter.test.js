@@ -2,7 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 global.Tango = {};
+require('../src/core/chains.js');
 const GMGN = require('../src/adapters/gmgn.js');
+
+const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
+const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
 
 test('extracts GMGN and Pump.fun token addresses', () => {
   assert.equal(GMGN.tokenAddressFromUrl('https://gmgn.ai/sol/token/AbC123pump?tab=holders'), 'AbC123pump');
@@ -190,34 +194,77 @@ test('detail scope prefers the current BaseInfoBar when another widget repeats t
 });
 
 test('a transient empty detail read preserves the verified context for the same route only', () => {
-  const current = { token: { chain: 'sol', address: 'AbC123pump' }, quote: { priceUsd: 1 } };
-  assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/sol/token/AbC123pump'), current);
-  assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/sol/token/Other456pump'), null);
+  const current = { token: { chain: 'sol', address: SOL_ADDRESS }, quote: { priceUsd: 1 } };
+  assert.equal(GMGN._resolveCurrentTokenRead(current, null, `https://gmgn.ai/sol/token/${SOL_ADDRESS}`), current);
+  assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/sol/token/11111111111111111111111111111111'), null);
   assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/?chain=sol'), null);
 });
 
 test('detail context is retried while the current route has not been resolved', () => {
-  const current = { token: { chain: 'sol', address: 'AbC123pump' } };
-  assert.equal(GMGN._needsCurrentTokenRead(null, 'https://gmgn.ai/sol/token/AbC123pump'), true);
-  assert.equal(GMGN._needsCurrentTokenRead(current, 'https://gmgn.ai/sol/token/AbC123pump'), false);
-  assert.equal(GMGN._needsCurrentTokenRead(current, 'https://gmgn.ai/sol/token/Other456pump'), true);
+  const current = { token: { chain: 'sol', address: SOL_ADDRESS } };
+  assert.equal(GMGN._needsCurrentTokenRead(null, `https://gmgn.ai/sol/token/${SOL_ADDRESS}`), true);
+  assert.equal(GMGN._needsCurrentTokenRead(current, `https://gmgn.ai/sol/token/${SOL_ADDRESS}`), false);
+  assert.equal(GMGN._needsCurrentTokenRead(current, 'https://gmgn.ai/sol/token/11111111111111111111111111111111'), true);
   assert.equal(GMGN._needsCurrentTokenRead(null, 'https://gmgn.ai/?chain=sol'), false);
 });
 
 test('quick-buy injection is restricted to the Solana trench root', () => {
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=sol'), true);
-  assert.equal(GMGN._isTrenchPage('https://gmgn.ai/sol/token/AbC123pump'), false);
+  assert.equal(GMGN._isTrenchPage(`https://gmgn.ai/sol/token/${SOL_ADDRESS}`), false);
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/monitor?chain=sol'), false);
   assert.equal(GMGN._isTrenchPage('https://gmgn.ai/trend?chain=sol'), false);
-  assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=bsc'), false);
+  assert.equal(GMGN._isTrenchPage('https://gmgn.ai/?chain=bsc'), true);
 });
 
-test('trading panel is restricted to an exact Solana token detail route', () => {
-  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/sol/token/AbC123pump'), true);
-  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/sol/token/AbC123pump?tab=holders'), true);
-  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/?chain=sol&token=AbC123pump'), false);
-  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/monitor?chain=sol&token=AbC123pump'), false);
+for (const chain of ['sol', 'eth', 'bsc', 'base', 'robinhood', 'xlayer']) {
+  test(`${chain} detail route is supported`, () => {
+    const address = chain === 'sol' ? SOL_ADDRESS : EVM_ADDRESS;
+    assert.equal(GMGN._isTokenDetailPage(`https://gmgn.ai/${chain}/token/${address}`), true);
+    assert.equal(GMGN.chainFromUrl(`https://gmgn.ai/${chain}/token/${address}`), chain);
+  });
+}
+
+test('trading panel requires an exact registered token detail route and valid address', () => {
+  assert.equal(GMGN._isTokenDetailPage(`https://gmgn.ai/sol/token/${SOL_ADDRESS}?tab=holders`), true);
+  assert.equal(GMGN._isTokenDetailPage(`https://gmgn.ai/?chain=sol&token=${SOL_ADDRESS}`), false);
+  assert.equal(GMGN._isTokenDetailPage(`https://gmgn.ai/monitor?chain=sol&token=${SOL_ADDRESS}`), false);
   assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/bsc/token/0x123'), false);
+});
+
+test('Solana cards retain Pump.fun support while EVM cards reject Base58 addresses', () => {
+  const pumpUrl = `https://pump.fun/coin/${SOL_ADDRESS}`;
+  const card = {
+    innerText: `${SOL_ADDRESS}\nSOL Solana`,
+    getAttribute: (name) => name === 'href' ? pumpUrl : null,
+    querySelectorAll: () => [],
+    firstElementChild: { querySelector: () => null }
+  };
+  assert.equal(GMGN._cardTokenHref(card, 'sol'), pumpUrl);
+  assert.equal(GMGN._verifiedCardMetadata(card, SOL_ADDRESS, 'base'), null);
+});
+
+test('a stale detail header linked to another chain fails closed', () => {
+  const originalDocument = global.document;
+  const staleLink = { href: `https://gmgn.ai/eth/token/${EVM_ADDRESS}`, getAttribute: () => null };
+  const staleHeader = {
+    textContent: `Old token ${EVM_ADDRESS}`,
+    parentElement: {},
+    querySelectorAll(selector) {
+      return selector.includes('a[href') ? [staleLink] : [];
+    }
+  };
+  global.document = {
+    querySelectorAll(selector) {
+      if (selector === '[data-sentry-component="BaseInfoBar"]') return [];
+      if (selector === '[data-sentry-component="TokenHeader"]') return [staleHeader];
+      return [];
+    }
+  };
+  try {
+    assert.equal(GMGN._findTokenDetailScope(EVM_ADDRESS, 'base'), null);
+  } finally {
+    global.document = originalDocument;
+  }
 });
 
 test('detail token logo ignores unrelated token images elsewhere on the page', () => {

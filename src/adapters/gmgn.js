@@ -15,14 +15,11 @@
 
   const SUBSCRIPT_DIGITS = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
 
-  function chainFromUrl(url = location.href) {
-    const parsed = new URL(url);
-    const match = parsed.pathname.match(/^\/(sol|bsc|base|eth)(?:\/|$)/i);
-    const chain = (match?.[1] || parsed.searchParams.get('chain') || '').toLowerCase();
-    return chain === 'sol' ? 'sol' : chain || null;
+  function chainFromUrl(url = global.location?.href || '') {
+    return Tango.Chains?.fromUrl?.(url)?.id || null;
   }
 
-  function tokenAddressFromUrl(url = location.href) {
+  function tokenAddressFromUrl(url = global.location?.href || '') {
     const parsed = new URL(url);
     const parts = parsed.pathname.split('/').filter(Boolean);
     if (parsed.hostname === 'pump.fun' && parts[0]?.toLowerCase() === 'coin' && parts[1]) {
@@ -143,10 +140,11 @@
       .some((attribute) => String(node.getAttribute?.(attribute) || '').toLowerCase().includes(String(address).toLowerCase())));
   }
 
-  function visibleSolAddressHint(value) {
+  function visibleAddressHint(value, chainId = null) {
     const text = String(value || '').replace(/\s+/g, '').trim();
-    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text)) return text;
-    if (/^[1-9A-HJ-NP-Za-km-z]{3,8}(?:\.{3}|…)[1-9A-HJ-NP-Za-km-z]{3,8}$/.test(text)) return text;
+    if (chainId && Tango.Chains.validateAddress(chainId, text)) return text;
+    if (!chainId && Tango.Chains.all().some((chain) => Tango.Chains.validateAddress(chain.id, text))) return text;
+    if (/^(?:0x[a-fA-F0-9]{3,8}|[1-9A-HJ-NP-Za-km-z]{3,8})(?:\.{3}|…)(?:[a-fA-F0-9]{3,8}|[1-9A-HJ-NP-Za-km-z]{3,8})$/.test(text)) return text;
     return '';
   }
 
@@ -158,7 +156,7 @@
     return Infinity;
   }
 
-  function localDetailAddressEvidence(header, scope, address) {
+  function localDetailAddressEvidence(header, scope, address, chainId = null) {
     if (!scope || /^(?:HTML|BODY|MAIN)$/.test(String(scope.tagName || '').toUpperCase())) return null;
     const headers = Array.from(scope.querySelectorAll?.('[data-sentry-component="TokenHeader"]') || []);
     if (headers.length !== 1 || headers[0] !== header) return null;
@@ -170,12 +168,12 @@
     const attributeNodes = Array.from(scope.querySelectorAll?.('[data-address], [data-token-address], [data-mint], [data-ca]') || []);
     const evidence = [];
     leafNodes.forEach((node) => {
-      const hint = visibleSolAddressHint(node.textContent);
+      const hint = visibleAddressHint(node.textContent, chainId);
       if (hint) evidence.push({ node, hint });
     });
     attributeNodes.forEach((node) => {
       ['data-address', 'data-token-address', 'data-mint', 'data-ca'].forEach((attribute) => {
-        const hint = visibleSolAddressHint(node.getAttribute?.(attribute));
+        const hint = visibleAddressHint(node.getAttribute?.(attribute), chainId);
         if (hint) evidence.push({ node, hint });
       });
     });
@@ -187,7 +185,7 @@
 
     const linkedAddresses = Array.from(scope.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || [])
       .map((link) => {
-        try { return tokenAddressFromUrl(new URL(link.href || link.getAttribute?.('href') || '', location.origin).href); }
+        try { return tokenAddressFromUrl(new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai').href); }
         catch { return ''; }
       })
       .filter(Boolean);
@@ -195,9 +193,21 @@
     return addressNode;
   }
 
-  function findTokenDetailScope(address) {
+  function elementBoundToChain(element, chainId) {
+    if (!chainId) return true;
+    const links = Array.from(element?.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || []);
+    return links.every((link) => {
+      let parsed;
+      try { parsed = new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai'); }
+      catch { return false; }
+      if (parsed.hostname === 'pump.fun') return chainId === 'sol';
+      return chainFromUrl(parsed.href) === chainId;
+    });
+  }
+
+  function findTokenDetailScope(address, chainId = null) {
     const findMatches = (headers) => {
-      const directMatches = headers.filter((header) => elementHasTokenAddress(header, address));
+      const directMatches = headers.filter((header) => elementHasTokenAddress(header, address) && elementBoundToChain(header, chainId));
       if (directMatches.length === 1) {
         return [{
           header: directMatches[0],
@@ -212,8 +222,9 @@
       for (const header of headers) {
         let bindingScope = header.parentElement;
         for (let depth = 1; depth <= 5 && bindingScope; depth += 1, bindingScope = bindingScope.parentElement) {
-          const addressNode = localDetailAddressEvidence(header, bindingScope, address);
+          const addressNode = localDetailAddressEvidence(header, bindingScope, address, chainId);
           if (!addressNode) continue;
+          if (!elementBoundToChain(bindingScope, chainId)) continue;
           localMatches.push({ header, scope: header, identityScope: bindingScope, bindingScope, addressNode });
           break;
         }
@@ -235,18 +246,20 @@
     return localMatches.length === 1 ? localMatches[0] : null;
   }
 
-  function resolveCurrentTokenRead(previous, next, url = location.href) {
+  function resolveCurrentTokenRead(previous, next, url = global.location?.href || '') {
     if (next) return next;
     if (!isTokenDetailPage(url)) return null;
-    const address = tokenAddressFromUrl(url).toLowerCase();
+    const chain = chainFromUrl(url);
+    const address = Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(url));
     const previousAddress = String(previous?.token?.address || '').toLowerCase();
-    return address && previousAddress === address ? previous : null;
+    return address && previous?.token?.chain === chain && previousAddress === address.toLowerCase() ? previous : null;
   }
 
-  function needsCurrentTokenRead(current, url = location.href) {
+  function needsCurrentTokenRead(current, url = global.location?.href || '') {
     if (!isTokenDetailPage(url)) return false;
-    const address = tokenAddressFromUrl(url).toLowerCase();
-    return !address || String(current?.token?.address || '').toLowerCase() !== address;
+    const chain = chainFromUrl(url);
+    const address = Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(url));
+    return !address || current?.token?.chain !== chain || String(current?.token?.address || '').toLowerCase() !== address.toLowerCase();
   }
 
   function detailTokenIdentity(scope, address) {
@@ -307,17 +320,18 @@
 
   async function readCurrentToken() {
     if (!isTokenDetailPage()) return null;
-    const address = tokenAddressFromUrl();
     const chain = chainFromUrl();
-    if (!address || chain !== 'sol') return null;
-    let detail = findTokenDetailScope(address);
+    const rawAddress = tokenAddressFromUrl();
+    if (!chain || !Tango.Chains.validateAddress(chain, rawAddress)) return null;
+    const address = Tango.Chains.normalizeAddress(chain, rawAddress);
+    let detail = findTokenDetailScope(address, chain);
     if (!detail) return null;
     if (detail.bindingScope !== detail.header) {
       const firstIdentity = detailTokenIdentity(detail.identityScope || detail.scope, address);
       const firstFingerprint = `${firstIdentity.symbol}\u0000${firstIdentity.name}\u0000${tokenLogo(detail.header)}`;
       await new Promise((resolve) => setTimeout(resolve, 48));
-      if (tokenAddressFromUrl() !== address || chainFromUrl() !== chain) return null;
-      const confirmed = findTokenDetailScope(address);
+      if (chainFromUrl() !== chain || Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl()) !== address) return null;
+      const confirmed = findTokenDetailScope(address, chain);
       if (!confirmed) return null;
       const confirmedIdentity = detailTokenIdentity(confirmed.identityScope || confirmed.scope, address);
       const confirmedFingerprint = `${confirmedIdentity.symbol}\u0000${confirmedIdentity.name}\u0000${tokenLogo(confirmed.header)}`;
@@ -330,7 +344,7 @@
     const baseItems = baseInfo ? Array.from(baseInfo.querySelectorAll('[data-sentry-component="InfoItem"]')) : [];
     const unlabeledMarketCap = parseMoney(baseItems.find((item) => !item.querySelector('.info-item-title'))?.querySelector('.info-item-value')?.textContent);
     const labeledLiquidity = baseItems.find((item) => /^(池子|pool|liquidity)$/i.test(item.querySelector('.info-item-title')?.textContent?.trim() || ''));
-    const marketCapUsd = unlabeledMarketCap || scanLabeledValue(['mc', 'market cap', 'mcap', '市值']) || (/pump$/i.test(address) ? priceUsd * 1_000_000_000 : 0);
+    const marketCapUsd = unlabeledMarketCap || scanLabeledValue(['mc', 'market cap', 'mcap', '市值']) || (chain === 'sol' && /pump$/i.test(address) ? priceUsd * 1_000_000_000 : 0);
     const liquidityUsd = parseMoney(labeledLiquidity?.querySelector('.info-item-value')?.textContent) || scanLabeledValue(['liq', 'liquidity', '流动性', '池子', 'pool']);
     return {
       token: {
@@ -341,21 +355,28 @@
         priceUsd,
         marketCapUsd,
         liquidityUsd,
-        solPriceUsd: 0,
+        nativePriceUsd: 0,
         source: 'GMGN',
         observedAt: priceUsd > 0 || marketCapUsd > 0 ? Date.now() : 0
       }
     };
   }
 
-  function isTrenchPage(url = location.href) {
+  function isTrenchPage(url = global.location?.href || '') {
     const parsed = new URL(url);
-    return parsed.hostname === 'gmgn.ai' && (parsed.pathname === '/' || parsed.pathname === '') && chainFromUrl(url) === 'sol';
+    const chain = Tango.Chains.fromUrl(url);
+    return parsed.hostname === 'gmgn.ai' && (parsed.pathname === '/' || parsed.pathname === '') && Boolean(chain?.capabilities.trench);
   }
 
-  function isTokenDetailPage(url = location.href) {
+  function isTokenDetailPage(url = global.location?.href || '') {
+    const chain = Tango.Chains.fromUrl(url);
+    if (!chain) return false;
     const parsed = new URL(url);
-    return parsed.hostname === 'gmgn.ai' && /^\/sol\/token\/[^/]+\/?$/i.test(parsed.pathname);
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length !== 3 || parts[0] !== chain.gmgnSlug || parts[1].toLowerCase() !== 'token') return false;
+    let address;
+    try { address = decodeURIComponent(parts[2]); } catch { return false; }
+    return Tango.Chains.validateAddress(chain.id, address);
   }
 
   function trenchColumn(card) {
@@ -393,7 +414,7 @@
 
   function tokenAddressLine(line) {
     const text = String(line || '').trim();
-    return /(?:\.{3}|…)/.test(text) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text);
+    return /(?:\.{3}|…)/.test(text) || /^0x[a-fA-F0-9]{40}$/.test(text) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text);
   }
 
   function validCardMetadataLine(value) {
@@ -444,7 +465,11 @@
     return fromCard;
   }
 
-  function verifiedCardMetadata(card, address) {
+  function verifiedCardMetadata(card, address, chainId = null) {
+    const chain = chainId
+      ? Tango.Chains.get(chainId)
+      : Tango.Chains.all().find((candidate) => Tango.Chains.validateAddress(candidate.id, address));
+    if (!chain || !Tango.Chains.validateAddress(chain.id, address)) return null;
     const identity = cardTokenIdentity(card, address);
     if (!identity) return null;
     return { ...identity, logoUrl: cardTokenLogo(card) };
@@ -475,15 +500,30 @@
     return match ? parseMoney(match[1]) : 0;
   }
 
-  function cardTokenHref(card) {
-    const directHref = card?.getAttribute?.('href');
-    if (directHref?.includes('/sol/token/')) return new URL(directHref, location.origin).href;
+  function normalizedCardHref(value, activeChainId) {
+    if (!value) return '';
+    let parsed;
+    try { parsed = new URL(value, global.location?.origin || 'https://gmgn.ai'); }
+    catch { return ''; }
+    const address = tokenAddressFromUrl(parsed.href);
+    if (parsed.hostname === 'pump.fun') {
+      return activeChainId === 'sol' && Tango.Chains.validateAddress('sol', address) ? parsed.href : '';
+    }
+    const routeChain = chainFromUrl(parsed.href);
+    if (!routeChain || routeChain !== activeChainId || !isTokenDetailPage(parsed.href)) return '';
+    return parsed.href;
+  }
+
+  function cardTokenHref(card, activeChainId = chainFromUrl()) {
+    if (!activeChainId) return '';
+    const directHref = normalizedCardHref(card?.getAttribute?.('href'), activeChainId);
+    if (directHref) return directHref;
     const lines = String(card?.innerText || card?.textContent || '').split(/\r?\n/)
       .map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
-    const candidates = Array.from(card?.querySelectorAll?.('a[href*="pump.fun/coin/"], a[href*="/sol/token/"]') || [])
+    const candidates = Array.from(card?.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || [])
       .map((link) => {
-        const href = link.href || link.getAttribute?.('href') || '';
-        const address = href ? tokenAddressFromUrl(new URL(href, location.origin).href) : '';
+        const href = normalizedCardHref(link.href || link.getAttribute?.('href') || '', activeChainId);
+        const address = href ? tokenAddressFromUrl(href) : '';
         return { href, address, addressIndex: lines.findIndex((line) => addressHintMatches(line, address)) };
       })
       .filter((candidate) => candidate.address && candidate.addressIndex >= 0)
@@ -520,22 +560,26 @@
 
   function readVisibleTokenMetadata(addresses) {
     if (!isTrenchPage()) return [];
-    const requested = new Set((addresses || []).map((address) => String(address || '').toLowerCase()).filter(Boolean));
+    const chain = chainFromUrl();
+    if (!chain) return [];
+    const requested = new Set((addresses || [])
+      .filter((address) => Tango.Chains.validateAddress(chain, address))
+      .map((address) => Tango.Chains.normalizeAddress(chain, address)));
     if (!requested.size) return [];
     const found = new Map();
     const cards = document.querySelectorAll('[class~="group/a"]');
     for (const card of cards) {
       if (found.size >= requested.size) break;
-      const href = cardTokenHref(card);
+      const href = cardTokenHref(card, chain);
       if (!href) continue;
       const address = tokenAddressFromUrl(href);
-      const normalized = String(address || '').toLowerCase();
+      const normalized = Tango.Chains.validateAddress(chain, address) ? Tango.Chains.normalizeAddress(chain, address) : '';
       if (!requested.has(normalized) || found.has(normalized)) continue;
       if (!trenchColumn(card)) continue;
-      const metadata = verifiedCardMetadata(card, address);
+      const metadata = verifiedCardMetadata(card, address, chain);
       if (!metadata) continue;
       found.set(normalized, {
-        chain: 'sol', address,
+        chain, address: normalized,
         symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
         metadataVerified: true, metadataSource: 'GMGN_TRENCH'
       });
@@ -584,6 +628,9 @@
       clearQuickBuy();
       return 0;
     }
+    const chain = chainFromUrl();
+    const chainDefinition = Tango.Chains.get(chain);
+    if (!chainDefinition) return 0;
     ensureQuickBuyStyle();
     const nativeSlots = document.querySelectorAll('.BuyButton-continer');
     let injected = 0;
@@ -591,13 +638,13 @@
       if (injected >= 80) break;
       const card = slot.closest('[class~="group/a"]');
       if (!card || !trenchColumn(card)) continue;
-      const href = cardTokenHref(card);
+      const href = cardTokenHref(card, chain);
       if (!href) continue;
-      const address = tokenAddressFromUrl(href);
+      const address = Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(href));
       const existingReplacement = slot.querySelector('.tango-list-quick-buy');
       let nativeControl = slot.querySelector('[data-testid="quickbuy"]');
       const amountSol = cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol);
-      if (!address || !(amountSol > 0) || !verifiedCardMetadata(card, address)) continue;
+      if (!Tango.Chains.validateAddress(chain, address) || !(amountSol > 0) || !verifiedCardMetadata(card, address, chain)) continue;
       const currentMarketCap = cardMarketCap(card.innerText || card.textContent || '');
       if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
       if (slot.dataset.tangoQuickBuy === '1' && existingReplacement &&
@@ -620,8 +667,8 @@
       replacement.dataset.tangoPaperAction = 'quick-buy';
       const actionId = `tango-paper-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       replacement.dataset.tangoActionId = actionId;
-      replacement.title = `Tango Paper Buy ${amountSol} SOL`;
-      replacement.setAttribute('aria-label', `Tango Paper Buy ${amountSol} SOL`);
+      replacement.title = `Tango Paper Buy ${amountSol} ${chainDefinition.nativeSymbol}`;
+      replacement.setAttribute('aria-label', `Tango Paper Buy ${amountSol} ${chainDefinition.nativeSymbol}`);
       const nativeRect = nativeControl.getBoundingClientRect();
       replacement.style.height = `${Math.max(22, Math.round(nativeRect.height || 0))}px`;
       const hint = document.createElement('span');
@@ -629,7 +676,7 @@
       hint.textContent = paperLabel;
       const amount = document.createElement('span');
       amount.className = 'tango-buy-amount';
-      amount.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m13.688 8.12-6.471 7.705c-.206.245-.604.061-.55-.255l1.007-5.843-4.617-.061c-.88-.012-1.352-1.038-.79-1.714L8.723.191c.205-.247.605-.063.55.253L8.247 6.399l4.641.003c.888.001 1.371 1.038.8 1.718Z"/></svg><span>' + amountSol + ' SOL</span>';
+      amount.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m13.688 8.12-6.471 7.705c-.206.245-.604.061-.55-.255l1.007-5.843-4.617-.061c-.88-.012-1.352-1.038-.79-1.714L8.723.191c.205-.247.605-.063.55.253L8.247 6.399l4.641.003c.888.001 1.371 1.038.8 1.718Z"/></svg><span>' + amountSol + ' ' + chainDefinition.nativeSymbol + '</span>';
       replacement.append(hint, amount);
       const handleClick = async () => {
         const now = Date.now();
@@ -637,25 +684,25 @@
         replacement.dataset.tangoLastClickAt = String(now);
         replacement.disabled = true;
         try {
-          const activeHref = cardTokenHref(card);
-          const activeAddress = activeHref ? tokenAddressFromUrl(activeHref) : null;
+          const activeHref = cardTokenHref(card, chain);
+          const activeAddress = activeHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(activeHref)) : null;
           if (activeAddress !== address || !verifiedCardMetadata(card, address)) return;
           const marketCapUsd = await latestCardMarketCap(card, slot);
-          const latestHref = cardTokenHref(card);
-          const latestAddress = latestHref ? tokenAddressFromUrl(latestHref) : null;
+          const latestHref = cardTokenHref(card, chain);
+          const latestAddress = latestHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(latestHref)) : null;
           if (latestAddress !== address) return;
-          const metadata = verifiedCardMetadata(card, address);
+          const metadata = verifiedCardMetadata(card, address, chain);
           if (!metadata) return;
           const symbol = metadata.symbol;
-          const isPumpToken = /pump$/i.test(address);
+          const isPumpToken = chain === 'sol' && /pump$/i.test(address);
           const priceUsd = marketCapUsd > 0 ? marketCapUsd / 1_000_000_000 : 0;
           await onQuickBuy({
             token: {
-              chain: chainFromUrl(href) || 'sol', address, symbol, name: metadata.name, logoUrl: metadata.logoUrl,
+              chain, address, symbol, name: metadata.name, logoUrl: metadata.logoUrl,
               metadataVerified: true, metadataSource: 'GMGN_TRENCH'
             },
             quote: {
-              priceUsd, marketCapUsd, liquidityUsd: 0, solPriceUsd: 0,
+              priceUsd, marketCapUsd, liquidityUsd: 0, nativePriceUsd: 0,
               source: isPumpToken ? 'GMGN_TRENCH_MC' : 'GMGN_LIST_MC',
               valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
               observedAt: marketCapUsd > 0 ? Date.now() : 0
@@ -717,7 +764,8 @@
     resolveCurrentTokenRead, needsCurrentTokenRead,
     _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,
     _cardIdentityFromText: cardIdentityFromText, _addressHintMatches: addressHintMatches,
-    _cardTokenLogo: cardTokenLogo, _verifiedCardMetadata: verifiedCardMetadata, _detailTokenIdentity: detailTokenIdentity,
+    _cardTokenLogo: cardTokenLogo, _cardTokenHref: cardTokenHref,
+    _verifiedCardMetadata: verifiedCardMetadata, _detailTokenIdentity: detailTokenIdentity,
     _findTokenDetailScope: findTokenDetailScope, _tokenLogo: tokenLogo,
     _resolveCurrentTokenRead: resolveCurrentTokenRead, _needsCurrentTokenRead: needsCurrentTokenRead,
     _selectQuickBuyAmount: selectQuickBuyAmount,

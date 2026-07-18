@@ -14,6 +14,11 @@ const REQUIRED_ISOLATED_ORDER = [
   'src/content/markers.js',
   'src/content/content.js'
 ];
+const REQUIRED_MAIN_ORDER = [
+  'src/core/chains.js',
+  'src/adapters/gmgn-quotes.js',
+  'src/content/page-main.js'
+];
 const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 7);
 
 function versionConsistencyErrors({ packageVersion, manifestVersion, constantsSource }) {
@@ -32,6 +37,16 @@ function contentScriptOrderErrors(contentScripts) {
   const indexes = REQUIRED_ISOLATED_ORDER.map((file) => script.js.indexOf(file));
   const ordered = indexes.every((index, position) => position === 0 || indexes[position - 1] < index);
   return ordered ? [] : [`Invalid isolated content script dependency order: ${REQUIRED_ISOLATED_ORDER.join(' -> ')}`];
+}
+
+function mainWorldScriptOrderErrors(contentScripts) {
+  const script = (contentScripts || []).find((entry) => entry.world === 'MAIN' && entry.js?.includes('src/content/page-main.js'));
+  if (!script) return ['Missing MAIN-world content script entry for src/content/page-main.js'];
+  const missing = REQUIRED_MAIN_ORDER.filter((file) => !script.js.includes(file));
+  if (missing.length) return [`Missing MAIN-world script dependencies: ${missing.join(', ')}`];
+  const exact = script.js.length === REQUIRED_MAIN_ORDER.length
+    && REQUIRED_MAIN_ORDER.every((file, index) => script.js[index] === file);
+  return exact ? [] : [`Invalid MAIN-world script order: ${REQUIRED_MAIN_ORDER.join(' -> ')}`];
 }
 
 function htmlScriptOrderErrors(html, file) {
@@ -107,6 +122,7 @@ function validateExtension(root = path.resolve(__dirname, '..')) {
     constantsSource
   }));
   errors.push(...contentScriptOrderErrors(manifest.content_scripts));
+  errors.push(...mainWorldScriptOrderErrors(manifest.content_scripts));
   errors.push(...javascriptSyntaxErrors(collectJavaScriptSources(root)));
   return { errors, manifest, referenced };
 }
@@ -123,9 +139,11 @@ if (require.main === module) {
 
 module.exports = {
   REQUIRED_ISOLATED_ORDER,
+  REQUIRED_MAIN_ORDER,
   validateExtension,
   versionConsistencyErrors,
   contentScriptOrderErrors,
+  mainWorldScriptOrderErrors,
   htmlScriptOrderErrors,
   javascriptSyntaxErrors
 };
