@@ -654,6 +654,10 @@
     const chain = chainFromUrl();
     const chainDefinition = Tango.Chains.get(chain);
     if (!chainDefinition) return 0;
+    if (chain !== 'sol') {
+      clearQuickBuy();
+      return 0;
+    }
     ensureQuickBuyStyle();
     const nativeSlots = document.querySelectorAll('.BuyButton-continer');
     let injected = 0;

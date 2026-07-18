@@ -23,6 +23,7 @@ function jsonResponse(body, { ok = true, status = 200 } = {}) {
 function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
   const listeners = [];
   const fetchCalls = [];
+  const openedTabs = [];
   class FakeDate extends Date { static now() { return clock.now; } }
   const context = {
     fetch: (...args) => {
@@ -40,14 +41,34 @@ function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
         getURL(value) { return `chrome-extension://test/${value}`; },
         openOptionsPage: async () => undefined
       },
-      tabs: { create: async () => undefined },
+      tabs: { create: async ({ url }) => { openedTabs.push(url); } },
       storage: { session: { get: async () => ({}), set: async () => undefined } }
     }
   };
   vm.runInNewContext(chainsSource, context, { filename: 'src/core/chains.js' });
   vm.runInNewContext(source, context, { filename: 'src/background.js' });
-  return { context, api: context.module.exports, listeners, clock, fetchCalls };
+  return { context, api: context.module.exports, listeners, clock, fetchCalls, openedTabs };
 }
+
+test('token tab messages accept every registered GMGN chain and reject non-token routes', async () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const send = (url) => new Promise((resolve) => {
+    loaded.listeners[0]({ type: 'TANGO_OPEN_TOKEN', url }, null, resolve);
+  });
+  const evmAddress = '0x1111111111111111111111111111111111111111';
+  const cases = ['sol', 'eth', 'bsc', 'base', 'robinhood', 'xlayer'].map((chain) => ({
+    chain,
+    address: chain === 'sol' ? ADDRESS : evmAddress
+  }));
+  for (const item of cases) {
+    const url = `https://gmgn.ai/${item.chain}/token/${item.address}`;
+    assert.equal((await send(url)).ok, true);
+    assert.equal(loaded.openedTabs.at(-1), url);
+  }
+  const rejected = await send('https://gmgn.ai/base/monitor');
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, 'Invalid GMGN token URL');
+});
 
 test('ETH native requests coalesce across Ethereum and Base', async () => {
   const loaded = loadBackground(async () => jsonResponse({ ethereum: { usd: 2500 } }));

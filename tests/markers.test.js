@@ -17,13 +17,13 @@ test('position entry wins and the first four matching sells keep trade order', (
     quote: { priceUsd: 2, marketCapUsd: 2_000 }
   };
   const trades = [
-    { id: 'sell-1', chain: 'sol', tokenAddress: ADDRESS.toLowerCase(), side: 'SELL', marketCapUsd: 1_500, observedPriceUsd: 1.5 },
-    { id: 'buy-1', chain: 'sol', tokenAddress: ADDRESS, side: 'BUY', marketCapUsd: 1_200, observedPriceUsd: 1.2 },
-    { id: 'sell-2', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', marketCapUsd: 1_600, observedPriceUsd: 0 },
-    { id: 'wrong-chain', chain: 'eth', tokenAddress: ADDRESS, side: 'SELL', marketCapUsd: 9_999, observedPriceUsd: 9.9 },
-    { id: 'sell-3', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', marketCapUsd: 1_700, observedPriceUsd: 1.7 },
-    { id: 'sell-4', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', marketCapUsd: 1_800, observedPriceUsd: 1.8 },
-    { id: 'sell-5', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', marketCapUsd: 1_900, observedPriceUsd: 1.9 }
+    { id: 'sell-1', chain: 'sol', tokenAddress: ADDRESS.toLowerCase(), side: 'SELL', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_500, observedPriceUsd: 1.5 },
+    { id: 'buy-1', chain: 'sol', tokenAddress: ADDRESS, side: 'BUY', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_200, observedPriceUsd: 1.2 },
+    { id: 'sell-2', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_600, observedPriceUsd: 0 },
+    { id: 'wrong-chain', chain: 'eth', tokenAddress: ADDRESS, side: 'SELL', amountNative: 9, nativePriceUsd: 3_000, marketCapUsd: 9_999, observedPriceUsd: 9.9 },
+    { id: 'sell-3', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_700, observedPriceUsd: 1.7 },
+    { id: 'sell-4', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_800, observedPriceUsd: 1.8 },
+    { id: 'sell-5', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_900, observedPriceUsd: 1.9 }
   ];
 
   const payload = buildPayload({
@@ -56,8 +56,8 @@ test('first matching buy is the fallback entry and missing trade ids keep the le
     current,
     position: null,
     trades: [
-      { chain: 'sol', tokenAddress: ADDRESS, side: 'BUY', marketCapUsd: 1_000, observedPriceUsd: 0 },
-      { chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', marketCapUsd: 1_500, observedPriceUsd: 0, executedAt: 123 }
+      { chain: 'sol', tokenAddress: ADDRESS, side: 'BUY', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_000, observedPriceUsd: 0 },
+      { chain: 'sol', tokenAddress: ADDRESS, side: 'SELL', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_500, observedPriceUsd: 0, executedAt: 123 }
     ],
     labels
   });

@@ -21,7 +21,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'TANGO_OPEN_TOKEN') {
     let url;
     try { url = new URL(String(message.url || '')); } catch { url = null; }
-    if (!url || url.origin !== 'https://gmgn.ai' || !/^\/sol\/token\//i.test(url.pathname)) {
+    const chain = url ? Chains.fromUrl(url.href) : null;
+    const parts = url?.pathname.split('/').filter(Boolean) || [];
+    const validTokenUrl = url?.origin === 'https://gmgn.ai' && chain
+      && parts.length === 3 && parts[0] === chain.gmgnSlug && parts[1].toLowerCase() === 'token'
+      && Chains.validateAddress(chain.id, parts[2]);
+    if (!validTokenUrl) {
       sendResponse({ ok: false, error: 'Invalid GMGN token URL' });
       return false;
     }

@@ -52,6 +52,12 @@ test('content script order requires state after constants and before helpers', (
   assert.match(errors[0], /src\/core\/state\.js/);
 });
 
+test('isolated content loads the chain view before content runtime consumers', () => {
+  const viewIndex = REQUIRED_ISOLATED_ORDER.indexOf('src/content/chain-view.js');
+  const contentIndex = REQUIRED_ISOLATED_ORDER.indexOf('src/content/content.js');
+  assert.ok(viewIndex >= 0 && viewIndex < contentIndex);
+});
+
 test('MAIN-world GMGN tap requires chains and quote extraction in exact order', () => {
   assert.deepEqual(REQUIRED_MAIN_ORDER, [
     'src/core/chains.js', 'src/adapters/gmgn-quotes.js', 'src/content/page-main.js'

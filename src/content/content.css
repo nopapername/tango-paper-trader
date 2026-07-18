@@ -190,7 +190,7 @@
 .tango-trade-title { align-items: center; display: flex; font-weight: 800; gap: 9px; margin-bottom: 10px; }
 .tango-trade-title.buy-title { color: #39e58c; }
 .tango-trade-title.sell-title { color: #ff6673; }
-.tango-title-balance { color: var(--text); font-size: 11px; font-weight: 700; margin-left: auto; max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tango-title-balance { color: var(--text); font-size: 11px; font-weight: 700; margin-left: auto; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tango-preset.buy-preset { background: transparent; border-color: #26d77e; color: #42e797; font-weight: 800; }
 .tango-preset.buy-preset:hover { background: rgba(38,215,126,.12); }
 .tango-preset.sell-preset { background: transparent; border-color: #ff4d5e; color: #ff6673; font-weight: 800; }
@@ -227,7 +227,7 @@
 .tango-paper-balance-summary { background: linear-gradient(135deg,rgba(155,124,255,.18),rgba(62,230,160,.08)); border: 1px solid rgba(155,124,255,.42); border-radius: 8px; margin: -5px 2px; padding: 5px 4px; }
 .tango-paper-balance-summary span { color: #cbbfff; font-size: 11px; font-weight: 750; margin-bottom: 3px; }
 .tango-paper-balance-summary strong { color: #72f0bd; font-size: 15px; font-weight: 900; text-shadow: 0 0 12px rgba(62,230,160,.18); }
-.buy-title .tango-title-balance { color: #72f0bd; font-size: 14px; font-weight: 900; max-width: 155px; text-shadow: 0 0 12px rgba(62,230,160,.18); }
+.buy-title .tango-title-balance { color: #72f0bd; font-size: 14px; font-weight: 900; max-width: 175px; text-shadow: 0 0 12px rgba(62,230,160,.18); }
 .tango-bottom-details { color: var(--muted); display: grid; font-size: 9px; gap: 5px; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 1px 2px 4px; text-align: center; }
 .tango-bottom-details span { min-width: 0; white-space: nowrap; }
 .tango-bottom-details strong { color: #c9cbd3; font-size: 9px; }

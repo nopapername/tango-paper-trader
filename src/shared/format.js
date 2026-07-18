@@ -15,11 +15,15 @@
     }).format(Number(value));
   }
 
-  function sol(value, language, signed = false) {
+  function native(value, symbol, language, signed = false) {
     if (!Number.isFinite(Number(value))) return '--';
-    const numeric = Number(value);
-    const sign = signed && numeric > 0 ? '+' : '';
-    return `${sign}${number(numeric, language, 4)} SOL`;
+    const numeric = Number(value || 0);
+    const sign = signed && numeric > 0 ? '+' : numeric < 0 ? '-' : '';
+    return `${sign}${number(Math.abs(numeric), language, 4)} ${String(symbol || '').trim()}`.trim();
+  }
+
+  function sol(value, language, signed = false) {
+    return native(value, 'SOL', language, signed);
   }
 
   function percent(value, language, signed = false) {
@@ -48,5 +52,5 @@
     return language === 'zh-CN' ? `${days}天 ${hours % 24}小时` : `${days}d ${hours % 24}h`;
   }
 
-  Tango.Format = { compact, number, sol, percent, usd, duration };
+  Tango.Format = { compact, number, native, sol, percent, usd, duration };
 })(globalThis);

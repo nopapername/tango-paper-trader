@@ -3,6 +3,7 @@
 
   function buildPayload({ current, position, trades, labels }) {
     if (!current?.token) return { markers: [] };
+    const chain = current.token.chain;
     const address = current.token.address.toLowerCase();
     const currentPrice = Number(current.quote.priceUsd || 0);
     const currentMarketCap = Number(current.quote.marketCapUsd || 0);
@@ -10,7 +11,7 @@
     const sellTrades = [];
 
     for (const trade of trades || []) {
-      if (trade.chain !== current.token.chain || trade.tokenAddress.toLowerCase() !== address || !(Number(trade.marketCapUsd) > 0)) continue;
+      if (trade.chain !== chain || trade.tokenAddress.toLowerCase() !== address || !(Number(trade.marketCapUsd) > 0)) continue;
       if (!firstBuy && trade.side === 'BUY') firstBuy = trade;
       if (trade.side === 'SELL' && sellTrades.length < 4) sellTrades.push(trade);
       if (firstBuy && sellTrades.length === 4) break;

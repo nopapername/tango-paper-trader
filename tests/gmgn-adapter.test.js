@@ -484,8 +484,7 @@ test('quick-buy executes a fresh Solana Pump market cap without promoting that d
     const evmOrders = [];
     global.document = evm.document;
     global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
-    assert.equal(GMGN.discoverTokenCards((order) => evmOrders.push(order)), 1);
-    await evm.slot.__tangoQuickBuyHandler();
+    assert.equal(GMGN.discoverTokenCards((order) => evmOrders.push(order)), 0);
     assert.equal(evmOrders.length, 0);
   } finally {
     global.document = original.document;
