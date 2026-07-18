@@ -2,6 +2,7 @@
   const Tango = global.Tango = global.Tango || {};
   const quickBuyActions = new Map();
   const trenchColumns = new WeakMap();
+  let lastVerifiedDetail = null;
   const quickBuyResizeObserver = typeof global.ResizeObserver === 'function'
     ? new global.ResizeObserver((entries) => entries.forEach((entry) => updateQuickBuySizeClass(entry.target)))
     : null;
@@ -67,9 +68,9 @@
     return null;
   }
 
-  function scanLabeledValue(labels) {
+  function scanLabeledValue(labels, root) {
     const normalized = labels.map((label) => label.toLowerCase());
-    const nodes = document.querySelectorAll('span,div,p');
+    const nodes = root?.querySelectorAll?.('span,div,p') || [];
     const limit = Math.min(nodes.length, 2500);
     for (let index = 0; index < limit; index += 1) {
       const element = nodes[index];
@@ -89,8 +90,13 @@
     return 0;
   }
 
-  function findPrice() {
-    const baseInfo = document.querySelector('[data-sentry-component="BaseInfoPriceView"]');
+  function baseInfoPriceView(root) {
+    if (root?.getAttribute?.('data-sentry-component') === 'BaseInfoPriceView') return root;
+    return root?.querySelector?.('[data-sentry-component="BaseInfoPriceView"]') || null;
+  }
+
+  function findPrice(root) {
+    const baseInfo = baseInfoPriceView(root);
     if (baseInfo) {
       const priceItem = Array.from(baseInfo.querySelectorAll('[data-sentry-component="InfoItem"]')).find((item) =>
         /^(价格|price)$/i.test(item.querySelector('.info-item-title')?.textContent?.trim() || '')
@@ -101,15 +107,11 @@
     const direct = firstText([
       '[data-testid="token-price"]', '[data-testid*="price"]', '[data-token-price]',
       '[class*="token-price"]', '[class*="TokenPrice"]', '[class*="price_usd"]'
-    ]);
+    ], root);
     const directValue = parseMoney(direct?.text);
     if (directValue > 0) return directValue;
 
-    const description = document.querySelector('meta[property="og:description"]')?.content || '';
-    const descriptionPrice = description.match(/(?:price|价格)\s*[:：]?\s*\$?([0-9.,eE+\-]+)/i);
-    if (descriptionPrice) return parseMoney(descriptionPrice[1]);
-
-    const candidates = Array.from(document.querySelectorAll('span,div'))
+    const candidates = Array.from(root?.querySelectorAll?.('span,div') || [])
       .filter((element) => element.childElementCount === 0)
       .map((element) => element.textContent?.trim() || '')
       .filter((text) => /^\$?0(?:\.\d+|\.0[\u2080-\u2089]\d+)$/.test(text) || /^\$\d+\.\d{3,}$/.test(text))
@@ -193,27 +195,39 @@
     return addressNode;
   }
 
-  function elementBoundToChain(element, chainId) {
-    if (!chainId) return true;
+  function elementChainBinding(element, chainId) {
+    if (!chainId) return 'MATCH';
     const links = Array.from(element?.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || []);
-    return links.every((link) => {
+    if (!links.length) return 'UNKNOWN';
+    const matches = links.every((link) => {
       let parsed;
       try { parsed = new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai'); }
       catch { return false; }
       if (parsed.hostname === 'pump.fun') return chainId === 'sol';
       return chainFromUrl(parsed.href) === chainId;
     });
+    return matches ? 'MATCH' : 'MISMATCH';
   }
 
-  function findTokenDetailScope(address, chainId = null) {
-    const findMatches = (headers) => {
-      const directMatches = headers.filter((header) => elementHasTokenAddress(header, address) && elementBoundToChain(header, chainId));
+  function findTokenDetailScope(address, chainId = null, allowUnknownChain = false) {
+    const findMatches = (headers, quoteScope = null) => {
+      const bindingFor = (header, scope = quoteScope) => {
+        const headerBinding = elementChainBinding(header, chainId);
+        if (headerBinding !== 'UNKNOWN' || !scope || scope === header) return headerBinding;
+        return elementChainBinding(scope, chainId);
+      };
+      const directMatches = headers
+        .filter((header) => elementHasTokenAddress(header, address))
+        .map((header) => ({ header, chainBinding: bindingFor(header) }))
+        .filter((item) => item.chainBinding === 'MATCH' || (allowUnknownChain && item.chainBinding === 'UNKNOWN'));
       if (directMatches.length === 1) {
         return [{
-          header: directMatches[0],
-          scope: directMatches[0],
-          identityScope: directMatches[0],
-          bindingScope: directMatches[0]
+          header: directMatches[0].header,
+          scope: directMatches[0].header,
+          identityScope: directMatches[0].header,
+          bindingScope: directMatches[0].header,
+          quoteScope: quoteScope || directMatches[0].header,
+          chainBound: directMatches[0].chainBinding === 'MATCH'
         }];
       }
       if (directMatches.length > 1) return [];
@@ -224,8 +238,12 @@
         for (let depth = 1; depth <= 5 && bindingScope; depth += 1, bindingScope = bindingScope.parentElement) {
           const addressNode = localDetailAddressEvidence(header, bindingScope, address, chainId);
           if (!addressNode) continue;
-          if (!elementBoundToChain(bindingScope, chainId)) continue;
-          localMatches.push({ header, scope: header, identityScope: bindingScope, bindingScope, addressNode });
+          const chainBinding = bindingFor(header, bindingScope);
+          if (chainBinding === 'MISMATCH' || (!allowUnknownChain && chainBinding === 'UNKNOWN')) continue;
+          localMatches.push({
+            header, scope: header, identityScope: bindingScope, bindingScope, addressNode,
+            quoteScope: quoteScope || bindingScope, chainBound: chainBinding === 'MATCH'
+          });
           break;
         }
       }
@@ -236,7 +254,7 @@
       .filter((bar) => bar.getAttribute?.('data-sentry-component') === 'BaseInfoBar');
     if (baseInfoBars.length) {
       const anchoredMatches = baseInfoBars.flatMap((bar) => findMatches(
-        Array.from(bar.querySelectorAll?.('[data-sentry-component="TokenHeader"]') || [])
+        Array.from(bar.querySelectorAll?.('[data-sentry-component="TokenHeader"]') || []), bar
       ));
       return anchoredMatches.length === 1 ? anchoredMatches[0] : null;
     }
@@ -318,48 +336,56 @@
     return images.length === 1 ? images[0].src || '' : '';
   }
 
+  function detailQuote(detail, chain, address) {
+    const quoteScope = detail?.quoteScope || detail?.bindingScope || detail?.scope;
+    if (!quoteScope) return null;
+    const priceUsd = findPrice(quoteScope);
+    const baseInfo = baseInfoPriceView(quoteScope);
+    const baseItems = baseInfo ? Array.from(baseInfo.querySelectorAll('[data-sentry-component="InfoItem"]')) : [];
+    const unlabeledMarketCap = parseMoney(baseItems.find((item) => !item.querySelector('.info-item-title'))?.querySelector('.info-item-value')?.textContent);
+    const labeledLiquidity = baseItems.find((item) => /^(池子|pool|liquidity)$/i.test(item.querySelector('.info-item-title')?.textContent?.trim() || ''));
+    const marketCapUsd = unlabeledMarketCap
+      || scanLabeledValue(['mc', 'market cap', 'mcap', '市值'], quoteScope)
+      || (chain === 'sol' && /pump$/i.test(address) ? priceUsd * 1_000_000_000 : 0);
+    const liquidityUsd = parseMoney(labeledLiquidity?.querySelector('.info-item-value')?.textContent)
+      || scanLabeledValue(['liq', 'liquidity', '流动性', '池子', 'pool'], quoteScope);
+    return {
+      priceUsd, marketCapUsd, liquidityUsd, nativePriceUsd: 0, source: 'GMGN',
+      observedAt: priceUsd > 0 || marketCapUsd > 0 ? Date.now() : 0
+    };
+  }
+
   async function readCurrentToken() {
     if (!isTokenDetailPage()) return null;
     const chain = chainFromUrl();
     const rawAddress = tokenAddressFromUrl();
     if (!chain || !Tango.Chains.validateAddress(chain, rawAddress)) return null;
     const address = Tango.Chains.normalizeAddress(chain, rawAddress);
-    let detail = findTokenDetailScope(address, chain);
+    let detail = findTokenDetailScope(address, chain, true);
     if (!detail) return null;
-    if (detail.bindingScope !== detail.header) {
-      const firstIdentity = detailTokenIdentity(detail.identityScope || detail.scope, address);
-      const firstFingerprint = `${firstIdentity.symbol}\u0000${firstIdentity.name}\u0000${tokenLogo(detail.header)}`;
-      await new Promise((resolve) => setTimeout(resolve, 48));
-      if (chainFromUrl() !== chain || Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl()) !== address) return null;
-      const confirmed = findTokenDetailScope(address, chain);
-      if (!confirmed) return null;
-      const confirmedIdentity = detailTokenIdentity(confirmed.identityScope || confirmed.scope, address);
-      const confirmedFingerprint = `${confirmedIdentity.symbol}\u0000${confirmedIdentity.name}\u0000${tokenLogo(confirmed.header)}`;
-      if (confirmedFingerprint !== firstFingerprint) return null;
-      detail = confirmed;
-    }
-    const identity = detailTokenIdentity(detail.identityScope || detail.scope, address);
-    const priceUsd = findPrice();
-    const baseInfo = document.querySelector('[data-sentry-component="BaseInfoPriceView"]');
-    const baseItems = baseInfo ? Array.from(baseInfo.querySelectorAll('[data-sentry-component="InfoItem"]')) : [];
-    const unlabeledMarketCap = parseMoney(baseItems.find((item) => !item.querySelector('.info-item-title'))?.querySelector('.info-item-value')?.textContent);
-    const labeledLiquidity = baseItems.find((item) => /^(池子|pool|liquidity)$/i.test(item.querySelector('.info-item-title')?.textContent?.trim() || ''));
-    const marketCapUsd = unlabeledMarketCap || scanLabeledValue(['mc', 'market cap', 'mcap', '市值']) || (chain === 'sol' && /pump$/i.test(address) ? priceUsd * 1_000_000_000 : 0);
-    const liquidityUsd = parseMoney(labeledLiquidity?.querySelector('.info-item-value')?.textContent) || scanLabeledValue(['liq', 'liquidity', '流动性', '池子', 'pool']);
-    return {
+    const firstIdentity = detailTokenIdentity(detail.identityScope || detail.scope, address);
+    const firstFingerprint = `${firstIdentity.symbol}\u0000${firstIdentity.name}\u0000${tokenLogo(detail.header)}`;
+    await new Promise((resolve) => setTimeout(resolve, 48));
+    if (chainFromUrl() !== chain || Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl()) !== address) return null;
+    const confirmed = findTokenDetailScope(address, chain, true);
+    if (!confirmed) return null;
+    const identity = detailTokenIdentity(confirmed.identityScope || confirmed.scope, address);
+    const fingerprint = `${identity.symbol}\u0000${identity.name}\u0000${tokenLogo(confirmed.header)}`;
+    if (fingerprint !== firstFingerprint) return null;
+    if (lastVerifiedDetail?.address === address && lastVerifiedDetail.chain !== chain
+      && !confirmed.chainBound && lastVerifiedDetail.fingerprint === fingerprint) return null;
+    detail = confirmed;
+    const quote = detailQuote(detail, chain, address);
+    if (!quote) return null;
+    const result = {
       token: {
         chain, address, symbol: identity.symbol, name: identity.name, logoUrl: tokenLogo(detail.header),
         metadataVerified: true, metadataSource: 'GMGN_DETAIL'
       },
-      quote: {
-        priceUsd,
-        marketCapUsd,
-        liquidityUsd,
-        nativePriceUsd: 0,
-        source: 'GMGN',
-        observedAt: priceUsd > 0 || marketCapUsd > 0 ? Date.now() : 0
-      }
+      quote
     };
+    lastVerifiedDetail = { chain, address, fingerprint };
+    return result;
   }
 
   function isTrenchPage(url = global.location?.href || '') {
@@ -531,16 +557,13 @@
     return candidates[0]?.href || '';
   }
 
-  async function latestCardMarketCap(card, slot) {
+  async function latestCardMarketCap(card) {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const value = cardMarketCap(card?.innerText || card?.textContent || '');
-      if (value > 0) {
-        slot.dataset.tangoMarketCapUsd = String(value);
-        return value;
-      }
+      if (value > 0) return { marketCapUsd: value, observedAt: Date.now() };
       await new Promise((resolve) => setTimeout(resolve, 75));
     }
-    return Number(slot.dataset.tangoMarketCapUsd || 0);
+    return null;
   }
 
   function updateQuickBuySizeClass(slot) {
@@ -645,8 +668,6 @@
       let nativeControl = slot.querySelector('[data-testid="quickbuy"]');
       const amountSol = cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol);
       if (!Tango.Chains.validateAddress(chain, address) || !(amountSol > 0) || !verifiedCardMetadata(card, address, chain)) continue;
-      const currentMarketCap = cardMarketCap(card.innerText || card.textContent || '');
-      if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
       if (slot.dataset.tangoQuickBuy === '1' && existingReplacement &&
         slot.dataset.tangoTokenAddress === address && Number(slot.dataset.tangoAmountSol) === amountSol &&
         slot.dataset.tangoPaperLabel === paperLabel) {
@@ -659,7 +680,6 @@
         nativeControl = slot.querySelector('[data-testid="quickbuy"]');
       }
       if (!nativeControl) continue;
-      if (currentMarketCap > 0) slot.dataset.tangoMarketCapUsd = String(currentMarketCap);
       const replacement = document.createElement('button');
       replacement.type = 'button';
       replacement.className = 'tango-list-quick-buy';
@@ -684,18 +704,23 @@
         replacement.dataset.tangoLastClickAt = String(now);
         replacement.disabled = true;
         try {
+          if (chainFromUrl() !== chain) return;
           const activeHref = cardTokenHref(card, chain);
           const activeAddress = activeHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(activeHref)) : null;
-          if (activeAddress !== address || !verifiedCardMetadata(card, address)) return;
-          const marketCapUsd = await latestCardMarketCap(card, slot);
+          if (activeAddress !== address || !verifiedCardMetadata(card, address, chain)) return;
+          const isPumpToken = chain === 'sol' && /pump$/i.test(address);
+          if (!isPumpToken) return;
+          const executableQuote = await latestCardMarketCap(card);
+          if (!executableQuote) return;
           const latestHref = cardTokenHref(card, chain);
           const latestAddress = latestHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(latestHref)) : null;
           if (latestAddress !== address) return;
           const metadata = verifiedCardMetadata(card, address, chain);
           if (!metadata) return;
           const symbol = metadata.symbol;
-          const isPumpToken = chain === 'sol' && /pump$/i.test(address);
-          const priceUsd = marketCapUsd > 0 ? marketCapUsd / 1_000_000_000 : 0;
+          if (chainFromUrl() !== chain) return;
+          const marketCapUsd = executableQuote.marketCapUsd;
+          const priceUsd = marketCapUsd / 1_000_000_000;
           await onQuickBuy({
             token: {
               chain, address, symbol, name: metadata.name, logoUrl: metadata.logoUrl,
@@ -703,9 +728,9 @@
             },
             quote: {
               priceUsd, marketCapUsd, liquidityUsd: 0, nativePriceUsd: 0,
-              source: isPumpToken ? 'GMGN_TRENCH_MC' : 'GMGN_LIST_MC',
+              source: 'GMGN_TRENCH_MC',
               valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
-              observedAt: marketCapUsd > 0 ? Date.now() : 0
+              observedAt: executableQuote.observedAt
             },
             amountSol,
             sourceUrl: href
@@ -756,7 +781,6 @@
     delete slot.dataset.tangoAmountSol;
     delete slot.dataset.tangoPaperLabel;
     delete slot.dataset.tangoActionId;
-    delete slot.dataset.tangoMarketCapUsd;
   }
 
   Tango.GMGN = {
