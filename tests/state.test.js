@@ -37,6 +37,32 @@ test('normalization is idempotent', () => {
   assert.deepEqual(State.normalizeState(once, State.normalizeSettings({})), once);
 });
 
+test('settings move legacy Solana values into the Solana chain only', () => {
+  const settings = State.normalizeSettings({ buyPresets: [1, 2], networkFeeSol: 0.002, initialBalanceSol: 25 });
+  assert.deepEqual(settings.chains.sol.buyPresets, [1, 2]);
+  assert.equal(settings.chains.sol.networkFeeNative, 0.002);
+  assert.equal(settings.chains.sol.initialBalanceNative, 25);
+  assert.equal(Object.hasOwn(settings, 'buyPresets'), false);
+  assert.equal(Object.hasOwn(settings, 'networkFeeSol'), false);
+  assert.equal(Object.hasOwn(settings, 'initialBalanceSol'), false);
+});
+
+test('v2 trade normalization derives the registered chain native symbol', () => {
+  const state = State.createInitialState({ now: 1000 });
+  state.trades = [{ id: 'bsc-1', chain: 'bsc', amountNative: 1 }];
+  const normalized = State.normalizeState(state, State.normalizeSettings({}));
+  assert.equal(normalized.trades[0].nativeSymbol, 'BNB');
+});
+
+test('strict v2 import rejects an inconsistent native symbol and repairs a missing one', () => {
+  const state = State.createInitialState({ now: 1000 });
+  state.trades = [{ id: 'bsc-1', chain: 'bsc', amountNative: 1, nativeSymbol: 'SOL' }];
+  assert.throws(() => State.normalizeState(state, State.normalizeSettings({}), { strict: true }), /invalidTrade/);
+  state.trades[0] = { id: 'bsc-1', chain: 'bsc', amountNative: 1 };
+  const normalized = State.normalizeState(state, State.normalizeSettings({}), { strict: true });
+  assert.equal(normalized.trades[0].nativeSymbol, 'BNB');
+});
+
 test('selected-chain reset preserves every other chain', () => {
   const state = State.createInitialState({ now: 1000 });
   state.accounts.eth.cashBalanceNative = 4;

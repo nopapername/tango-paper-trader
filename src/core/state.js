@@ -19,6 +19,23 @@
     nativePriceUsd: native(trade, 'nativePriceUsd', 'solPriceUsd'),
     nativeSymbol: trade.nativeSymbol || 'SOL'
   });
+  const normalizeV2Trade = (trade, strict) => {
+    const chain = Tango.Chains.get(trade?.chain);
+    if (!chain) {
+      if (strict) throw new Error('invalidTrade');
+      return { ...trade };
+    }
+    if (strict && trade.nativeSymbol && trade.nativeSymbol !== chain.nativeSymbol) throw new Error('invalidTrade');
+    return {
+      ...trade,
+      amountNative: native(trade, 'amountNative', 'amountSol'),
+      platformFeeNative: native(trade, 'platformFeeNative', 'platformFeeSol'),
+      networkFeeNative: native(trade, 'networkFeeNative', 'networkFeeSol'),
+      realizedPnlNative: native(trade, 'realizedPnlNative', 'realizedPnlSol'),
+      nativePriceUsd: native(trade, 'nativePriceUsd', 'solPriceUsd'),
+      nativeSymbol: chain.nativeSymbol
+    };
+  };
 
   function createInitialState({ now = Date.now(), initialBalances = {} } = {}) {
     const accounts = Object.fromEntries(Tango.Chains.all().map((chain) => [
@@ -40,8 +57,16 @@
       } : {};
       return [chain.id, chainSettingsFor(chain, { ...legacySolSettings, ...(existing[chain.id] || {}) })];
     }));
-    const { chains: ignoredChains, chainSettings: ignoredChainSettings, ...globalSettings } = source;
-    return { ...Tango.DEFAULT_SETTINGS, ...globalSettings, chains };
+    const {
+      chains: ignoredChains, chainSettings: ignoredChainSettings,
+      buyPresets: ignoredBuyPresets, networkFeeSol: ignoredNetworkFeeSol,
+      initialBalanceSol: ignoredInitialBalanceSol, ...globalSettings
+    } = source;
+    const {
+      buyPresets: defaultBuyPresets, networkFeeSol: defaultNetworkFeeSol,
+      initialBalanceSol: defaultInitialBalanceSol, ...defaultGlobalSettings
+    } = Tango.DEFAULT_SETTINGS;
+    return { ...defaultGlobalSettings, ...globalSettings, chains };
   }
 
   function normalizeAccount(raw, fallback, strict) {
@@ -140,7 +165,7 @@
       schemaVersion: 2,
       accounts,
       positions,
-      trades: Array.isArray(raw.trades) ? raw.trades.slice(0, Tango.MAX_TRADES).map(migrateTrade) : [],
+      trades: Array.isArray(raw.trades) ? raw.trades.slice(0, Tango.MAX_TRADES).map((trade) => normalizeV2Trade(trade, strict)) : [],
       dailyRealizedByChain,
       initialized: Boolean(raw.initialized)
     };

@@ -14,7 +14,7 @@ const REQUIRED_ISOLATED_ORDER = [
   'src/content/markers.js',
   'src/content/content.js'
 ];
-const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 6);
+const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 7);
 
 function versionConsistencyErrors({ packageVersion, manifestVersion, constantsSource }) {
   const constantsVersion = String(constantsSource || '').match(/Tango\.VERSION\s*=\s*['\"]([^'\"]+)['\"]/)?.[1] || '';
