@@ -1,6 +1,7 @@
 (function initEngine(global) {
   const Tango = global.Tango = global.Tango || {};
   const METADATA_SOURCE_RANK = Object.freeze({ GMGN_TRENCH: 20, GMGN_DETAIL: 30 });
+  const MARKET_CAP_PROVENANCE = 'SOLANA_PUMP_TRENCH_V1';
 
   function round(value, digits = 12) {
     const factor = 10 ** digits;
@@ -42,8 +43,24 @@
     return ratio > 900_000_000 && ratio < 1_100_000_000;
   }
 
-  function effectiveQuotePrice(quote, position) {
+  function trustedMarketCapQuote(quote, context) {
+    const metadataSource = String(context?.metadataSource || '').toUpperCase();
+    const verifiedContext = context?.marketCapProvenance === MARKET_CAP_PROVENANCE
+      || (context?.metadataVerified === true && metadataSource === 'GMGN_TRENCH');
+    return context?.chain === 'sol'
+      && /pump$/i.test(String(context?.tokenAddress || context?.address || ''))
+      && verifiedContext
+      && String(quote?.source || '').toUpperCase() === 'GMGN_TRENCH_MC'
+      && quote?.valuationMode === 'MARKET_CAP'
+      && Number(quote?.marketCapDivisor) === 1_000_000_000
+      && Number(quote?.marketCapUsd || 0) > 0;
+  }
+
+  function effectiveQuotePrice(quote, position, trustContext = position) {
     const marketCap = Number(quote?.marketCapUsd || 0);
+    const price = Number(quote?.priceUsd || 0);
+    const trustedMarketCap = trustedMarketCapQuote(quote, trustContext);
+    if (!trustedMarketCap) return price > 0 ? price : 0;
     const positionUsesMarketCap = usesMarketCapValuation(position);
     const useMarketCap = position ? positionUsesMarketCap : quote?.valuationMode === 'MARKET_CAP';
     if (useMarketCap && marketCap > 0) {
@@ -54,12 +71,12 @@
       const referenceMarketCap = Number(position.lastMarketCapUsd || position.averageEntryMarketCap || 0);
       if (referencePrice > 0 && referenceMarketCap > 0) return referencePrice * marketCap / referenceMarketCap;
     }
-    const price = Number(quote?.priceUsd || 0);
-    return price > 0 ? price : marketCap > 0 ? marketCap / 1_000_000_000 : 0;
+    return price > 0 ? price : marketCap / Number(quote.marketCapDivisor);
   }
 
-  function validateQuote(quote, now = Date.now(), staleMs) {
-    if (!quote || !(effectiveQuotePrice(quote) > 0) || !(Number(quote.nativePriceUsd) > 0)) return { ok: false, reason: 'invalidQuote' };
+  function validateQuote(quote, now = Date.now(), staleMs, context, trustContext = context) {
+    if (!quote || !(effectiveQuotePrice(quote, context, trustContext) > 0)
+      || !(Number(quote.nativePriceUsd) > 0)) return { ok: false, reason: 'invalidQuote' };
     const maxAge = Number(staleMs || Tango.QUOTE_STALE_MS || 15_000);
     if (!quote.observedAt || now - Number(quote.observedAt) > maxAge) return { ok: false, reason: 'staleQuote' };
     return { ok: true };
@@ -74,10 +91,13 @@
   }
 
   function executeBuy(state, order, settings, now = Date.now()) {
-    const quoteValidation = validateQuote(order.quote, now, order.staleMs);
-    if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
     const chain = order.token.chain;
     const account = chainAccount(state, chain);
+    const key = positionKey(chain, order.token.address);
+    const existing = state.positions[key];
+    const trustContext = existing?.marketCapProvenance === MARKET_CAP_PROVENANCE ? existing : order.token;
+    const quoteValidation = validateQuote(order.quote, now, order.staleMs, existing || order.token, trustContext);
+    if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
     const amountNative = Number(order.amountNative);
     if (!(amountNative > 0)) throw new Error('invalidAmount');
     if (amountNative > Number(account.cashBalanceNative) + 1e-12) throw new Error('insufficientBalance');
@@ -88,14 +108,15 @@
     const netInvestmentNative = amountNative - platformFeeNative - networkFeeNative;
     if (!(netInvestmentNative > 0)) throw new Error('invalidAmount');
 
-    const key = positionKey(chain, order.token.address);
-    const existing = state.positions[key];
+    const trustedMarketCap = trustedMarketCapQuote(order.quote, trustContext);
     const valuationMode = existing
       ? (usesMarketCapValuation(existing) ? 'MARKET_CAP' : 'PRICE')
-      : (order.quote.valuationMode === 'MARKET_CAP' ? 'MARKET_CAP' : 'PRICE');
+      : (trustedMarketCap ? 'MARKET_CAP' : 'PRICE');
     const marketCapDivisor = Number(existing?.marketCapDivisor || order.quote.marketCapDivisor || 1_000_000_000);
-    const valuationContext = existing || (valuationMode === 'MARKET_CAP' ? { valuationMode, marketCapDivisor } : null);
-    const executionPriceUsd = effectiveQuotePrice(order.quote, valuationContext) * (1 + slippage);
+    const valuationContext = existing || (valuationMode === 'MARKET_CAP'
+      ? { ...order.token, valuationMode, marketCapDivisor }
+      : order.token);
+    const executionPriceUsd = effectiveQuotePrice(order.quote, valuationContext, trustContext) * (1 + slippage);
     const nativePriceUsd = Number(order.quote.nativePriceUsd);
     const quantity = netInvestmentNative * nativePriceUsd / executionPriceUsd;
     const existingQuantity = Number(existing?.quantity || 0);
@@ -117,7 +138,7 @@
     const trade = {
       id: cryptoId(now), chain, tokenAddress: order.token.address, symbol: positionSymbol, name: positionName, logoUrl: positionLogoUrl,
       side: 'BUY', quantity: round(quantity), amountNative: round(amountNative),
-      observedPriceUsd: effectiveQuotePrice(order.quote, valuationContext), executionPriceUsd: round(executionPriceUsd),
+      observedPriceUsd: effectiveQuotePrice(order.quote, valuationContext, trustContext), executionPriceUsd: round(executionPriceUsd),
       marketCapUsd: Number(order.quote.marketCapUsd || 0), liquidityUsd: Number(order.quote.liquidityUsd || 0), nativePriceUsd,
       nativeSymbol: nativeSymbol(chain), slippageBps: Number(settings.slippageBps || 0),
       platformFeeNative: round(platformFeeNative), networkFeeNative: round(networkFeeNative),
@@ -131,22 +152,25 @@
       ...(existing || {}), chain, tokenAddress: order.token.address, symbol: positionSymbol, name: positionName, logoUrl: positionLogoUrl,
       metadataSource, quantity: round(nextQuantity), costBasisNative: round(nextCost), averageEntryPriceUsd: round(averageEntryPriceUsd),
       averageEntryMarketCap: round(averageEntryMarketCap), realizedPnlNative: Number(existing?.realizedPnlNative || 0),
-      lastPriceUsd: effectiveQuotePrice(order.quote, valuationContext), lastMarketCapUsd: Number(order.quote.marketCapUsd || 0),
+      lastPriceUsd: effectiveQuotePrice(order.quote, valuationContext, trustContext), lastMarketCapUsd: Number(order.quote.marketCapUsd || 0),
       lastNativePriceUsd: nativePriceUsd, quoteObservedAt: Number(order.quote.observedAt), openedAt: existing?.openedAt || now,
-      updatedAt: now, valuationMode, marketCapDivisor
+      updatedAt: now, valuationMode, marketCapDivisor,
+      ...(existing?.marketCapProvenance || trustedMarketCap
+        ? { marketCapProvenance: existing?.marketCapProvenance || MARKET_CAP_PROVENANCE }
+        : {})
     };
     nextState.trades = [trade, ...(state.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
     return { state: nextState, trade, position: nextState.positions[key] };
   }
 
   function executeSell(state, order, settings, now = Date.now()) {
-    const quoteValidation = validateQuote(order.quote, now, order.staleMs);
-    if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
     const chain = order.token.chain;
     const account = chainAccount(state, chain);
     const key = positionKey(chain, order.token.address);
     const existing = state.positions[key];
     if (!existing || !(Number(existing.quantity) > 0)) throw new Error('noPosition');
+    const quoteValidation = validateQuote(order.quote, now, order.staleMs, existing);
+    if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
 
     const percent = Number(order.percent || 0);
     const requestedQuantity = order.quantity == null ? Number(existing.quantity) * percent / 100 : Number(order.quantity);
@@ -231,7 +255,7 @@
   }
 
   function breakevenSellPercent(position, quote, settings) {
-    if (!position || !(Number(position.quantity) > 0) || !validateQuote(quote).ok) return null;
+    if (!position || !(Number(position.quantity) > 0) || !validateQuote(quote, Date.now(), undefined, position).ok) return null;
     const slippage = Number(settings.slippageBps || 0) / 10_000;
     const feeRate = Number(settings.platformFeeBps || 0) / 10_000;
     const executionPriceUsd = effectiveQuotePrice(quote, position) * (1 - slippage);
@@ -278,7 +302,8 @@
 
   function updatePositionQuote(state, token, quote) {
     const key = positionKey(token.chain, token.address);
-    if (!state.positions[key] || !validateQuote(quote, Number(quote.observedAt), Infinity).ok) return state;
+    if (!state.positions[key]
+      || !validateQuote(quote, Number(quote.observedAt), Infinity, state.positions[key]).ok) return state;
     const nextState = structuredCloneSafe(state);
     nextState.positions[key] = {
       ...nextState.positions[key], lastPriceUsd: effectiveQuotePrice(quote, nextState.positions[key]),

@@ -343,10 +343,23 @@
     runtime.nativePricePromises.set(chain.id, request);
   }
 
-  function acceptedTokenObservation(candidate, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
+  function trustedMarketCapObservation(candidate, token) {
+    const persistedTrust = token?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1';
+    const observedTrust = token?.metadataVerified === true
+      && String(token?.metadataSource || '').toUpperCase() === 'GMGN_TRENCH';
+    return token?.chain === 'sol'
+      && /pump$/i.test(String(token?.tokenAddress || token?.address || ''))
+      && (persistedTrust || observedTrust)
+      && String(candidate?.source || '').toUpperCase() === 'GMGN_TRENCH_MC'
+      && candidate?.valuationMode === 'MARKET_CAP'
+      && Number(candidate?.marketCapDivisor) === 1_000_000_000
+      && Number(candidate?.marketCapUsd || 0) > 0;
+  }
+
+  function acceptedTokenObservation(candidate, token, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
     const source = String(candidate?.source || '').toUpperCase();
     const acceptedSource = source === 'DEXSCREENER' || source.startsWith('GMGN');
-    const hasValue = Number(candidate?.priceUsd || 0) > 0 || Number(candidate?.marketCapUsd || 0) > 0;
+    const hasValue = Number(candidate?.priceUsd || 0) > 0 || trustedMarketCapObservation(candidate, token);
     const observedAt = Number(candidate?.observedAt || 0);
     return acceptedSource && hasValue && observedAt > 0 && Date.now() - observedAt <= maxAgeMs;
   }
@@ -354,11 +367,11 @@
   function ensureTokenQuote(context, routeCapture = captureRoute()) {
     const chain = activeChain();
     if (!routeCaptureIsCurrent(routeCapture) || !chain || context?.token?.chain !== chain.id
-      || !context?.token?.address || acceptedTokenObservation(context.quote)) return;
+      || !context?.token?.address || acceptedTokenObservation(context.quote, context.token)) return;
     const address = context.token.address;
     const requestKey = gmgnQuoteKey(chain.id, address);
     const gmgnQuote = freshGmgnQuote(chain.id, address);
-    if (acceptedTokenObservation(gmgnQuote)) {
+    if (acceptedTokenObservation(gmgnQuote, context.token)) {
       mergeQuote(context, gmgnQuote);
       queueRender();
       return;
@@ -372,7 +385,7 @@
       .then((response) => {
         if (!requestIsCurrent()) return;
         const quote = response?.quote;
-        if (!acceptedTokenObservation(quote)) {
+        if (!acceptedTokenObservation(quote, context.token)) {
           runtime.quoteRetryAt.set(requestKey, Date.now() + 15_000);
           return;
         }
@@ -412,7 +425,7 @@
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain) return null;
       const quote = freshGmgnQuote(chain, address);
       const hasMetadata = !isPlaceholderTokenLabel(quote?.symbol) || !isPlaceholderTokenLabel(quote?.name);
-      if (acceptedTokenObservation(quote) && (!requireMetadata || hasMetadata)) return quote;
+      if (acceptedTokenObservation(quote, { chain, address }) && (!requireMetadata || hasMetadata)) return quote;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return null;
@@ -422,6 +435,8 @@
     if (!quote) return context.quote;
     const chain = context.token?.chain;
     const nativePriceUsd = freshNativePrice(chain);
+    const validationContext = persistedQuoteContext(context.token);
+    const trustedMarketCap = trustedMarketCapObservation(quote, validationContext);
     context.quote = {
       ...context.quote,
       ...quote,
@@ -430,12 +445,12 @@
       liquidityUsd: Number(quote.liquidityUsd || 0),
       observedAt: Number(quote.observedAt || 0),
       source: String(quote.source || ''),
-      marketCapDivisor: Number(quote.marketCapDivisor || 1_000_000_000),
+      marketCapDivisor: trustedMarketCap ? Number(quote.marketCapDivisor) : 0,
       nativePriceUsd,
       nativePriceObservedAt: nativePriceUsd ? runtime.nativePriceObservedAt.get(chain) : 0,
-      valuationMode: quote.valuationMode === 'MARKET_CAP'
+      valuationMode: trustedMarketCap
         ? 'MARKET_CAP'
-        : Number(quote.priceUsd) > 0 ? 'PRICE' : Number(quote.marketCapUsd) > 0 ? 'MARKET_CAP' : ''
+        : Number(quote.priceUsd) > 0 ? 'PRICE' : ''
     };
     return context.quote;
   }
@@ -454,13 +469,13 @@
     const chain = activeChain();
     if (!routeCaptureIsCurrent(routeCapture) || !chain || context?.token?.chain !== chain.id) return null;
     let networkQuote = freshGmgnQuote(chain.id, context.token.address);
-    if (acceptedTokenObservation(networkQuote)) mergeQuote(context, networkQuote);
-    let hasTokenValue = acceptedTokenObservation(context.quote);
+    if (acceptedTokenObservation(networkQuote, context.token)) mergeQuote(context, networkQuote);
+    let hasTokenValue = acceptedTokenObservation(context.quote, context.token);
     if (!hasTokenValue) {
       networkQuote = await waitForGmgnQuote(chain.id, context.token.address, 900, false, routeCapture);
       if (!routeCaptureIsCurrent(routeCapture)) return null;
-      if (acceptedTokenObservation(networkQuote)) mergeQuote(context, networkQuote);
-      hasTokenValue = acceptedTokenObservation(context.quote);
+      if (acceptedTokenObservation(networkQuote, context.token)) mergeQuote(context, networkQuote);
+      hasTokenValue = acceptedTokenObservation(context.quote, context.token);
     }
     const tokenRequest = hasTokenValue ? Promise.resolve(null) : sharedQuoteRequest({
       type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address: context.token.address
@@ -470,7 +485,7 @@
       : sharedQuoteRequest({ type: 'TANGO_GET_NATIVE_PRICE', chain: chain.id });
     const [tokenResponse, nativeResponse] = await Promise.all([tokenRequest, nativeRequest]);
     if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain.id) return null;
-    if (acceptedTokenObservation(tokenResponse?.quote)) mergeQuote(context, tokenResponse.quote);
+    if (acceptedTokenObservation(tokenResponse?.quote, context.token)) mergeQuote(context, tokenResponse.quote);
     const nativePrice = nativeResponse?.price
       ? rememberNativePrice(chain.id, nativeResponse.price, Number(nativeResponse.observedAt || 0))
       : freshNativePrice(chain.id);
@@ -491,7 +506,7 @@
       nativePriceUsd,
       nativePriceObservedAt: runtime.nativePriceObservedAt.get(chain.id)
     };
-    const validation = Tango.Engine.validateQuote(quote);
+    const validation = Tango.Engine.validateQuote(quote, Date.now(), undefined, persistedQuoteContext(token));
     if (!validation.ok) throw new Error(validation.reason);
     return quote;
   }
@@ -501,6 +516,13 @@
     catch { return null; }
   }
 
+  function persistedQuoteContext(token) {
+    const chain = token?.chain;
+    const address = token?.tokenAddress || token?.address;
+    if (!chain || !address) return token;
+    return runtime.state?.positions?.[Tango.Engine.positionKey(chain, address)] || token;
+  }
+
   function freshExecutableQuote(position) {
     const chain = activeChain();
     if (!chain || position?.chain !== chain.id) return null;
@@ -508,7 +530,7 @@
     const currentMatches = runtime.current?.token?.chain === chain.id
       && Tango.Chains.normalizeAddress(chain.id, runtime.current.token.address) === address;
     const candidate = currentMatches ? runtime.current.quote : freshGmgnQuote(chain.id, address);
-    return executableQuote({ chain: chain.id, address }, candidate);
+    return executableQuote(position, candidate);
   }
 
   function positionUrl(position) {
@@ -571,7 +593,7 @@
     const account = activeAccount();
     const settings = chainSettings();
     if (!chain || order.token?.chain !== chain.id || !account || !settings) throw new Error('unsupportedChain');
-    const validation = Tango.Engine.validateQuote(order.quote);
+    const validation = Tango.Engine.validateQuote(order.quote, Date.now(), undefined, persistedQuoteContext(order.token));
     if (!validation.ok) throw new Error(validation.reason);
     if (!(order.amountNative > 0)) throw new Error('invalidAmount');
     if (order.amountNative > account.cashBalanceNative) throw new Error('insufficientBalance');
@@ -623,7 +645,7 @@
       order.quote = requireExecutableQuote(context?.token, context?.quote);
       const key = Tango.Engine.positionKey(order.token?.chain, order.token?.address);
       if (!runtime.state.positions[key]) throw new Error('noPosition');
-      const validation = Tango.Engine.validateQuote(order.quote);
+      const validation = Tango.Engine.validateQuote(order.quote, Date.now(), undefined, persistedQuoteContext(order.token));
       if (!validation.ok) throw new Error(validation.reason);
       if (requiresConfirmation()) {
         runtime.modal = {

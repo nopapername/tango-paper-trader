@@ -83,6 +83,7 @@ async function getNativePriceObservation(chainId) {
 
 async function fetchNativePriceObservation(chain, key) {
   let price = 0;
+  let observedAt = 0;
   try {
     const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(chain.coingeckoId)}&vs_currencies=usd`, {
       headers: { accept: 'application/json' }
@@ -90,14 +91,16 @@ async function fetchNativePriceObservation(chain, key) {
     if (response.ok) {
       const body = await response.json();
       price = Number(body?.[key]?.usd || 0);
+      if (price > 0) observedAt = Date.now();
     }
   } catch {}
   if (!(price > 0) && chain.wrappedNativeAddress && chain.dexScreenerChain) {
     const wrappedNative = await getTokenQuote(chain.id, chain.wrappedNativeAddress);
     price = Number(wrappedNative?.priceUsd || 0);
+    observedAt = Number(wrappedNative?.observedAt || 0);
   }
   if (!(price > 0)) throw new Error(`${chain.nativeSymbol} price is unavailable`);
-  const observedAt = Date.now();
+  if (!(observedAt > 0)) observedAt = Date.now();
   nativePriceCache.set(key, { price, fetchedAt: observedAt });
   return { price, observedAt };
 }

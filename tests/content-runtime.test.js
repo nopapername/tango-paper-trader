@@ -10,7 +10,8 @@ const contentSource = fs.readFileSync(path.resolve(__dirname, '../src/content/co
 const START = "  start().catch((error) => console.error('[Tango Paper Trader]', error));";
 const EXPOSE = `  global.__contentTest = {
     runtime, performQuoteTick, handleRouteChange, handleQuickBuy, buy,
-    ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice
+    ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
+    requireExecutableQuote, freshExecutableQuote
   };`;
 const instrumentedSource = contentSource.replace(START, EXPOSE);
 
@@ -46,7 +47,7 @@ function defaultSettings() {
 function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurrentToken, sendMessage } = {}) {
   assert.notEqual(instrumentedSource, contentSource, 'content test harness must replace startup with runtime exports');
   const messages = [];
-  const calls = { buy: 0, save: 0 };
+  const calls = { buy: 0, buyOrders: [], save: 0 };
   const clock = { now: 1_000_000 };
   class FakeDate extends Date {
     constructor(...args) { super(args.length ? args[0] : clock.now); }
@@ -125,14 +126,18 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
     },
     Engine: {
       positionKey: (chain, address) => `${chain}:${String(address).toLowerCase()}`,
-      validateQuote(quote) {
+      validateQuote(quote, now, staleMs, context) {
         const hasValue = Number(quote?.priceUsd || quote?.marketCapUsd) > 0;
         const fresh = Number(quote?.observedAt || 0) > 0 && FakeDate.now() - Number(quote.observedAt) <= 15_000;
-        return hasValue && Number(quote?.nativePriceUsd) > 0 && fresh ? { ok: true } : { ok: false, reason: fresh ? 'invalidQuote' : 'staleQuote' };
+        const marketCapAllowed = quote?.valuationMode !== 'MARKET_CAP' || Number(quote?.priceUsd || 0) > 0
+          || context?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1';
+        return hasValue && marketCapAllowed && Number(quote?.nativePriceUsd) > 0 && fresh
+          ? { ok: true }
+          : { ok: false, reason: fresh ? 'invalidQuote' : 'staleQuote' };
       },
       updatePositionMetadata: (state) => state,
       updatePositionQuote: (state) => state,
-      executeBuy(state) { calls.buy += 1; return { state, trade: {} }; },
+      executeBuy(state, order) { calls.buy += 1; calls.buyOrders.push(order); return { state, trade: {} }; },
       executeSell: (state) => ({ state, trade: {} }), executeCloseAll: (state) => ({ state, trades: [], failures: [] }),
       portfolioSummary: () => ({ totalPnlNative: 0, positionsValueNative: 0, positionCount: 0 }),
       markPosition: () => ({ unrealizedPnlNative: 0, valueNative: 0, roi: 0 }), breakevenSellPercent: () => null
@@ -257,4 +262,67 @@ test('an old failed quote request cannot suppress or remove a newer away-and-bac
 
   currentGate.resolve({ ok: false });
   await currentRequest;
+});
+
+test('EVM market-cap-only GMGN observation falls back to a priced DEX quote before execution', async () => {
+  const loaded = loadContent({
+    sendMessage: async (message) => message.type === 'TANGO_GET_TOKEN_QUOTE'
+      ? {
+        ok: true,
+        quote: { priceUsd: 2, marketCapUsd: 2_000, source: 'DEXSCREENER', observedAt: 1_000_000 }
+      }
+      : { ok: true }
+  });
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  loaded.api.rememberNativePrice('eth', 3_000, loaded.clock.now);
+  const context = {
+    ...quoteContext(),
+    amountNative: 1,
+    quote: {
+      priceUsd: 0,
+      marketCapUsd: 2_000,
+      source: 'GMGN_NETWORK',
+      observedAt: loaded.clock.now,
+      valuationMode: 'MARKET_CAP',
+      marketCapDivisor: 1_000_000_000
+    }
+  };
+
+  const action = loaded.api.handleQuickBuy(context);
+  loaded.clock.now += 1_000;
+  await action;
+
+  assert.equal(loaded.messages.some((message) => message.type === 'TANGO_GET_TOKEN_QUOTE'), true);
+  assert.equal(loaded.calls.buy, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 2);
+  assert.equal(loaded.calls.buyOrders[0].quote.source, 'DEXSCREENER');
+});
+
+test('content validates a persisted Pump market-cap position after detail metadata replaces trench metadata', () => {
+  const address = '11111111111111111111111111111111pump';
+  const loaded = loadContent({ href: `https://gmgn.ai/sol/token/${address}` });
+  const position = {
+    chain: 'sol',
+    tokenAddress: address,
+    symbol: 'PUMP',
+    metadataSource: 'GMGN_DETAIL',
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1',
+    valuationMode: 'MARKET_CAP',
+    marketCapDivisor: 1_000_000_000
+  };
+  const quote = {
+    priceUsd: 0,
+    marketCapUsd: 4_000,
+    source: 'GMGN_TRENCH_MC',
+    observedAt: loaded.clock.now,
+    valuationMode: 'MARKET_CAP',
+    marketCapDivisor: 1_000_000_000
+  };
+  loaded.api.runtime.state.positions[`sol:${address}`] = position;
+  loaded.api.runtime.gmgnQuotes.set(`sol:${address}`, quote);
+  loaded.api.rememberNativePrice('sol', 100, loaded.clock.now);
+
+  assert.ok(loaded.api.requireExecutableQuote({ chain: 'sol', address, metadataSource: 'GMGN_DETAIL' }, quote));
+  assert.ok(loaded.api.freshExecutableQuote(position));
 });

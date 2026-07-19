@@ -85,17 +85,116 @@ test('close all only closes orders for the requested chain', () => {
   assert.equal(result.failures.length, 1);
 });
 
-test('market-cap-only trench quotes can buy and track native pnl without a token price', () => {
+test('verified Solana Pump market-cap quotes can buy and track native pnl without a token price', () => {
+  const pumpToken = {
+    ...token,
+    address: '11111111111111111111111111111111pump',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
   const marketCapQuote = {
     priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100, observedAt: 1_000,
-    valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
   };
-  const bought = Engine.executeBuy(state(), { token, quote: marketCapQuote, amountNative: 1 }, settings, 1_000);
+  const bought = Engine.executeBuy(state(), { token: pumpToken, quote: marketCapQuote, amountNative: 1 }, settings, 1_000);
   assert.equal(bought.position.valuationMode, 'MARKET_CAP');
   const doubled = { ...marketCapQuote, marketCapUsd: 6_000, observedAt: 2_000 };
   const mark = Engine.markPosition(bought.position, doubled);
   assert.ok(mark.valueNative > bought.position.costBasisNative * 1.9);
-  assert.ok(Engine.executeSell(bought.state, { token, quote: doubled, percent: 100 }, settings, 2_000).trade.realizedPnlNative > 0);
+  assert.ok(Engine.executeSell(bought.state, { token: pumpToken, quote: doubled, percent: 100 }, settings, 2_000).trade.realizedPnlNative > 0);
+});
+
+test('EVM market-cap-only observations cannot execute through the engine', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const evmToken = { chain: 'eth', address, symbol: 'AAA' };
+  const marketCapOnly = {
+    priceUsd: 0,
+    marketCapUsd: 2_000_000,
+    nativePriceUsd: 2_000,
+    observedAt: 1_000,
+    source: 'GMGN_NETWORK',
+    valuationMode: 'MARKET_CAP',
+    marketCapDivisor: 1_000_000_000
+  };
+  const evmState = State.createInitialState({ now: 1 });
+  evmState.initialized = true;
+  assert.throws(
+    () => Engine.executeBuy(evmState, { token: evmToken, quote: marketCapOnly, amountNative: 1 }, settings, 1_000),
+    /invalidQuote/
+  );
+});
+
+test('untrusted market-cap mode never overrides a real token price', () => {
+  const evmAddress = '0x1111111111111111111111111111111111111111';
+  const pumpToken = {
+    ...token,
+    address: '11111111111111111111111111111111pump',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
+  const cases = [
+    {
+      token: { chain: 'eth', address: evmAddress, symbol: 'AAA' },
+      quote: { ...quote, marketCapUsd: 9_000_000, valuationMode: 'MARKET_CAP', source: 'GMGN_NETWORK', marketCapDivisor: 1_000_000_000 }
+    },
+    {
+      token: pumpToken,
+      quote: { ...quote, marketCapUsd: 9_000_000, valuationMode: 'MARKET_CAP', source: 'GMGN_NETWORK', marketCapDivisor: 1_000_000_000 }
+    },
+    {
+      token: pumpToken,
+      quote: { ...quote, marketCapUsd: 9_000_000, valuationMode: 'MARKET_CAP', source: 'GMGN_TRENCH_MC', marketCapDivisor: 1_000_000 }
+    }
+  ];
+  for (const item of cases) {
+    const next = State.createInitialState({ now: 1 });
+    next.initialized = true;
+    const result = Engine.executeBuy(next, { token: item.token, quote: item.quote, amountNative: 1 }, settings, 1_000);
+    assert.equal(result.trade.observedPriceUsd, 2);
+    assert.equal(result.position.valuationMode, 'PRICE');
+  }
+});
+
+test('trusted Pump market-cap provenance survives detail metadata across every engine boundary', () => {
+  const pumpToken = {
+    ...token,
+    address: '11111111111111111111111111111111pump',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
+  const marketCapQuote = {
+    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100, observedAt: 1_000,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+  };
+  const first = Engine.executeBuy(state(), { token: pumpToken, quote: marketCapQuote, amountNative: 1 }, settings, 1_000);
+  const enrichedState = Engine.updatePositionMetadata(first.state, {
+    ...pumpToken,
+    metadataSource: 'GMGN_DETAIL',
+    name: 'Pump Detail'
+  });
+  const key = Engine.positionKey('sol', pumpToken.address);
+  const enriched = enrichedState.positions[key];
+  const doubled = { ...marketCapQuote, marketCapUsd: 6_000, observedAt: 2_000 };
+  assert.equal(enriched.metadataSource, 'GMGN_DETAIL');
+  assert.equal(enriched.marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.ok(Engine.markPosition(enriched, doubled).valueNative > enriched.costBasisNative * 1.9);
+
+  const updated = Engine.updatePositionQuote(enrichedState, pumpToken, doubled);
+  assert.equal(updated.positions[key].lastMarketCapUsd, 6_000);
+  const rebought = Engine.executeBuy(updated, {
+    token: { ...pumpToken, metadataSource: 'GMGN_DETAIL' }, quote: doubled, amountNative: 1
+  }, settings, 2_000);
+  assert.equal(Number.isFinite(rebought.position.quantity), true);
+  assert.ok(rebought.trade.executionPriceUsd > 0);
+  const sold = Engine.executeSell(rebought.state, {
+    token: { chain: 'sol', address: pumpToken.address }, quote: doubled, percent: 25
+  }, settings, 2_000);
+  assert.ok(sold.trade.executionPriceUsd > 0);
+  const closed = Engine.executeCloseAll(sold.state, 'sol', [{
+    token: { chain: 'sol', address: pumpToken.address }, quote: doubled
+  }], settings, 2_000);
+  assert.equal(closed.failures.length, 0);
+  assert.equal(closed.trades.length, 1);
 });
 
 test('portfolio summary is chain-local', () => {
@@ -149,12 +248,18 @@ test('close all settles every valid position and keeps chain daily pnl consisten
 });
 
 test('adding a market-cap trench quote to a price position keeps the original valuation mode', () => {
-  const first = Engine.executeBuy(state(), { token, quote, amountNative: 1 }, settings, 1_000);
+  const pumpToken = {
+    ...token,
+    address: '11111111111111111111111111111111pump',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
+  const first = Engine.executeBuy(state(), { token: pumpToken, quote, amountNative: 1 }, settings, 1_000);
   const listQuote = {
     priceUsd: 0, marketCapUsd: 4_000_000, nativePriceUsd: 100, observedAt: 2_000,
-    valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
   };
-  const second = Engine.executeBuy(first.state, { token, quote: listQuote, amountNative: 1 }, settings, 2_000);
+  const second = Engine.executeBuy(first.state, { token: pumpToken, quote: listQuote, amountNative: 1 }, settings, 2_000);
   assert.equal(second.position.valuationMode, 'PRICE');
   assert.ok(second.position.averageEntryPriceUsd > 2 && second.position.averageEntryPriceUsd < 4.1);
 });

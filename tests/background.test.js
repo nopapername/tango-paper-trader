@@ -186,6 +186,20 @@ test('CoinGecko failure still falls back to Wrapped SOL', async () => {
   assert.equal(urls.length, 2);
 });
 
+test('cached Wrapped SOL fallback preserves the DEX quote observation timestamp', async () => {
+  const loaded = loadBackground(async (url) => {
+    if (String(url).includes('coingecko')) return jsonResponse(null, { ok: false, status: 503 });
+    return jsonResponse([{ baseToken: { address: WRAPPED_SOL }, priceUsd: '145', liquidity: { usd: 1 } }]);
+  });
+  const wrapped = await loaded.context.getTokenQuote('sol', WRAPPED_SOL);
+  loaded.clock.now += 10_000;
+  const native = await new Promise((resolve) => {
+    loaded.listeners[0]({ type: 'TANGO_GET_NATIVE_PRICE', chain: 'sol' }, null, resolve);
+  });
+  assert.equal(native.price, 145);
+  assert.equal(native.observedAt, wrapped.observedAt);
+});
+
 test('expired token cache entries are removed while fresh entries remain', async () => {
   const loaded = loadBackground(async () => jsonResponse([
     { baseToken: { address: ADDRESS }, priceUsd: '4', liquidity: { usd: 1 } }
