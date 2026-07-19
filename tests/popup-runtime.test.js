@@ -43,7 +43,7 @@ function mergeSettingsPatch(settings, patch) {
   return { ...settings, ...patch, chains };
 }
 
-async function loadPopup({ failFirstGetAll = false } = {}) {
+async function loadPopup({ failFirstGetAll = false, failAction = '', initialized = true } = {}) {
   const elements = new Map();
   let document;
   let markup = '';
@@ -78,9 +78,10 @@ async function loadPopup({ failFirstGetAll = false } = {}) {
     set innerHTML(value) { markup = String(value); elements.clear(); }
   };
   let persistedState = stateFixture();
+  persistedState.initialized = initialized;
   let persistedSettings = settingsFixture();
   let getAllCalls = 0;
-  const calls = { saves: [], fullSaves: [] };
+  const calls = { saves: [], fullSaves: [], initialize: 0, resetChain: 0, resetAll: 0 };
   const Tango = {
     Chains,
     I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key },
@@ -117,9 +118,21 @@ async function loadPopup({ failFirstGetAll = false } = {}) {
         });
       },
       saveSettings(next) { calls.fullSaves.push(next); throw new Error('Popup must use patchSettings'); },
-      async initialize() { return { state: persistedState, settings: persistedSettings }; },
-      async resetChain() { return persistedState; },
-      async resetAll() { return persistedState; }
+      async initialize() {
+        calls.initialize += 1;
+        if (failAction === 'initialize' && calls.initialize === 1) throw new Error('write failed');
+        return { state: persistedState, settings: persistedSettings };
+      },
+      async resetChain() {
+        calls.resetChain += 1;
+        if (failAction === 'reset-chain' && calls.resetChain === 1) throw new Error('write failed');
+        return persistedState;
+      },
+      async resetAll() {
+        calls.resetAll += 1;
+        if (failAction === 'reset-all' && calls.resetAll === 1) throw new Error('write failed');
+        return persistedState;
+      }
     }
   };
   document = {
@@ -157,6 +170,42 @@ test('Popup startup storage failure renders a retry that recovers', async () => 
   await retry.click();
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(popup.app.innerHTML, /id="popup-chain"/);
+});
+
+test('Popup initialization contains a rejected write, reloads authoritative setup state, and shows recovery feedback', async () => {
+  const popup = await loadPopup({ failAction: 'initialize', initialized: false });
+  const rejection = await popup.element('#initialize').click().then(() => null, (error) => error);
+
+  assert.equal(rejection, null);
+  assert.equal(popup.calls.initialize, 1);
+  assert.match(popup.app.innerHTML, /id="initialize"/);
+  assert.match(popup.app.innerHTML, /settingsSaveFailed/);
+});
+
+test('Popup reset actions contain rejected writes and restore authoritative account UI', async () => {
+  for (const [failAction, selector, callField] of [
+    ['reset-chain', '#reset-chain-button', 'resetChain'],
+    ['reset-all', '#reset-all-button', 'resetAll']
+  ]) {
+    const popup = await loadPopup({ failAction });
+    const rejection = await popup.element(selector).click().then(() => null, (error) => error);
+
+    assert.equal(rejection, null, failAction);
+    assert.equal(popup.calls[callField], 1, failAction);
+    assert.match(popup.app.innerHTML, /id="popup-chain"/);
+    assert.match(popup.app.innerHTML, /settingsSaveFailed/);
+  }
+});
+
+test('Popup clears rejected-write feedback after a successful retry', async () => {
+  const popup = await loadPopup({ failAction: 'reset-chain' });
+  await popup.element('#reset-chain-button').click();
+  assert.match(popup.app.innerHTML, /settingsSaveFailed/);
+
+  await popup.element('#reset-chain-button').click();
+
+  assert.equal(popup.calls.resetChain, 2);
+  assert.doesNotMatch(popup.app.innerHTML, /settingsSaveFailed/);
 });
 
 test('Popup rolls back a selected chain when settings persistence fails', async () => {

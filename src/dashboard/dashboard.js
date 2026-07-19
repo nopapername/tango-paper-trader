@@ -176,10 +176,10 @@
       [t('winRate'), Tango.Format.percent(summary.winRate, lang()), cls(summary.winRate)],
       [t('profitFactor'), Number.isFinite(summary.profitFactor) ? Tango.Format.number(summary.profitFactor, lang(), 2) : '∞', cls(summary.profitFactor)]
     ];
-    const accounts = view.accounts.map(({ chain, summary: account, nativePriceUsd }) => `<button class="chain-account card ${chain.id === view.chain.id ? 'active' : ''}" data-account-chain="${chain.id}">
+    const accounts = view.accounts.map(({ chain, summary: account, nativePriceUsd, usdSummary }) => `<button class="chain-account card ${chain.id === view.chain.id ? 'active' : ''}" data-account-chain="${chain.id}">
       <span>${esc(chain.name)} · ${esc(chain.nativeSymbol)}</span>
       <strong>${Tango.Format.native(account.equityNative, chain.nativeSymbol, lang())}</strong>
-      <small>${nativePriceUsd > 0 ? Tango.Format.usd(account.equityNative * nativePriceUsd, lang()) : t('partialUsdData')}</small>
+      <small>${nativePriceUsd > 0 && usdSummary ? Tango.Format.usd(usdSummary.assetsUsd, lang()) : t('partialUsdData')}</small>
     </button>`).join('');
     return `<section class="global-overview"><div class="global-usd-summary">
       <div class="stat card"><span>${label('All-chain total USD assets', '全链美元资产总额')}</span><strong>${Tango.Format.usd(view.globalUsd.assetsUsd, lang())}</strong></div>
@@ -303,9 +303,14 @@
         '永久重置全部链？这会删除所有链上的全部模拟交易、持仓和盈亏日历记录。'
       ));
       if (!confirmed) return;
-      await runtime.settingsWrite;
-      runtime.state = await Tango.Store.resetAll();
-      await load();
+      try {
+        await runtime.settingsWrite;
+        runtime.state = await Tango.Store.resetAll();
+        await load();
+      } catch {
+        try { await load(); } catch { /* keep the last rendered snapshot */ }
+        showToast(t('settingsSaveFailed'));
+      }
       return;
     }
     if (name === 'save-settings') {
@@ -371,8 +376,13 @@
       if (!confirmed) return;
       const executionView = model();
       if (runtime.selectedChain !== chainId || runtime.settings?.selectedChain !== chainId || executionView.chain.id !== chainId) return;
-      runtime.state = await Tango.Store.resetChain(chainId, Number(executionView.chainSettings.initialBalanceNative || 10));
-      await load();
+      try {
+        runtime.state = await Tango.Store.resetChain(chainId, Number(executionView.chainSettings.initialBalanceNative || 10));
+        await load();
+      } catch {
+        try { await load(); } catch { /* keep the last rendered snapshot */ }
+        showToast(t('settingsSaveFailed'));
+      }
     }
   }
 

@@ -8,6 +8,11 @@ const Engine = require('../src/core/engine.js');
 
 const PUMP_ADDRESS = '11111111111111111111111111111111pump';
 const EVM_ADDRESS = '0xa111111111111111111111111111111111111111';
+const GLOBAL_BOOLEAN_FIELDS = [
+  'enabled', 'fastMode', 'confirmationEnabled', 'soundEnabled', 'showListQuickBuy',
+  'barCollapsed', 'panelCollapsed'
+];
+const GLOBAL_ENUM_FIELDS = ['language', 'displayCurrency', 'theme', 'pnlBarPosition', 'selectedChain'];
 
 function validTrade(overrides = {}) {
   return {
@@ -335,6 +340,59 @@ test('strict settings reject unsafe global and per-chain values', () => {
   cases.forEach((settings) => {
     assert.throws(() => State.normalizeSettings(settings, { strict: true }), /invalidSettings/);
   });
+});
+
+test('strict v2 settings reject present null and wrong-type global booleans and enums while allowing omission', () => {
+  const canonical = State.normalizeSettings({});
+  for (const field of GLOBAL_BOOLEAN_FIELDS) {
+    for (const value of [null, 'true']) {
+      assert.throws(
+        () => State.normalizeSettings({ ...canonical, [field]: value }, { strict: true, requireAllChains: true }),
+        /invalidSettings/,
+        `${field}=${String(value)}`
+      );
+    }
+  }
+  for (const field of GLOBAL_ENUM_FIELDS) {
+    for (const value of [null, 'invalid']) {
+      assert.throws(
+        () => State.normalizeSettings({ ...canonical, [field]: value }, { strict: true, requireAllChains: true }),
+        /invalidSettings/,
+        `${field}=${String(value)}`
+      );
+    }
+  }
+  for (const field of [...GLOBAL_BOOLEAN_FIELDS, ...GLOBAL_ENUM_FIELDS]) {
+    const omitted = { ...canonical };
+    delete omitted[field];
+    assert.doesNotThrow(
+      () => State.normalizeSettings(omitted, { strict: true, requireAllChains: true }),
+      `omitted ${field}`
+    );
+  }
+});
+
+test('strict v1 settings apply the same present-value validation while allowing omitted globals', () => {
+  const legacy = { buyPresets: [1], sellPresets: [25, 100], networkFeeSol: 0.001, initialBalanceSol: 10 };
+  for (const field of GLOBAL_BOOLEAN_FIELDS) {
+    for (const value of [null, 'true']) {
+      assert.throws(
+        () => State.normalizeSettings({ ...legacy, [field]: value }, { strict: true }),
+        /invalidSettings/,
+        `${field}=${String(value)}`
+      );
+    }
+  }
+  for (const field of GLOBAL_ENUM_FIELDS) {
+    for (const value of [null, 'invalid']) {
+      assert.throws(
+        () => State.normalizeSettings({ ...legacy, [field]: value }, { strict: true }),
+        /invalidSettings/,
+        `${field}=${String(value)}`
+      );
+    }
+  }
+  assert.doesNotThrow(() => State.normalizeSettings(legacy, { strict: true }));
 });
 
 test('selected-chain reset preserves every other chain', () => {

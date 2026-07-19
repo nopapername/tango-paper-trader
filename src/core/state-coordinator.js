@@ -40,7 +40,9 @@
 
     function mutate(command) {
       return serialized(async () => {
-        const { state, settings } = await readSnapshot({ persistMigration: command?.type !== 'RESET_CHAIN' });
+        const { state, settings } = await readSnapshot({
+          persistMigration: !['RESET_CHAIN', 'IMPORT'].includes(command?.type)
+        });
         if (command?.type === 'INITIALIZE') {
           const nextSettings = Tango.State.normalizeSettings({ ...settings, language: command.language });
           const balance = Number(command.defaultBalanceNative ?? 10);

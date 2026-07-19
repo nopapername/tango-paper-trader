@@ -70,10 +70,10 @@ test('Popup model aggregates every priced chain exactly and reports missing pric
   const prices = { sol: 100, eth: 1_000, bsc: 500, base: 200, robinhood: 1_000, xlayer: 50 };
 
   const complete = Tango.PopupModel.build(state, settings, 'eth', prices).globalUsd;
-  assert.deepEqual(JSON.parse(JSON.stringify(complete)), { assetsUsd: 30_000, pnlUsd: 1_500, complete: true, missingChains: [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(complete)), { assetsUsd: 31_100, pnlUsd: 2_600, complete: true, missingChains: [] });
 
   const partial = Tango.PopupModel.build(state, settings, 'eth', { ...prices, bsc: 0 }).globalUsd;
-  assert.deepEqual(JSON.parse(JSON.stringify(partial)), { assetsUsd: 24_500, pnlUsd: 1_000, complete: false, missingChains: ['bsc'] });
+  assert.deepEqual(JSON.parse(JSON.stringify(partial)), { assetsUsd: 25_500, pnlUsd: 2_000, complete: false, missingChains: ['bsc'] });
 });
 
 function deferred() {

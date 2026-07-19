@@ -11,7 +11,7 @@ const START = "  start().catch((error) => console.error('[Tango Paper Trader]', 
 const EXPOSE = `  global.__contentTest = {
     runtime, performQuoteTick, handleRouteChange, handleQuickBuy, buy,
     ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
-    requireExecutableQuote, freshExecutableQuote, renderPanel, commitCloseAll, savePresetEdits, bindEvents
+    requireExecutableQuote, freshExecutableQuote, renderPanel, commitCloseAll, savePresetEdits, bindEvents, bindDraggable
   };`;
 const instrumentedSource = contentSource.replace(START, EXPOSE);
 
@@ -40,6 +40,7 @@ function defaultSettings() {
   return {
     enabled: true, showListQuickBuy: true, language: 'en', displayCurrency: 'NATIVE', fastMode: false,
     confirmationEnabled: true, platformFeeBps: 0, slippageBps: 0, soundEnabled: false,
+    barCollapsed: false, panelCollapsed: false, panelPosition: null,
     chains: { eth: { ...chain }, base: { ...chain }, sol: { ...chain } }, sellPresets: [100]
   };
 }
@@ -55,7 +56,7 @@ function mergeSettingsPatch(settings, patch) {
 function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurrentToken, sendMessage, patchSettings } = {}) {
   assert.notEqual(instrumentedSource, contentSource, 'content test harness must replace startup with runtime exports');
   const messages = [];
-  const calls = { buy: 0, buyOrders: [], patches: [], fullSaves: [] };
+  const calls = { buy: 0, buyOrders: [], patches: [], fullSaves: [], getAll: 0 };
   const clock = { now: 1_000_000 };
   class FakeDate extends Date {
     constructor(...args) { super(args.length ? args[0] : clock.now); }
@@ -67,10 +68,11 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
     addEventListener() {}, querySelectorAll(selector) { return shellLists.get(selector) || []; }, querySelector() { return null; }
   };
   const shadowLists = new Map();
+  const shadowSingles = new Map();
   const shadow = {
     append() {}, addEventListener() {},
     querySelectorAll(selector) { return shadowLists.get(selector) || []; },
-    querySelector() { return null; }
+    querySelector(selector) { return shadowSingles.get(selector) || null; }
   };
   const host = { id: '', attachShadow: () => shadow };
   const genericElement = () => ({
@@ -85,6 +87,7 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
     createElement() { createCount += 1; return createCount === 1 ? host : createCount === 3 ? shell : genericElement(); },
     querySelector() { return null; }, querySelectorAll() { return []; }, addEventListener() {}
   };
+  const windowListeners = new Map();
   const context = {
     console,
     Date: FakeDate,
@@ -104,8 +107,8 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
     setInterval: () => 0,
     clearInterval() {},
     postMessage() {},
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, listener) { windowListeners.set(type, listener); },
+    removeEventListener(type, listener) { if (windowListeners.get(type) === listener) windowListeners.delete(type); },
     MutationObserver: class { observe() {} },
     chrome: {
       runtime: {
@@ -133,7 +136,7 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
     },
     Markers: { buildPayload: () => ({ markers: [] }) },
     Store: {
-      getAll: async () => ({ state: defaultState(), settings: defaultSettings() }),
+      getAll: async () => { calls.getAll += 1; return { state: defaultState(), settings: defaultSettings() }; },
       async patchSettings(patch) {
         calls.patches.push(patch);
         if (patchSettings) return patchSettings(patch);
@@ -196,7 +199,7 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
   api.runtime.state = defaultState();
   api.runtime.settings = defaultSettings();
   api.runtime.activeChainId = Chains.fromUrl(href)?.id || null;
-  return { api, calls, clock, context, messages, shadowLists, shellLists };
+  return { api, calls, clock, context, messages, shadowLists, shadowSingles, shellLists, windowListeners };
 }
 
 function setPresetInputs(loaded, {
@@ -292,6 +295,52 @@ test('content preset click contains persistence rejection', async () => {
   const rejection = await saveButton.emit('click', { stopPropagation() {} }).then(() => null, (error) => error);
 
   assert.equal(rejection, null);
+  assert.equal(loaded.api.runtime.toast.message, 'settingsSaveFailed');
+});
+
+test('content collapse and sound controls contain rejected settings writes and restore authoritative settings', async () => {
+  for (const [action, field, authoritative] of [
+    ['collapse-bar', 'barCollapsed', false],
+    ['collapse-panel', 'panelCollapsed', false],
+    ['toggle-sound', 'soundEnabled', false]
+  ]) {
+    const loaded = loadContent({ patchSettings: async () => { throw new Error('write failed'); } });
+    const button = eventElement({ dataset: { action } });
+    loaded.shellLists.set('[data-action]', [button]);
+    loaded.api.bindEvents();
+
+    const rejection = await button.emit('click', { stopPropagation() {} }).then(() => null, (error) => error);
+
+    assert.equal(rejection, null, action);
+    assert.equal(loaded.api.runtime.settings[field], authoritative, action);
+    assert.equal(loaded.calls.getAll, 1, `${action} reloads authoritative settings`);
+    assert.equal(loaded.api.runtime.toast.message, 'settingsSaveFailed');
+    assert.equal(loaded.api.runtime.toast.type, 'error');
+  }
+});
+
+test('content drag persistence rejection restores the authoritative position without escaping', async () => {
+  const loaded = loadContent({ patchSettings: async () => { throw new Error('write failed'); } });
+  const handle = eventElement();
+  const element = eventElement();
+  element.style = {};
+  element.getBoundingClientRect = () => ({ left: 100, top: 100, width: 200, height: 100 });
+  element.removeEventListener = () => {};
+  loaded.shadowSingles.set('[data-drag-handle]', handle);
+  loaded.shadowSingles.set('.tango-panel', element);
+  loaded.api.bindDraggable('[data-drag-handle]', '.tango-panel', 'panelPosition');
+
+  handle.emit('pointerdown', {
+    target: { closest: () => null },
+    clientX: 10,
+    clientY: 10
+  });
+  loaded.windowListeners.get('pointermove')({ clientX: 30, clientY: 40, preventDefault() {} });
+  const rejection = await loaded.windowListeners.get('pointerup')().then(() => null, (error) => error);
+
+  assert.equal(rejection, null);
+  assert.equal(loaded.api.runtime.settings.panelPosition, null);
+  assert.equal(loaded.calls.getAll, 1);
   assert.equal(loaded.api.runtime.toast.message, 'settingsSaveFailed');
 });
 

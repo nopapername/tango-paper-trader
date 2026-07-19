@@ -67,12 +67,13 @@ test('all content state writes express mutation intent to the extension-owned co
 
 test('all content settings writers use exact scoped patches', () => {
   assert.doesNotMatch(source, /Tango\.Store\.saveSettings\(/);
+  assert.match(source, /Tango\.Store\.patchSettings\(patch\)/);
   assert.match(source, /chains:\s*\{\s*\[chain\.id\]:\s*\{\s*buyPresets:\s*buyValues\s*\}\s*\}/s);
   assert.match(source, /sellPresets:\s*sellValues/);
-  assert.match(source, /patchSettings\(\{\s*barCollapsed\s*\}\)/);
-  assert.match(source, /patchSettings\(\{\s*panelCollapsed\s*\}\)/);
-  assert.match(source, /patchSettings\(\{\s*soundEnabled\s*\}\)/);
-  assert.match(source, /patchSettings\(\{\s*\[settingKey\]:\s*runtime\.settings\[settingKey\]\s*\}\)/);
+  assert.match(source, /patchRuntimeSettings\(\{\s*barCollapsed\s*\}\)/);
+  assert.match(source, /patchRuntimeSettings\(\{\s*panelCollapsed\s*\}\)/);
+  assert.match(source, /patchRuntimeSettings\(\{\s*soundEnabled\s*\}\)/);
+  assert.match(source, /patchRuntimeSettings\(\{\s*\[settingKey\]:\s*runtime\.settings\[settingKey\]\s*\}/);
 });
 
 test('content preset validation explicitly rejects non-finite buys and sells', () => {

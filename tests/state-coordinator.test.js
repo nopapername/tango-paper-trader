@@ -7,6 +7,11 @@ require('../src/shared/constants.js');
 const State = require('../src/core/state.js');
 const Engine = require('../src/core/engine.js');
 const StateCoordinator = require('../src/core/state-coordinator.js');
+const GLOBAL_BOOLEAN_FIELDS = [
+  'enabled', 'fastMode', 'confirmationEnabled', 'soundEnabled', 'showListQuickBuy',
+  'barCollapsed', 'panelCollapsed'
+];
+const GLOBAL_ENUM_FIELDS = ['language', 'displayCurrency', 'theme', 'pnlBarPosition', 'selectedChain'];
 
 function memoryPersistence(initialState, initialSettings) {
   const values = {
@@ -543,6 +548,117 @@ test('imports normalize before one queued atomic state-and-settings write', asyn
   invalidTimestamp.exportedAt = Infinity;
   await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload: invalidTimestamp }), /importFailed/);
   assert.equal((await coordinator.getAll()).state.stateRevision, 1);
+});
+
+test('IMPORT rejects every malformed global setting without writes for v1 or v2 and the queue remains usable', async () => {
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const settings = State.normalizeSettings({ selectedChain: 'eth', language: 'en' });
+  const persistence = memoryPersistence(initial, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000
+  });
+  const v1State = {
+    schemaVersion: 1,
+    account: { initialBalanceSol: 10, cashBalanceSol: 10, realizedPnlSol: 0, createdAt: 1, updatedAt: 1 },
+    positions: {}, trades: [], dailyRealized: {}, initialized: true
+  };
+  const snapshots = [
+    { label: 'v2', state: initial, settings },
+    {
+      label: 'v1', state: v1State,
+      settings: { buyPresets: [1], sellPresets: [25, 100], networkFeeSol: 0.001, initialBalanceSol: 10 }
+    }
+  ];
+  const beforeState = structuredClone(persistence.values[global.Tango.STORAGE_KEY]);
+  const beforeSettings = structuredClone(persistence.values[global.Tango.SETTINGS_KEY]);
+
+  for (const snapshot of snapshots) {
+    for (const [field, values] of [
+      ...GLOBAL_BOOLEAN_FIELDS.map((field) => [field, [null, 'true']]),
+      ...GLOBAL_ENUM_FIELDS.map((field) => [field, [null, 'invalid']])
+    ]) {
+      for (const value of values) {
+        const payload = {
+          product: 'Tango Paper Trader', version: 'test', exportedAt: 1_500,
+          state: structuredClone(snapshot.state),
+          settings: { ...structuredClone(snapshot.settings), [field]: value }
+        };
+        await assert.rejects(
+          coordinator.mutate({ type: 'IMPORT', payload }),
+          /invalidSettings/,
+          `${snapshot.label} ${field}=${String(value)}`
+        );
+        assert.equal(persistence.writes.length, 0, `${snapshot.label} ${field} must not write`);
+        assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], beforeState);
+        assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], beforeSettings);
+      }
+    }
+  }
+
+  const accepted = await coordinator.mutate({ type: 'PATCH_SETTINGS', patch: { selectedChain: 'bsc' } });
+  assert.equal(accepted.settings.selectedChain, 'bsc');
+  assert.equal(persistence.writes.length, 1);
+});
+
+test('malformed IMPORT never persists migration of the current raw v1 snapshot and a later valid import writes once', async () => {
+  const currentLegacy = {
+    schemaVersion: 1,
+    account: { initialBalanceSol: 10, cashBalanceSol: 9, realizedPnlSol: -1, createdAt: 10, updatedAt: 20 },
+    positions: {}, trades: [], dailyRealized: { '2026-07-18': -1 }, initialized: true
+  };
+  const currentSettings = State.normalizeSettings({ selectedChain: 'eth', language: 'en' });
+  const importedV2 = State.createInitialState({ now: 100 });
+  importedV2.initialized = true;
+  importedV2.accounts.bsc.cashBalanceNative = 7;
+  const importedV1 = {
+    schemaVersion: 1,
+    account: { initialBalanceSol: 10, cashBalanceSol: 8, realizedPnlSol: -2, createdAt: 30, updatedAt: 40 },
+    positions: {}, trades: [], dailyRealized: { '2026-07-19': -2 }, initialized: true
+  };
+  const variants = [
+    { label: 'v2', state: importedV2, settings: State.normalizeSettings({ selectedChain: 'base' }) },
+    {
+      label: 'v1', state: importedV1,
+      settings: { selectedChain: 'sol', buyPresets: [1], sellPresets: [25, 100], networkFeeSol: 0.001, initialBalanceSol: 10 }
+    }
+  ];
+
+  for (const variant of variants) {
+    const persistence = memoryPersistence(currentLegacy, currentSettings);
+    const coordinator = StateCoordinator.create({
+      readRaw: persistence.readRaw,
+      writeRaw: persistence.writeRaw,
+      now: () => 2_000
+    });
+    const malformed = {
+      product: 'Tango Paper Trader', version: 'test', exportedAt: 1_500,
+      state: structuredClone(variant.state),
+      settings: { ...structuredClone(variant.settings), enabled: null }
+    };
+
+    await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload: malformed }), /invalidSettings/);
+    assert.equal(persistence.writes.length, 0, `${variant.label} malformed import must not migrate current storage`);
+    assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], currentLegacy);
+    assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], currentSettings);
+
+    const valid = structuredClone(malformed);
+    valid.settings.enabled = true;
+    const imported = await coordinator.mutate({ type: 'IMPORT', payload: valid });
+
+    assert.equal(persistence.writes.length, 1, `${variant.label} valid import writes once`);
+    assert.deepEqual(Object.keys(persistence.writes[0]).sort(), [
+      global.Tango.SETTINGS_KEY,
+      global.Tango.STORAGE_KEY
+    ].sort());
+    assert.equal(imported.state.schemaVersion, 2);
+    assert.equal(imported.state.stateRevision, 1);
+    assert.equal(imported.settings.enabled, true);
+    assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], imported.state);
+    assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], imported.settings);
+  }
 });
 
 test('imports a structurally valid v1 backup and canonicalizes its Solana state', async () => {

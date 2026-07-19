@@ -354,14 +354,27 @@
     };
   }
 
+  function chainUsdSummary(state, chain, nativePriceUsd) {
+    const account = chainAccount(state, chain);
+    const price = Number(nativePriceUsd);
+    if (!(price > 0)) throw new Error('invalidNativePrice');
+    const positionsUsd = Object.values(state.positions || {})
+      .filter((position) => position.chain === chain)
+      .reduce((sum, position) => sum + Number(position.quantity) * markPosition(position).priceUsd, 0);
+    const cashUsd = Number(account.cashBalanceNative) * price;
+    const principalUsd = Number(account.initialBalanceNative) * price;
+    const assetsUsd = cashUsd + positionsUsd;
+    return { cashUsd, positionsUsd, assetsUsd, principalUsd, pnlUsd: assetsUsd - principalUsd };
+  }
+
   function globalUsdSummary(state, nativePricesByChain) {
     let assetsUsd = 0; let pnlUsd = 0; const missingChains = [];
     Tango.Chains.all().forEach((chain) => {
       const price = Number(nativePricesByChain?.[chain.id] || 0);
       if (!(price > 0)) { missingChains.push(chain.id); return; }
-      const summary = portfolioSummary(state, chain.id);
-      assetsUsd += summary.equityNative * price;
-      pnlUsd += summary.totalPnlNative * price;
+      const summary = chainUsdSummary(state, chain.id, price);
+      assetsUsd += summary.assetsUsd;
+      pnlUsd += summary.pnlUsd;
     });
     return { assetsUsd, pnlUsd, complete: missingChains.length === 0, missingChains };
   }
@@ -424,7 +437,7 @@
 
   Tango.Engine = {
     round, positionKey, validateQuote, executeBuy, executeSell, executeCloseAll, markPosition,
-    portfolioSummary, globalUsdSummary, updatePositionQuote, updatePositionMetadata, breakevenSellPercent,
+    portfolioSummary, chainUsdSummary, globalUsdSummary, updatePositionQuote, updatePositionMetadata, breakevenSellPercent,
     usesMarketCapValuation
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Engine;

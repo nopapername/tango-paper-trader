@@ -245,7 +245,7 @@ test('global USD summary excludes native asset appreciation from paper PnL', () 
   });
 });
 
-test('global USD summary converts the same current-native equity and pnl shown by each chain card', () => {
+test('chain USD summary values cash and principal at the current native quote but positions at their USD mark', () => {
   const next = State.createInitialState({ now: 1 });
   next.accounts.eth.cashBalanceNative = 9;
   next.positions['eth:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'] = {
@@ -257,10 +257,16 @@ test('global USD summary converts the same current-native equity and pnl shown b
     lastNativePriceUsd: 100
   };
 
-  const ethCard = Engine.portfolioSummary(next, 'eth');
+  assert.deepEqual(Engine.chainUsdSummary(next, 'eth', 200), {
+    cashUsd: 1_800,
+    positionsUsd: 100,
+    assetsUsd: 1_900,
+    principalUsd: 2_000,
+    pnlUsd: -100
+  });
   assert.deepEqual(Engine.globalUsdSummary(next, { eth: 200 }), {
-    assetsUsd: ethCard.equityNative * 200,
-    pnlUsd: ethCard.totalPnlNative * 200,
+    assetsUsd: 1_900,
+    pnlUsd: -100,
     complete: false,
     missingChains: ['sol', 'bsc', 'base', 'robinhood', 'xlayer']
   });

@@ -773,6 +773,24 @@
     runtime.toastTimer = setTimeout(() => { runtime.toast = null; render(); }, 2600);
   }
 
+  async function patchRuntimeSettings(patch, fallbackSettings = runtime.settings) {
+    try {
+      runtime.settings = await Tango.Store.patchSettings(patch);
+      render();
+      return true;
+    } catch {
+      try {
+        const data = await Tango.Store.getAll();
+        runtime.state = data.state;
+        runtime.settings = data.settings;
+      } catch {
+        runtime.settings = fallbackSettings;
+      }
+      showToast(t('settingsSaveFailed'), 'error');
+      return false;
+    }
+  }
+
   function primeTradeAudio() {
     if (!runtime.settings?.soundEnabled) return;
     try {
@@ -1128,11 +1146,11 @@
       if (action === 'toggle-drawer') { runtime.drawerOpen = !runtime.drawerOpen; render(); }
       if (action === 'collapse-bar') {
         const barCollapsed = !runtime.settings.barCollapsed;
-        runtime.settings = await Tango.Store.patchSettings({ barCollapsed });
+        await patchRuntimeSettings({ barCollapsed });
       }
       if (action === 'collapse-panel') {
         const panelCollapsed = !runtime.settings.panelCollapsed;
-        runtime.settings = await Tango.Store.patchSettings({ panelCollapsed });
+        await patchRuntimeSettings({ panelCollapsed });
       }
       if (action === 'dashboard') {
         chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD' })
@@ -1146,8 +1164,7 @@
       }
       if (action === 'toggle-sound') {
         const soundEnabled = !runtime.settings.soundEnabled;
-        runtime.settings = await Tango.Store.patchSettings({ soundEnabled });
-        render();
+        await patchRuntimeSettings({ soundEnabled });
       }
       if (action === 'breakeven') await sellBreakeven();
       if (action === 'close-all') requestCloseAll();
@@ -1187,17 +1204,19 @@
       if (event.target.closest('button')) return;
       const rect = element.getBoundingClientRect();
       const startX = event.clientX; const startY = event.clientY;
+      const fallbackSettings = { ...runtime.settings, [settingKey]: runtime.settings[settingKey] };
       let dragged = false;
       const onMove = (move) => {
         if (!dragged && Math.hypot(move.clientX - startX, move.clientY - startY) < 5) return;
         dragged = true;
         move.preventDefault();
-        runtime.settings[settingKey] = {
+        const position = {
           x: Math.min(Math.max(0, innerWidth - rect.width), Math.max(0, rect.left + move.clientX - startX)),
           y: Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, rect.top + move.clientY - startY))
         };
-        element.style.left = `${runtime.settings[settingKey].x}px`;
-        element.style.top = `${runtime.settings[settingKey].y}px`;
+        runtime.settings = { ...runtime.settings, [settingKey]: position };
+        element.style.left = `${position.x}px`;
+        element.style.top = `${position.y}px`;
         element.style.right = 'auto'; element.style.bottom = 'auto'; element.style.transform = 'none';
       };
       const onUp = async () => {
@@ -1206,7 +1225,7 @@
         const suppressClick = (click) => { click.preventDefault(); click.stopImmediatePropagation(); };
         element.addEventListener('click', suppressClick, true);
         setTimeout(() => element.removeEventListener('click', suppressClick, true), 0);
-        runtime.settings = await Tango.Store.patchSettings({ [settingKey]: runtime.settings[settingKey] });
+        await patchRuntimeSettings({ [settingKey]: runtime.settings[settingKey] }, fallbackSettings);
       };
       global.addEventListener('pointermove', onMove); global.addEventListener('pointerup', onUp); global.addEventListener('pointercancel', onUp);
     });

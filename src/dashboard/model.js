@@ -41,7 +41,10 @@
       accounts: Tango.Chains.all().map((entry) => ({
         chain: entry,
         summary: Tango.Engine.portfolioSummary(state, entry.id),
-        nativePriceUsd: Number(nativePrices?.[entry.id] || 0)
+        nativePriceUsd: Number(nativePrices?.[entry.id] || 0),
+        usdSummary: Number(nativePrices?.[entry.id] || 0) > 0
+          ? Tango.Engine.chainUsdSummary(state, entry.id, nativePrices[entry.id])
+          : null
       }))
     };
   }

@@ -68,15 +68,15 @@ test('Dashboard operational collections contain only the selected chain', () => 
   assert.deepEqual(model.chainSettings.buyPresets, [0.2, 2]);
 });
 
-test('Dashboard global USD uses the same current-native equity and pnl as its chain cards', () => {
+test('Dashboard global USD exactly sums the canonical USD totals displayed by its priced chain cards', () => {
   const prices = { eth: 1_000, bsc: 500 };
   const model = DashboardModel.build(fixture(), settings, 'eth', prices, {});
   const pricedCards = model.accounts.filter(({ nativePriceUsd }) => nativePriceUsd > 0);
-  const expectedAssetsUsd = pricedCards.reduce((sum, card) =>
-    sum + card.summary.equityNative * card.nativePriceUsd, 0);
-  const expectedPnlUsd = pricedCards.reduce((sum, card) =>
-    sum + card.summary.totalPnlNative * card.nativePriceUsd, 0);
+  const expectedAssetsUsd = pricedCards.reduce((sum, card) => sum + card.usdSummary.assetsUsd, 0);
+  const expectedPnlUsd = pricedCards.reduce((sum, card) => sum + card.usdSummary.pnlUsd, 0);
 
+  assert.equal(model.accounts.find(({ chain }) => chain.id === 'eth').usdSummary.assetsUsd, 12_000);
+  assert.equal(model.accounts.find(({ chain }) => chain.id === 'bsc').usdSummary.assetsUsd, 5_600);
   assert.equal(model.globalUsd.assetsUsd, expectedAssetsUsd);
   assert.equal(model.globalUsd.pnlUsd, expectedPnlUsd);
   assert.equal(model.globalUsd.complete, false);

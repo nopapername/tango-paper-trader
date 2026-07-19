@@ -29,6 +29,20 @@
     ({ state, settings } = await Tango.Store.getAll());
   }
 
+  async function runStoreWrite(write, apply) {
+    try {
+      const result = await write();
+      statusMessage = '';
+      await apply(result);
+      return result;
+    } catch {
+      try { await reload(); } catch { /* keep the last rendered snapshot */ }
+      statusMessage = t('settingsSaveFailed');
+      render();
+      return null;
+    }
+  }
+
   async function loadInitial() {
     try {
       await reload();
@@ -159,25 +173,31 @@
       await saveSelectedChain(event.target.value);
     });
     document.querySelector('#initialize')?.addEventListener('click', async () => {
-      const data = await Tango.Store.initialize(10, settings.language);
-      state = data.state;
-      settings = data.settings;
-      render();
-      refreshNativePrices();
+      await runStoreWrite(
+        () => Tango.Store.initialize(10, settings.language),
+        async (data) => {
+          state = data.state;
+          settings = data.settings;
+          render();
+          refreshNativePrices();
+        }
+      );
     });
     document.querySelector('#reset-chain-button')?.addEventListener('click', async () => {
       const chainModel = model();
       const balance = Number(document.querySelector('#reset-balance')?.value);
       if (!(balance > 0) || !global.confirm(selectedResetConfirm())) return;
-      await Tango.Store.resetChain(chainModel.chain.id, balance);
-      await reload();
-      render();
+      await runStoreWrite(
+        () => Tango.Store.resetChain(chainModel.chain.id, balance),
+        async () => { await reload(); render(); }
+      );
     });
     document.querySelector('#reset-all-button')?.addEventListener('click', async () => {
       if (!global.confirm(t('resetConfirm'))) return;
-      await Tango.Store.resetAll();
-      await reload();
-      render();
+      await runStoreWrite(
+        () => Tango.Store.resetAll(),
+        async () => { await reload(); render(); }
+      );
     });
     document.querySelector('#dashboard')?.addEventListener('click', () => global.chrome.runtime.openOptionsPage());
     document.querySelector('#gmgn')?.addEventListener('click', () => global.chrome.tabs.create({ url: Tango.Chains.trenchUrl(model().chain.id) }));

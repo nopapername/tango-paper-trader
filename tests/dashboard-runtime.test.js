@@ -50,7 +50,7 @@ function mergeSettingsPatch(settings, patch) {
   return { ...settings, ...patch, chains };
 }
 
-async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false } = {}) {
+async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false, failAction = '' } = {}) {
   const appElements = new Map();
   let document;
   let appMarkup = '';
@@ -100,7 +100,7 @@ async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false
   let persistedSettings = settingsFixture();
   const refreshedSettings = deferred();
   let getAllCalls = 0;
-  const calls = { saves: [], fullSaves: [], resetChain: [], resetAll: 0, exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [] };
+  const calls = { getAll: 0, saves: [], fullSaves: [], resetChain: [], resetAll: 0, exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [] };
   const anchors = [];
   const urls = new Map();
   let urlId = 0;
@@ -135,7 +135,12 @@ async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false
           }),
           summary: Tango.Engine.portfolioSummary(), globalUsd: Tango.Engine.globalUsdSummary(),
           chainSettings: settings.chains[chain.id],
-          accounts: Chains.all().map((entry) => ({ chain: entry, summary: Tango.Engine.portfolioSummary(), nativePriceUsd: Number(nativePrices[entry.id] || 0) }))
+          accounts: Chains.all().map((entry) => ({
+            chain: entry,
+            summary: Tango.Engine.portfolioSummary(),
+            nativePriceUsd: Number(nativePrices[entry.id] || 0),
+            usdSummary: { assetsUsd: entry.id === 'eth' ? 1_900 : 1_000, pnlUsd: entry.id === 'eth' ? -100 : 0 }
+          }))
         };
       },
       hasDerivedMarketCapPrice(trade) {
@@ -149,6 +154,7 @@ async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false
     Store: {
       getAll() {
         getAllCalls += 1;
+        calls.getAll += 1;
         if (failFirstGetAll && getAllCalls === 1) return Promise.reject(new Error('storage unavailable'));
         if (deferThirdGetAll && getAllCalls === 3) return refreshedSettings.promise.then(() => ({ state: persistedState, settings: persistedSettings }));
         return Promise.resolve({ state: persistedState, settings: persistedSettings });
@@ -162,8 +168,16 @@ async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false
         });
       },
       saveSettings(next) { calls.fullSaves.push(next); throw new Error('Dashboard must use patchSettings'); },
-      async resetChain(chain, balance) { calls.resetChain.push([chain, balance]); return persistedState; },
-      async resetAll() { calls.resetAll += 1; return persistedState; },
+      async resetChain(chain, balance) {
+        calls.resetChain.push([chain, balance]);
+        if (failAction === 'reset-chain') throw new Error('write failed');
+        return persistedState;
+      },
+      async resetAll() {
+        calls.resetAll += 1;
+        if (failAction === 'reset-all') throw new Error('write failed');
+        return persistedState;
+      },
       async exportData() { calls.exportData += 1; return { product: 'Tango Paper Trader', state: persistedState, settings: persistedSettings }; },
       async importData() { return { state: persistedState, settings: persistedSettings }; },
       subscribe() {}
@@ -253,6 +267,29 @@ test('Dashboard startup storage failure renders a retry that recovers', async ()
   assert.ok(retry);
   await retry.click();
   assert.match(dashboard.app.innerHTML, /Selected chain/);
+});
+
+test('Dashboard chain-account USD display uses the canonical USD summary instead of reconverting native equity', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.nativePrices.eth = 200;
+  dashboard.api.render();
+
+  assert.match(dashboard.app.innerHTML, /\$1900/);
+  assert.doesNotMatch(dashboard.app.innerHTML, /\$2000/);
+});
+
+test('Dashboard reset actions contain rejected writes, reload authoritative data, and remain usable', async () => {
+  for (const action of ['reset-chain', 'reset-all']) {
+    const dashboard = await loadDashboard({ failAction: action });
+    const loadsBefore = dashboard.calls.getAll;
+    const rejection = await dashboard.api.action(action).then(() => null, (error) => error);
+
+    assert.equal(rejection, null, action);
+    assert.equal(dashboard.calls.getAll, loadsBefore + 1, `${action} reloads authoritative data`);
+    assert.match(dashboard.app.innerHTML, /settingsSaveFailed/);
+    await dashboard.api.action('export-csv');
+    assert.equal(dashboard.anchors.length, 1, `${action} leaves actions usable`);
+  }
 });
 
 test('Dashboard rolls back an optimistic chain selection when settings persistence fails', async () => {

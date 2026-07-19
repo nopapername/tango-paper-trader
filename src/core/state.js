@@ -43,14 +43,14 @@
       'enabled', 'fastMode', 'confirmationEnabled', 'soundEnabled', 'showListQuickBuy',
       'barCollapsed', 'panelCollapsed'
     ];
-    if (booleanFields.some((field) => source[field] != null && typeof source[field] !== 'boolean')) {
+    if (booleanFields.some((field) => hasOwn(source, field) && typeof source[field] !== 'boolean')) {
       throw new Error('invalidSettings');
     }
-    if (source.language != null && !['auto', 'en', 'zh-CN'].includes(source.language)) throw new Error('invalidSettings');
-    if (source.displayCurrency != null && !['SOL', 'NATIVE', 'USD'].includes(source.displayCurrency)) throw new Error('invalidSettings');
-    if (source.theme != null && !['auto', 'dark', 'light'].includes(source.theme)) throw new Error('invalidSettings');
-    if (source.pnlBarPosition != null && !['top', 'bottom'].includes(source.pnlBarPosition)) throw new Error('invalidSettings');
-    if (source.selectedChain != null && !Tango.Chains.get(source.selectedChain)) throw new Error('invalidSettings');
+    if (hasOwn(source, 'language') && !['auto', 'en', 'zh-CN'].includes(source.language)) throw new Error('invalidSettings');
+    if (hasOwn(source, 'displayCurrency') && !['SOL', 'NATIVE', 'USD'].includes(source.displayCurrency)) throw new Error('invalidSettings');
+    if (hasOwn(source, 'theme') && !['auto', 'dark', 'light'].includes(source.theme)) throw new Error('invalidSettings');
+    if (hasOwn(source, 'pnlBarPosition') && !['top', 'bottom'].includes(source.pnlBarPosition)) throw new Error('invalidSettings');
+    if (hasOwn(source, 'selectedChain') && !Tango.Chains.get(source.selectedChain)) throw new Error('invalidSettings');
     if (!optional(source, 'slippageBps', (value) => finiteBetween(value, 0, 10_000))) throw new Error('invalidSettings');
     if (!optional(source, 'platformFeeBps', (value) => finiteBetween(value, 0, 10_000))) throw new Error('invalidSettings');
     if (!optional(source, 'sellPresets', (value) => validatePresetList(value, { maximum: 100 }))) throw new Error('invalidSettings');
