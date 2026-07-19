@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const cssSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.css'), 'utf8');
+const root = path.resolve(__dirname, '..');
 
 function between(startText, endText) {
   const start = source.indexOf(startText);
@@ -119,4 +120,15 @@ test('same-chain navigation invalidates stale token modals before the next quote
 test('panel balance labels leave room for multichain native symbols', () => {
   assert.match(cssSource, /\.tango-title-balance\s*\{[^}]*max-width:\s*150px/s);
   assert.match(cssSource, /\.buy-title \.tango-title-balance\s*\{[^}]*max-width:\s*175px/s);
+});
+
+test('every operational surface is registry and selected-chain driven', () => {
+  const content = fs.readFileSync(path.join(root, 'src/content/content.js'), 'utf8');
+  const popup = fs.readFileSync(path.join(root, 'src/popup/popup.js'), 'utf8');
+  const dashboard = fs.readFileSync(path.join(root, 'src/dashboard/dashboard.js'), 'utf8');
+  assert.match(content, /portfolioSummary\(runtime\.state, activeChain\(\)\.id\)/);
+  assert.match(content, /ChainView\.positions\(runtime\.state, activeChain\(\)\.id\)/);
+  assert.match(popup, /PopupModel\.build/);
+  assert.match(dashboard, /DashboardModel\.build/);
+  assert.doesNotMatch(content, /GMGN Solana only in V1/);
 });

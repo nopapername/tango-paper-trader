@@ -19,7 +19,7 @@ const {
 test('the current extension satisfies all static contracts', () => {
   const result = validateExtension(path.resolve(__dirname, '..'));
   assert.deepEqual(result.errors, []);
-  assert.equal(result.manifest.version, '0.2.17');
+  assert.equal(result.manifest.version, '0.3.0');
 });
 
 test('version consistency reports a mismatch', () => {
@@ -53,6 +53,14 @@ test('content script order requires state after constants and before helpers', (
   const errors = contentScriptOrderErrors([{ js: scripts }]);
   assert.equal(errors.length, 1);
   assert.match(errors[0], /src\/core\/state\.js/);
+});
+
+test('manifest content scripts load every registry-driven dependency before consumers', () => {
+  const manifest = require('../manifest.json');
+  const isolated = manifest.content_scripts.find((entry) => entry.js?.includes('src/content/content.js'));
+  const main = manifest.content_scripts.find((entry) => entry.world === 'MAIN' && entry.js?.includes('src/content/page-main.js'));
+  assert.deepEqual(isolated.js, REQUIRED_ISOLATED_ORDER);
+  assert.deepEqual(main.js, REQUIRED_MAIN_ORDER);
 });
 
 test('isolated content loads the chain view before content runtime consumers', () => {
