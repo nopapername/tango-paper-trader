@@ -33,6 +33,11 @@ test('render computes one portfolio summary and passes it to the drawer', () => 
   assert.match(render, /renderDrawer\(summary\)/);
 });
 
+test('clearing route context immediately publishes an empty marker payload', () => {
+  const clear = between('function clearChainContext()', "window.addEventListener('message'");
+  assert.match(clear, /syncChartMarkers\(true\)/);
+});
+
 test('content resolves account and settings from the active GMGN chain', () => {
   assert.match(source, /function activeChain\(\) \{ return Tango\.Chains\.fromUrl\(location\.href\); \}/);
   assert.match(source, /function activeAccount\(\)/);
@@ -48,7 +53,32 @@ test('drawer and close all operate on current-chain positions only', () => {
   assert.doesNotMatch(drawer, /Object\.values\(runtime\.state\.positions/);
   assert.match(closeAll, /const chain = activeChain\(\)\.id/);
   assert.match(closeAll, /Tango\.ChainView\.closeOrders\(runtime\.state, chain,/);
-  assert.match(closeAll, /Tango\.Engine\.executeCloseAll\(runtime\.state, chain, orders, runtime\.settings\)/);
+  assert.match(closeAll, /Tango\.Store\.executeCloseAll\(chain, orders\)/);
+});
+
+test('all content state writes express mutation intent to the extension-owned coordinator', () => {
+  assert.doesNotMatch(source, /Tango\.Store\.saveState\(/);
+  assert.match(source, /Tango\.Store\.executeBuy\(executableOrder\)/);
+  assert.match(source, /Tango\.Store\.executeSell\(executableOrder\)/);
+  assert.match(source, /Tango\.Store\.executeCloseAll\(chain, orders\)/);
+  assert.match(source, /Tango\.Store\.updatePositionQuote\(/);
+  assert.match(source, /Tango\.Store\.updatePositionMetadata/);
+});
+
+test('all content settings writers use exact scoped patches', () => {
+  assert.doesNotMatch(source, /Tango\.Store\.saveSettings\(/);
+  assert.match(source, /chains:\s*\{\s*\[chain\.id\]:\s*\{\s*buyPresets:\s*buyValues\s*\}\s*\}/s);
+  assert.match(source, /sellPresets:\s*sellValues/);
+  assert.match(source, /patchSettings\(\{\s*barCollapsed\s*\}\)/);
+  assert.match(source, /patchSettings\(\{\s*panelCollapsed\s*\}\)/);
+  assert.match(source, /patchSettings\(\{\s*soundEnabled\s*\}\)/);
+  assert.match(source, /patchSettings\(\{\s*\[settingKey\]:\s*runtime\.settings\[settingKey\]\s*\}\)/);
+});
+
+test('content preset validation explicitly rejects non-finite buys and sells', () => {
+  const presetSave = between('async function savePresetEdits()', 'function renderPanel()');
+  assert.match(presetSave, /validBuy[\s\S]*Number\.isFinite\(value\)[\s\S]*value > 0/);
+  assert.match(presetSave, /validSell[\s\S]*Number\.isFinite\(value\)[\s\S]*value > 0[\s\S]*value <= 100/);
 });
 
 test('header balance is read from the active account', () => {
@@ -84,7 +114,7 @@ test('native prices and GMGN quotes are explicitly keyed by chain', () => {
   assert.match(quoteTick, /runtime\.current\.quote\.nativePriceUsd = freshNativePrice\(chain\.id\)/);
   assert.doesNotMatch(quoteTick, /lastNativePriceUsd|runtime\.nativePrices\.get/);
   assert.match(quoteTick, /const executable = executableQuote\(runtime\.current\?\.token, runtime\.current\?\.quote\)/);
-  assert.match(quoteTick, /updatePositionQuote\(runtime\.state, runtime\.current\.token, executable\)/);
+  assert.match(quoteTick, /updatePositionQuote\(runtime\.current\.token, executable\)/);
 });
 
 test('panel marks positions only from a coherent executable quote', () => {

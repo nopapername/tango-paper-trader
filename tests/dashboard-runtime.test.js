@@ -10,8 +10,9 @@ const dashboardSource = fs.readFileSync(path.resolve(__dirname, '../src/dashboar
 
 function deferred() {
   let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 function stateFixture() {
@@ -41,7 +42,15 @@ function settingsFixture() {
   };
 }
 
-async function loadDashboard({ deferThirdGetAll = false } = {}) {
+function mergeSettingsPatch(settings, patch) {
+  const chains = { ...settings.chains };
+  Object.entries(patch.chains || {}).forEach(([chainId, chainPatch]) => {
+    chains[chainId] = { ...chains[chainId], ...chainPatch };
+  });
+  return { ...settings, ...patch, chains };
+}
+
+async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false } = {}) {
   const appElements = new Map();
   let document;
   let appMarkup = '';
@@ -91,7 +100,7 @@ async function loadDashboard({ deferThirdGetAll = false } = {}) {
   let persistedSettings = settingsFixture();
   const refreshedSettings = deferred();
   let getAllCalls = 0;
-  const calls = { saves: [], resetChain: [], resetAll: 0, exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [] };
+  const calls = { saves: [], fullSaves: [], resetChain: [], resetAll: 0, exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [] };
   const anchors = [];
   const urls = new Map();
   let urlId = 0;
@@ -129,20 +138,30 @@ async function loadDashboard({ deferThirdGetAll = false } = {}) {
           accounts: Chains.all().map((entry) => ({ chain: entry, summary: Tango.Engine.portfolioSummary(), nativePriceUsd: Number(nativePrices[entry.id] || 0) }))
         };
       },
+      hasDerivedMarketCapPrice(trade) {
+        return String(trade?.priceProvenance || '').startsWith('MARKET_CAP')
+          || trade?.priceProvenance === 'MIXED_DERIVED'
+          || trade?.valuationMode === 'MARKET_CAP';
+      },
       tradesCsvRows(state, chain) { return state.trades.filter((trade) => trade.chain === chain); },
       calendar() { return { days: {}, trades: [], totalNative: 0, winRate: 0, bestNative: 0, worstNative: 0 }; }
     },
     Store: {
       getAll() {
         getAllCalls += 1;
+        if (failFirstGetAll && getAllCalls === 1) return Promise.reject(new Error('storage unavailable'));
         if (deferThirdGetAll && getAllCalls === 3) return refreshedSettings.promise.then(() => ({ state: persistedState, settings: persistedSettings }));
         return Promise.resolve({ state: persistedState, settings: persistedSettings });
       },
-      saveSettings(next) {
+      patchSettings(patch) {
         const gate = deferred();
-        calls.saves.push({ next, gate });
-        return gate.promise.then(() => { persistedSettings = next; return next; });
+        calls.saves.push({ patch, gate });
+        return gate.promise.then(() => {
+          persistedSettings = mergeSettingsPatch(persistedSettings, patch);
+          return persistedSettings;
+        });
       },
+      saveSettings(next) { calls.fullSaves.push(next); throw new Error('Dashboard must use patchSettings'); },
       async resetChain(chain, balance) { calls.resetChain.push([chain, balance]); return persistedState; },
       async resetAll() { calls.resetAll += 1; return persistedState; },
       async exportData() { calls.exportData += 1; return { product: 'Tango Paper Trader', state: persistedState, settings: persistedSettings }; },
@@ -169,7 +188,7 @@ async function loadDashboard({ deferThirdGetAll = false } = {}) {
       createObjectURL(blob) { const key = `blob:${++urlId}`; urls.set(key, blob); return key; },
       revokeObjectURL() {}
     },
-    setTimeout: (fn) => { fn(); return 0; },
+    setTimeout: (fn, delay) => { if (Number(delay) < 1_000) fn(); return 0; },
     confirm(message) { calls.confirms.push(message); return confirmImpl(message); },
     navigator: {}, ClipboardItem: class {},
     chrome: {
@@ -184,9 +203,10 @@ async function loadDashboard({ deferThirdGetAll = false } = {}) {
   };
   vm.runInNewContext(source, context, { filename: 'src/dashboard/dashboard.js' });
   assert.ok(context.__dashboardTest, 'dashboard runtime test API must be exposed');
-  await context.__dashboardTest.load();
+  let initialLoadError = null;
+  try { await context.__dashboardTest.load(); } catch (error) { initialLoadError = error; }
   return {
-    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings, document,
+    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings, document, initialLoadError,
     setConfirm(callback) { confirmImpl = callback; },
     get persistedSettings() { return persistedSettings; },
     set persistedSettings(value) { persistedSettings = value; }
@@ -207,22 +227,83 @@ function fillSettingsForm(dashboard) {
 }
 
 test('rapid Dashboard chain selections persist only the latest chain without clobbering global settings', async () => {
-  const dashboard = await loadDashboard({ deferThirdGetAll: true });
+  const dashboard = await loadDashboard();
   const first = dashboard.api.saveSelectedChain('eth');
   await new Promise((resolve) => setImmediate(resolve));
   const second = dashboard.api.saveSelectedChain('bsc');
   assert.equal(dashboard.calls.saves.length, 1);
+  dashboard.persistedSettings = { ...dashboard.persistedSettings, displayCurrency: 'USD' };
   dashboard.calls.saves[0].gate.resolve();
   await first;
-  dashboard.persistedSettings = { ...dashboard.persistedSettings, displayCurrency: 'USD' };
-  dashboard.refreshedSettings.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(dashboard.calls.saves.length, 2);
-  assert.equal(dashboard.calls.saves[1].next.selectedChain, 'bsc');
-  assert.equal(dashboard.calls.saves[1].next.displayCurrency, 'USD');
+  assert.equal(JSON.stringify(dashboard.calls.saves[1].patch), JSON.stringify({ selectedChain: 'bsc' }));
   dashboard.calls.saves[1].gate.resolve();
   await second;
   assert.equal(dashboard.api.runtime.selectedChain, 'bsc');
+  assert.equal(dashboard.persistedSettings.displayCurrency, 'USD');
+  assert.deepEqual(dashboard.calls.fullSaves, []);
+});
+
+test('Dashboard startup storage failure renders a retry that recovers', async () => {
+  const dashboard = await loadDashboard({ failFirstGetAll: true });
+  assert.equal(dashboard.initialLoadError, null);
+  assert.match(dashboard.app.innerHTML, /storageLoadFailed/);
+  const retry = dashboard.element('#retry-storage-load');
+  assert.ok(retry);
+  await retry.click();
+  assert.match(dashboard.app.innerHTML, /Selected chain/);
+});
+
+test('Dashboard rolls back an optimistic chain selection when settings persistence fails', async () => {
+  const dashboard = await loadDashboard();
+  const selection = dashboard.api.saveSelectedChain('bsc');
+  assert.equal(dashboard.api.runtime.selectedChain, 'bsc');
+  await new Promise((resolve) => setImmediate(resolve));
+  dashboard.calls.saves[0].gate.reject(new Error('write failed'));
+  const rejection = await selection.then(() => null, (error) => error);
+  assert.equal(rejection, null);
+  assert.equal(dashboard.api.runtime.selectedChain, 'eth');
+  assert.equal(dashboard.api.runtime.settings.selectedChain, 'eth');
+  assert.match(dashboard.app.innerHTML, /settingsSaveFailed/);
+  assert.match(dashboard.app.innerHTML, /<option value="eth" selected>/);
+});
+
+test('Dashboard rolls back a failed latest selection to a stale-successful queued selection', async () => {
+  const dashboard = await loadDashboard();
+  const bscSelection = dashboard.api.saveSelectedChain('bsc');
+  await new Promise((resolve) => setImmediate(resolve));
+  const solSelection = dashboard.api.saveSelectedChain('sol');
+  assert.equal(dashboard.calls.saves.length, 1);
+
+  dashboard.calls.saves[0].gate.resolve();
+  await bscSelection;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(dashboard.calls.saves.length, 2);
+  dashboard.calls.saves[1].gate.reject(new Error('write failed'));
+  await solSelection;
+
+  assert.equal(dashboard.persistedSettings.selectedChain, 'bsc');
+  assert.equal(dashboard.api.runtime.settings.selectedChain, 'bsc');
+  assert.equal(dashboard.api.runtime.selectedChain, 'bsc');
+  assert.match(dashboard.app.innerHTML, /settingsSaveFailed/);
+  assert.match(dashboard.app.innerHTML, /<option value="bsc" selected>/);
+});
+
+test('Dashboard settings-save failure restores persisted values and shows an error', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.tab = 'settings';
+  dashboard.api.render();
+  fillSettingsForm(dashboard);
+  const saving = dashboard.api.action('save-settings');
+  await new Promise((resolve) => setImmediate(resolve));
+  dashboard.calls.saves[0].gate.reject(new Error('write failed'));
+  const rejection = await saving.then(() => null, (error) => error);
+  assert.equal(rejection, null);
+  assert.equal(dashboard.api.runtime.settings.theme, 'dark');
+  assert.equal(dashboard.api.runtime.settings.slippageBps, 50);
+  assert.match(dashboard.app.innerHTML, /settingsSaveFailed/);
+  assert.equal(dashboard.element('#setting-slippage').value, '50');
 });
 
 test('selected-chain reset waits for the visible BSC selection to persist and never targets the old chain', async () => {
@@ -257,7 +338,7 @@ test('CSV export waits for selected-chain persistence and contains BSC rather th
   assert.doesNotMatch(csv, /eth/);
 });
 
-test('selection and immediate full settings save serialize and preserve BSC plus global and per-chain edits', async () => {
+test('selection and immediate scoped settings save serialize and preserve BSC plus global and per-chain edits', async () => {
   const dashboard = await loadDashboard();
   dashboard.api.runtime.tab = 'settings';
   dashboard.api.render();
@@ -271,12 +352,12 @@ test('selection and immediate full settings save serialize and preserve BSC plus
   await selection;
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(dashboard.calls.saves.length, 2);
-  const next = dashboard.calls.saves[1].next;
-  assert.equal(next.selectedChain, 'bsc');
-  assert.deepEqual(Array.from(next.chains.bsc.buyPresets), [2, 4]);
-  assert.equal(next.chains.bsc.networkFeeNative, 0.005);
-  assert.deepEqual(next.chains.eth, dashboard.persistedSettings.chains.eth);
-  assert.deepEqual(Array.from(next.sellPresets), [50, 100]);
+  const patch = dashboard.calls.saves[1].patch;
+  assert.equal(Object.hasOwn(patch, 'selectedChain'), false);
+  assert.deepEqual(Array.from(patch.chains.bsc.buyPresets), [2, 4]);
+  assert.equal(patch.chains.bsc.networkFeeNative, 0.005);
+  assert.equal(Object.hasOwn(patch.chains, 'eth'), false);
+  assert.deepEqual(Array.from(patch.sellPresets), [50, 100]);
   dashboard.calls.saves[1].gate.resolve();
   await settingsSave;
   assert.equal(dashboard.persistedSettings.selectedChain, 'bsc');
@@ -298,6 +379,18 @@ test('multi-character history search retains focus and updates filtered results 
   assert.equal(search.value, 'ethyx');
   assert.doesNotMatch(dashboard.element('#history-results').innerHTML, /ETHY/);
   assert.match(dashboard.element('#history-results').innerHTML, /noTrades/);
+});
+
+test('history labels market-cap-derived fills without rendering the synthetic token price', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.state.trades[0] = {
+    ...dashboard.api.runtime.state.trades[0], amountNative: 1, executionPriceUsd: 0.000004,
+    marketCapUsd: 4_000, valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  dashboard.api.runtime.tab = 'history';
+  dashboard.api.render();
+  assert.match(dashboard.app.innerHTML, /marketCap[^<]*.*\$4000/s);
+  assert.doesNotMatch(dashboard.app.innerHTML, /\$0\.000004/);
 });
 
 test('selected reset revalidates its chain after confirmation and reset prompts state exact destructive scope', async () => {
@@ -346,12 +439,12 @@ test('saving Dashboard settings changes chain controls only for the selected cha
   const save = dashboard.api.action('save-settings');
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(dashboard.calls.saves.length, 1);
-  const next = dashboard.calls.saves[0].next;
-  assert.deepEqual(next.chains.eth, dashboard.persistedSettings.chains.eth);
-  assert.deepEqual(Array.from(next.chains.bsc.buyPresets), [2, 4]);
-  assert.equal(next.chains.bsc.networkFeeNative, 0.005);
-  assert.equal(next.chains.bsc.initialBalanceNative, 30);
-  assert.deepEqual(Array.from(next.sellPresets), [50, 100]);
+  const patch = dashboard.calls.saves[0].patch;
+  assert.equal(Object.hasOwn(patch.chains, 'eth'), false);
+  assert.deepEqual(Array.from(patch.chains.bsc.buyPresets), [2, 4]);
+  assert.equal(patch.chains.bsc.networkFeeNative, 0.005);
+  assert.equal(patch.chains.bsc.initialBalanceNative, 30);
+  assert.deepEqual(Array.from(patch.sellPresets), [50, 100]);
   dashboard.calls.saves[0].gate.resolve();
   await save;
 });

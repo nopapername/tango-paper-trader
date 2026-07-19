@@ -7,6 +7,49 @@ const State = require('../src/core/state.js');
 const Engine = require('../src/core/engine.js');
 
 const PUMP_ADDRESS = '11111111111111111111111111111111pump';
+const EVM_ADDRESS = '0xa111111111111111111111111111111111111111';
+
+function validTrade(overrides = {}) {
+  return {
+    id: 'trade-1', chain: 'eth', tokenAddress: EVM_ADDRESS, side: 'BUY',
+    amountNative: 1, quantity: 100, observedPriceUsd: 20, executionPriceUsd: 20,
+    marketCapUsd: 2_000_000, liquidityUsd: 500_000, nativePriceUsd: 2_000,
+    nativeSymbol: 'ETH', slippageBps: 0, platformFeeNative: 0,
+    networkFeeNative: 0, realizedPnlNative: 0, realizedPnlUsd: 0,
+    executedAt: 1_000,
+    ...overrides
+  };
+}
+
+function validPosition(overrides = {}) {
+  return {
+    chain: 'eth', tokenAddress: EVM_ADDRESS, quantity: 1, costBasisNative: 1,
+    realizedPnlNative: 0, averageEntryPriceUsd: 2, averageEntryMarketCap: 2_000_000,
+    lastPriceUsd: 2, lastMarketCapUsd: 2_000_000, lastNativePriceUsd: 2_000,
+    marketCapDivisor: 1_000_000_000, openedAt: 1, updatedAt: 1,
+    ...overrides
+  };
+}
+
+function validLegacyTrade(overrides = {}) {
+  return {
+    id: 'legacy-trade-1', chain: 'sol', tokenAddress: PUMP_ADDRESS, side: 'BUY',
+    amountSol: 1, quantity: 100, observedPriceUsd: 20, executionPriceUsd: 20,
+    marketCapUsd: 2_000_000, liquidityUsd: 500_000, solPriceUsd: 100,
+    slippageBps: 0, platformFeeSol: 0, networkFeeSol: 0, realizedPnlSol: 0,
+    executedAt: 1_000,
+    ...overrides
+  };
+}
+
+function validLegacyState(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    account: { initialBalanceSol: 10, cashBalanceSol: 10, realizedPnlSol: 0, createdAt: 1, updatedAt: 1 },
+    positions: {}, trades: [], dailyRealized: {}, initialized: true,
+    ...overrides
+  };
+}
 
 function legacyMarketCapPosition(overrides = {}) {
   return {
@@ -32,6 +75,7 @@ test('new state creates six independent ten-native accounts', () => {
 
 test('v1 migration preserves Solana economics and initializes only new chains', () => {
   const address = 'So11111111111111111111111111111111111111112';
+  const canonicalKey = `sol:${address}`;
   const legacy = {
     schemaVersion: 1,
     account: { initialBalanceSol: 100, cashBalanceSol: 77, realizedPnlSol: -3, createdAt: 1, updatedAt: 2 },
@@ -42,24 +86,27 @@ test('v1 migration preserves Solana economics and initializes only new chains', 
   const state = State.normalizeState(legacy, State.normalizeSettings({ buyPresets: [1], networkFeeSol: 0.002 }));
   assert.equal(state.accounts.sol.cashBalanceNative, 77);
   assert.equal(state.accounts.eth.cashBalanceNative, 10);
-  assert.equal(state.positions[`sol:${address.toLowerCase()}`].costBasisNative, 4);
+  assert.equal(state.positions[canonicalKey].costBasisNative, 4);
+  assert.equal(state.positions[`sol:${address.toLowerCase()}`], undefined);
   assert.equal(state.trades[0].amountNative, 2);
   assert.equal(state.dailyRealizedByChain.sol['2026-07-18'].native, 1);
 });
 
 test('v1 migration backfills trusted provenance for a coherent legacy Pump position', () => {
-  const key = `sol:${PUMP_ADDRESS.toLowerCase()}`;
+  const legacyKey = `sol:${PUMP_ADDRESS.toLowerCase()}`;
+  const key = `sol:${PUMP_ADDRESS}`;
   const legacy = {
     schemaVersion: 1,
     account: { initialBalanceSol: 10, cashBalanceSol: 9, realizedPnlSol: 0 },
-    positions: { [key]: legacyMarketCapPosition() },
+    positions: { [legacyKey]: legacyMarketCapPosition() },
     trades: [], dailyRealized: {}, initialized: true
   };
   const migrated = State.normalizeState(legacy, State.normalizeSettings({}));
   assert.equal(migrated.positions[key].marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
 
   const freshQuote = {
-    priceUsd: 0, marketCapUsd: 6_000, nativePriceUsd: 100, observedAt: 2_000,
+    priceUsd: 0, marketCapUsd: 6_000, nativePriceUsd: 100,
+    observedAt: 2_000, nativePriceObservedAt: 2_000,
     source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
   };
   const sold = Engine.executeSell(migrated, {
@@ -110,7 +157,8 @@ test('v2 normalization recognizes a real default-slippage legacy Pump position',
     metadataVerified: true, metadataSource: 'GMGN_TRENCH'
   };
   const marketCapQuote = {
-    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100, observedAt: 1_000,
+    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
     source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
   };
   const current = State.createInitialState({ now: 1 });
@@ -135,7 +183,8 @@ test('v2 normalization recognizes a real legacy Pump position after repeat buys'
   };
   const settings = State.normalizeSettings({});
   const firstQuote = {
-    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100, observedAt: 1_000,
+    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
     source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
   };
   const secondQuote = { ...firstQuote, marketCapUsd: 6_000, observedAt: 2_000 };
@@ -159,6 +208,30 @@ test('normalization is idempotent', () => {
   assert.deepEqual(State.normalizeState(once, State.normalizeSettings({})), once);
 });
 
+test('direct v1 normalization derives deterministic timestamps without a coordinator', () => {
+  const legacy = {
+    schemaVersion: 1,
+    account: { initialBalanceSol: 10, cashBalanceSol: 9, realizedPnlSol: 0 },
+    positions: {}, trades: [], dailyRealized: {}, initialized: true
+  };
+  const first = State.normalizeState(legacy, State.normalizeSettings({}));
+  const second = State.normalizeState(legacy, State.normalizeSettings({}));
+  assert.deepEqual(second, first);
+  assert.equal(first.accounts.eth.createdAt, 0);
+  assert.equal(first.accounts.eth.updatedAt, 0);
+});
+
+test('non-strict v1 migration preserves legacy numeric timestamp recovery', () => {
+  const legacy = {
+    schemaVersion: 1,
+    account: { initialBalanceSol: 10, cashBalanceSol: 9, realizedPnlSol: 0, createdAt: '10', updatedAt: '20' },
+    positions: {}, trades: [], dailyRealized: {}, initialized: true
+  };
+  const migrated = State.normalizeState(legacy, State.normalizeSettings({}));
+  assert.equal(migrated.accounts.eth.createdAt, 20);
+  assert.equal(migrated.accounts.eth.updatedAt, 20);
+});
+
 test('settings move legacy Solana values into the Solana chain only', () => {
   const settings = State.normalizeSettings({ buyPresets: [1, 2], networkFeeSol: 0.002, initialBalanceSol: 25 });
   assert.deepEqual(settings.chains.sol.buyPresets, [1, 2]);
@@ -167,6 +240,13 @@ test('settings move legacy Solana values into the Solana chain only', () => {
   assert.equal(Object.hasOwn(settings, 'buyPresets'), false);
   assert.equal(Object.hasOwn(settings, 'networkFeeSol'), false);
   assert.equal(Object.hasOwn(settings, 'initialBalanceSol'), false);
+});
+
+test('settings always expose a canonical registered selected chain', () => {
+  assert.equal(State.normalizeSettings({}).selectedChain, 'sol');
+  assert.equal(State.normalizeSettings({ buyPresets: [1], networkFeeSol: 0.002 }).selectedChain, 'sol');
+  assert.equal(State.normalizeSettings({ selectedChain: 'wat' }).selectedChain, 'sol');
+  assert.equal(State.normalizeSettings({ selectedChain: 'ETH' }).selectedChain, 'eth');
 });
 
 test('v2 trade normalization derives the registered chain native symbol', () => {
@@ -178,11 +258,83 @@ test('v2 trade normalization derives the registered chain native symbol', () => 
 
 test('strict v2 import rejects an inconsistent native symbol and repairs a missing one', () => {
   const state = State.createInitialState({ now: 1000 });
-  state.trades = [{ id: 'bsc-1', chain: 'bsc', amountNative: 1, nativeSymbol: 'SOL' }];
+  state.trades = [validTrade({ chain: 'bsc', tokenAddress: '0xb111111111111111111111111111111111111111', nativeSymbol: 'SOL' })];
   assert.throws(() => State.normalizeState(state, State.normalizeSettings({}), { strict: true }), /invalidTrade/);
-  state.trades[0] = { id: 'bsc-1', chain: 'bsc', amountNative: 1 };
+  state.trades[0] = validTrade({ chain: 'bsc', tokenAddress: '0xb111111111111111111111111111111111111111', nativeSymbol: undefined });
   const normalized = State.normalizeState(state, State.normalizeSettings({}), { strict: true });
   assert.equal(normalized.trades[0].nativeSymbol, 'BNB');
+});
+
+test('strict v2 import requires exact collection and registered-account structure', () => {
+  const base = State.createInitialState({ now: 1000 });
+  const cases = [
+    ['accounts', { ...base.accounts, eth: undefined }],
+    ['accounts', { ...base.accounts, wat: base.accounts.eth }],
+    ['positions', []],
+    ['trades', {}],
+    ['dailyRealizedByChain', []]
+  ];
+  for (const [field, value] of cases) {
+    const state = structuredClone(base);
+    state[field] = value;
+    assert.throws(
+      () => State.normalizeState(state, State.normalizeSettings({}), { strict: true }),
+      /invalid(State|Account|Positions|Trades|Daily)/
+    );
+  }
+});
+
+test('strict v2 import rejects malformed account, position, trade, and daily economics', () => {
+  const settings = State.normalizeSettings({});
+  const account = State.createInitialState({ now: 1000 });
+  account.accounts.eth.cashBalanceNative = Infinity;
+  assert.throws(() => State.normalizeState(account, settings, { strict: true }), /invalidAccount/);
+
+  const tradeMutations = [
+    { tokenAddress: 'bad' },
+    { chain: 'ETH' },
+    { quantity: -1 },
+    { amountNative: Infinity },
+    { nativePriceUsd: NaN },
+    { executedAt: Infinity }
+  ];
+  for (const mutation of tradeMutations) {
+    const state = State.createInitialState({ now: 1000 });
+    state.trades = [validTrade(mutation)];
+    assert.throws(() => State.normalizeState(state, settings, { strict: true }), /invalidTrade/);
+  }
+
+  const positioned = Engine.executeBuy(
+    State.createInitialState({ now: 1 }),
+    {
+      token: { chain: 'eth', address: EVM_ADDRESS },
+      quote: { priceUsd: 2, nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000 },
+      amountNative: 1
+    },
+    State.normalizeSettings({ slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } } }),
+    1_000
+  ).state;
+  positioned.positions[`eth:${EVM_ADDRESS}`].costBasisNative = Infinity;
+  assert.throws(() => State.normalizeState(positioned, settings, { strict: true }), /invalidPosition/);
+
+  const daily = State.createInitialState({ now: 1000 });
+  daily.dailyRealizedByChain.eth['not-a-date'] = { native: Infinity, usdAtExecution: 0 };
+  assert.throws(() => State.normalizeState(daily, settings, { strict: true }), /invalidDaily/);
+});
+
+test('strict settings reject unsafe global and per-chain values', () => {
+  const cases = [
+    { slippageBps: Infinity },
+    { platformFeeBps: -1 },
+    { fastMode: 'yes' },
+    { sellPresets: [25, -1] },
+    { chains: { eth: { networkFeeNative: Infinity } } },
+    { chains: { eth: { initialBalanceNative: 0 } } },
+    { chains: { wat: { networkFeeNative: 1 } } }
+  ];
+  cases.forEach((settings) => {
+    assert.throws(() => State.normalizeSettings(settings, { strict: true }), /invalidSettings/);
+  });
 });
 
 test('selected-chain reset preserves every other chain', () => {
@@ -202,11 +354,40 @@ test('strict normalization rejects an invalid imported position', () => {
   assert.throws(() => State.normalizeState(state, State.normalizeSettings({}), { strict: true }), /invalidPosition/);
 });
 
+test('normalization rebuilds position keys without collapsing case-sensitive Solana addresses', () => {
+  const upper = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
+  const lower = upper.toLowerCase();
+  const state = State.createInitialState({ now: 1000 });
+  state.positions = {
+    first: { chain: 'sol', tokenAddress: upper, quantity: 1 },
+    second: { chain: 'sol', tokenAddress: lower, quantity: 2 }
+  };
+
+  const normalized = State.normalizeState(state, State.normalizeSettings({}));
+  assert.equal(normalized.positions[`sol:${upper}`].quantity, 1);
+  assert.equal(normalized.positions[`sol:${lower}`].quantity, 2);
+  assert.equal(Object.keys(normalized.positions).length, 2);
+});
+
+test('strict v2 import rejects mismatched position keys and normalized collisions', () => {
+  const address = '0xA111111111111111111111111111111111111111';
+  const state = State.createInitialState({ now: 1000 });
+  state.positions = { wrong: validPosition({ tokenAddress: address }) };
+  assert.throws(() => State.normalizeState(state, State.normalizeSettings({}), { strict: true }), /invalidPosition/);
+
+  state.positions = {
+    'eth:0xa111111111111111111111111111111111111111': validPosition({ tokenAddress: address.toLowerCase() }),
+    'eth:0xA111111111111111111111111111111111111111': validPosition({ tokenAddress: address.toLowerCase(), quantity: 2 })
+  };
+  assert.throws(() => State.normalizeState(state, State.normalizeSettings({}), { strict: true }), /positionCollision/);
+});
+
 test('strict v1 import rejects an invalid legacy position', () => {
   const legacy = {
     schemaVersion: 1,
-    account: { initialBalanceSol: 10, cashBalanceSol: 10, realizedPnlSol: 0 },
-    positions: { invalid: { chain: 'unknown', tokenAddress: 'not-an-address', quantity: 1 } }
+    account: { initialBalanceSol: 10, cashBalanceSol: 10, realizedPnlSol: 0, createdAt: 1, updatedAt: 1 },
+    positions: { invalid: { chain: 'unknown', tokenAddress: 'not-an-address', quantity: 1 } },
+    trades: [], dailyRealized: {}, initialized: true
   };
   assert.throws(() => State.normalizeState(legacy, State.normalizeSettings({}), { strict: true }), /invalidPosition/);
 });
@@ -214,7 +395,189 @@ test('strict v1 import rejects an invalid legacy position', () => {
 test('strict v1 import rejects a non-finite legacy balance', () => {
   const legacy = {
     schemaVersion: 1,
-    account: { initialBalanceSol: 10, cashBalanceSol: Infinity, realizedPnlSol: 0 }
+    account: { initialBalanceSol: 10, cashBalanceSol: Infinity, realizedPnlSol: 0, createdAt: 1, updatedAt: 1 },
+    positions: {}, trades: [], dailyRealized: {}, initialized: true
   };
   assert.throws(() => State.normalizeState(legacy, State.normalizeSettings({}), { strict: true }), /invalidAccount/);
+});
+
+test('strict v1 import applies equivalent validation to legacy trades and collection shapes', () => {
+  const base = {
+    schemaVersion: 1,
+    account: { initialBalanceSol: 10, cashBalanceSol: 10, realizedPnlSol: 0, createdAt: 1, updatedAt: 1 },
+    positions: {}, trades: [], dailyRealized: {}, initialized: true
+  };
+  const malformed = structuredClone(base);
+  malformed.trades = [{
+    id: 'bad', chain: 'sol', tokenAddress: PUMP_ADDRESS, side: 'BUY',
+    amountSol: Infinity, quantity: -1, observedPriceUsd: 1, executionPriceUsd: 1,
+    marketCapUsd: 1, liquidityUsd: 1, solPriceUsd: 100, slippageBps: 0,
+    platformFeeSol: 0, networkFeeSol: 0, realizedPnlSol: 0, executedAt: 1
+  }];
+  assert.throws(() => State.normalizeState(malformed, State.normalizeSettings({}), { strict: true }), /invalidTrade/);
+
+  const wrongCollection = structuredClone(base);
+  wrongCollection.positions = [];
+  assert.throws(() => State.normalizeState(wrongCollection, State.normalizeSettings({}), { strict: true }), /invalidPositions/);
+});
+
+test('strict v2 import accepts numeric zero but rejects coerced economic and timestamp values', () => {
+  const settings = State.normalizeSettings({});
+  const cases = [
+    ['account cash', 'invalidAccount', (value) => {
+      const state = State.createInitialState({ now: 1 });
+      state.accounts.eth.cashBalanceNative = value;
+      return state;
+    }],
+    ['account timestamp', 'invalidAccount', (value) => {
+      const state = State.createInitialState({ now: 1 });
+      state.accounts.eth.createdAt = value;
+      return state;
+    }],
+    ['position quantity', 'invalidPosition', (value) => {
+      const state = State.createInitialState({ now: 1 });
+      state.positions[`eth:${EVM_ADDRESS}`] = validPosition({ quantity: value });
+      return state;
+    }],
+    ['position timestamp', 'invalidPosition', (value) => {
+      const state = State.createInitialState({ now: 1 });
+      state.positions[`eth:${EVM_ADDRESS}`] = validPosition({ openedAt: value });
+      return state;
+    }],
+    ['trade fee', 'invalidTrade', (value) => {
+      const state = State.createInitialState({ now: 1 });
+      state.trades = [validTrade({ platformFeeNative: value })];
+      return state;
+    }],
+    ['trade timestamp', 'invalidTrade', (value) => {
+      const state = State.createInitialState({ now: 1 });
+      state.trades = [validTrade({ executedAt: value })];
+      return state;
+    }]
+  ];
+
+  for (const [label, error, build] of cases) {
+    for (const value of [null, false, '']) {
+      assert.throws(
+        () => State.normalizeState(build(value), settings, { strict: true }),
+        new RegExp(error),
+        `${label} must reject ${String(value)}`
+      );
+    }
+  }
+
+  const zeroAccount = State.createInitialState({ now: 0 });
+  zeroAccount.accounts.eth.cashBalanceNative = 0;
+  zeroAccount.accounts.eth.realizedPnlNative = 0;
+  assert.doesNotThrow(() => State.normalizeState(zeroAccount, settings, { strict: true }));
+
+  const zeroPosition = State.createInitialState({ now: 0 });
+  zeroPosition.positions[`eth:${EVM_ADDRESS}`] = validPosition({
+    quantity: 0, costBasisNative: 0, realizedPnlNative: 0, openedAt: 0, updatedAt: 0,
+    quoteObservedAt: 0, metadataUpdatedAt: 0
+  });
+  assert.doesNotThrow(() => State.normalizeState(zeroPosition, settings, { strict: true }));
+
+  const zeroTrade = State.createInitialState({ now: 0 });
+  zeroTrade.trades = [validTrade({
+    amountNative: 0, marketCapUsd: 0, liquidityUsd: 0, slippageBps: 0,
+    platformFeeNative: 0, networkFeeNative: 0, realizedPnlNative: 0,
+    realizedPnlUsd: 0, executedAt: 0, entryMarketCapUsd: 0, heldMs: 0
+  })];
+  assert.doesNotThrow(() => State.normalizeState(zeroTrade, settings, { strict: true }));
+});
+
+test('strict v1 import accepts numeric zero but rejects coerced legacy economic and timestamp values', () => {
+  const settings = State.normalizeSettings({});
+  const legacyKey = `sol:${PUMP_ADDRESS.toLowerCase()}`;
+  const cases = [
+    ['account cash', 'invalidAccount', (value) => validLegacyState({
+      account: { initialBalanceSol: 10, cashBalanceSol: value, realizedPnlSol: 0, createdAt: 1, updatedAt: 1 }
+    })],
+    ['account timestamp', 'invalidAccount', (value) => validLegacyState({
+      account: { initialBalanceSol: 10, cashBalanceSol: 10, realizedPnlSol: 0, createdAt: value, updatedAt: 1 }
+    })],
+    ['position quantity', 'invalidPosition', (value) => validLegacyState({
+      positions: { [legacyKey]: legacyMarketCapPosition({ quantity: value }) }
+    })],
+    ['position timestamp', 'invalidPosition', (value) => validLegacyState({
+      positions: { [legacyKey]: legacyMarketCapPosition({ openedAt: value }) }
+    })],
+    ['trade fee', 'invalidTrade', (value) => validLegacyState({
+      trades: [validLegacyTrade({ platformFeeSol: value })]
+    })],
+    ['trade timestamp', 'invalidTrade', (value) => validLegacyState({
+      trades: [validLegacyTrade({ executedAt: value })]
+    })]
+  ];
+
+  for (const [label, error, build] of cases) {
+    for (const value of [null, false, '']) {
+      assert.throws(
+        () => State.normalizeState(build(value), settings, { strict: true }),
+        new RegExp(error),
+        `${label} must reject ${String(value)}`
+      );
+    }
+  }
+
+  const zeroAccount = validLegacyState({
+    account: { initialBalanceSol: 10, cashBalanceSol: 0, realizedPnlSol: 0, createdAt: 0, updatedAt: 0 }
+  });
+  assert.doesNotThrow(() => State.normalizeState(zeroAccount, settings, { strict: true }));
+
+  const zeroPosition = validLegacyState({
+    positions: { [legacyKey]: legacyMarketCapPosition({
+      quantity: 0, costBasisSol: 0, realizedPnlSol: 0, openedAt: 0, updatedAt: 0
+    }) }
+  });
+  assert.doesNotThrow(() => State.normalizeState(zeroPosition, settings, { strict: true }));
+
+  const zeroTrade = validLegacyState({
+    trades: [validLegacyTrade({
+      amountSol: 0, marketCapUsd: 0, liquidityUsd: 0, slippageBps: 0,
+      platformFeeSol: 0, networkFeeSol: 0, realizedPnlSol: 0, executedAt: 0
+    })]
+  });
+  assert.doesNotThrow(() => State.normalizeState(zeroTrade, settings, { strict: true }));
+});
+
+test('strict v1 import validates every present modern trade alias before migration', () => {
+  const settings = State.normalizeSettings({});
+  const aliases = ['amountNative', 'platformFeeNative', 'networkFeeNative', 'realizedPnlNative', 'nativePriceUsd'];
+  for (const field of aliases) {
+    const state = validLegacyState({ trades: [validLegacyTrade({ [field]: false })] });
+    assert.throws(() => State.normalizeState(state, settings, { strict: true }), /invalidTrade/);
+  }
+
+  const state = validLegacyState({
+    trades: [validLegacyTrade({
+      amountNative: 2, platformFeeNative: 0, networkFeeNative: 0,
+      realizedPnlNative: 0, nativePriceUsd: 101
+    })]
+  });
+  const migrated = State.normalizeState(state, settings, { strict: true });
+  assert.equal(migrated.trades[0].amountNative, 2);
+  assert.equal(migrated.trades[0].nativePriceUsd, 101);
+});
+
+test('strict v1 import rejects a present null daily realized value without rejecting numeric zero', () => {
+  const settings = State.normalizeSettings({});
+  const malformed = validLegacyState({ dailyRealized: { '2026-07-18': null } });
+  assert.throws(() => State.normalizeState(malformed, settings, { strict: true }), /invalidDaily/);
+
+  const zero = validLegacyState({ dailyRealized: { '2026-07-18': 0 } });
+  assert.doesNotThrow(() => State.normalizeState(zero, settings, { strict: true }));
+});
+
+test('strict settings validate both present chain-setting aliases before normalization', () => {
+  assert.throws(() => State.normalizeSettings({
+    chains: { eth: { networkFeeNative: 0 } },
+    chainSettings: null
+  }, { strict: true }), /invalidSettings/);
+
+  assert.doesNotThrow(() => State.normalizeSettings({
+    chains: { eth: { networkFeeNative: 0 } },
+    chainSettings: { bsc: { networkFeeNative: 0 } }
+  }, { strict: true }));
 });

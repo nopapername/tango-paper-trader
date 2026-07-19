@@ -335,6 +335,18 @@ test('a transient empty detail read preserves the verified context for the same 
   assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/?chain=sol'), null);
 });
 
+test('Solana detail identity remains case-sensitive while EVM identity normalizes case', () => {
+  const solana = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
+  assert.equal(GMGN._addressHintMatches(solana.toLowerCase(), solana, 'sol'), false);
+  assert.equal(GMGN._addressHintMatches(solana, solana, 'sol'), true);
+  assert.equal(
+    GMGN._addressHintMatches('0xa111111111111111111111111111111111111111', '0xA111111111111111111111111111111111111111', 'eth'),
+    true
+  );
+  const previous = { token: { chain: 'sol', address: solana } };
+  assert.equal(GMGN.resolveCurrentTokenRead(previous, null, `https://gmgn.ai/sol/token/${solana.toLowerCase()}`), null);
+});
+
 test('detail context is retried while the current route has not been resolved', () => {
   const current = { token: { chain: 'sol', address: SOL_ADDRESS } };
   assert.equal(GMGN._needsCurrentTokenRead(null, `https://gmgn.ai/sol/token/${SOL_ADDRESS}`), true);
@@ -376,6 +388,40 @@ test('Solana cards retain Pump.fun support while EVM cards reject Base58 address
   };
   assert.equal(GMGN._cardTokenHref(card, 'sol'), pumpUrl);
   assert.equal(GMGN._verifiedCardMetadata(card, SOL_ADDRESS, 'base'), null);
+});
+
+test('Solana card metadata keeps address identity case-sensitive', () => {
+  const address = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
+  const card = {
+    innerText: `${address.toLowerCase()}\nWRONG Wrong Token`,
+    querySelectorAll: () => [],
+    firstElementChild: { querySelector: () => null }
+  };
+  assert.equal(GMGN._verifiedCardMetadata(card, address, 'sol'), null);
+});
+
+test('EVM card metadata normalizes address case', () => {
+  const address = '0xA111111111111111111111111111111111111111';
+  const card = {
+    innerText: `${address.toLowerCase()}\nRIGHT Right Token`,
+    querySelectorAll: () => [],
+    firstElementChild: { querySelector: () => null }
+  };
+  assert.deepEqual(GMGN._verifiedCardMetadata(card, address, 'eth'), {
+    symbol: 'RIGHT', name: 'Right Token', logoUrl: ''
+  });
+});
+
+test('nested Solana card links require a case-sensitive visible address match', () => {
+  const address = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
+  const href = `https://gmgn.ai/sol/token/${address}`;
+  const link = { href };
+  const card = {
+    innerText: `${address.toLowerCase()}\nWRONG Wrong Token`,
+    getAttribute: () => null,
+    querySelectorAll: () => [link]
+  };
+  assert.equal(GMGN._cardTokenHref(card, 'sol'), '');
 });
 
 test('a stale detail header linked to another chain fails closed', () => {
@@ -480,7 +526,7 @@ test('quick-buy rejects an undated cached market cap after the live card value d
   }
 });
 
-test('quick-buy executes a fresh Solana Pump market cap without promoting that divisor to EVM', async () => {
+test('quick-buy keeps a fresh Solana Pump market-cap valuation synthetic and scoped away from EVM', async () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
   global.requestAnimationFrame = (callback) => callback();
   try {
@@ -491,7 +537,8 @@ test('quick-buy executes a fresh Solana Pump market cap without promoting that d
     assert.equal(GMGN.discoverTokenCards((order) => pumpOrders.push(order)), 1);
     await pump.slot.__tangoQuickBuyHandler();
     assert.equal(pumpOrders.length, 1);
-    assert.equal(pumpOrders[0].quote.priceUsd, 0.00001);
+    assert.equal(pumpOrders[0].quote.priceUsd, 0);
+    assert.equal(pumpOrders[0].quote.priceProvenance, 'MARKET_CAP_DERIVED');
     assert.equal(pumpOrders[0].quote.marketCapDivisor, 1_000_000_000);
     assert.ok(pumpOrders[0].quote.observedAt > 0);
 
@@ -508,21 +555,26 @@ test('quick-buy executes a fresh Solana Pump market cap without promoting that d
   }
 });
 
-test('non-Pump or unexecutable Solana cards keep or regain the native quick-buy control', () => {
+test('verified non-Pump Solana cards receive Tango quick-buy without a synthetic market-cap quote', async () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
   global.location = { href: 'https://gmgn.ai/?chain=sol', origin: 'https://gmgn.ai' };
   global.requestAnimationFrame = (callback) => callback();
   try {
     const nonPump = quickBuyHarness({ address: SOL_ADDRESS });
+    const nonPumpOrders = [];
     global.document = nonPump.document;
-    assert.equal(GMGN.discoverTokenCards(() => {}), 0);
-    assert.equal(nonPump.replacement, null);
-    assert.equal(nonPump.slot.querySelector('[data-testid="quickbuy"]').isConnected, true);
+    assert.equal(GMGN.discoverTokenCards((order) => nonPumpOrders.push(order)), 1);
+    assert.ok(nonPump.replacement);
+    await nonPump.slot.__tangoQuickBuyHandler();
+    assert.equal(nonPumpOrders.length, 1);
+    assert.equal(nonPumpOrders[0].quote.priceUsd, 0);
+    assert.notEqual(nonPumpOrders[0].quote.source, 'GMGN_TRENCH_MC');
+    assert.notEqual(nonPumpOrders[0].quote.valuationMode, 'MARKET_CAP');
 
     const missingMarketCap = quickBuyHarness({ marketCap: '' });
     global.document = missingMarketCap.document;
-    assert.equal(GMGN.discoverTokenCards(() => {}), 0);
-    assert.equal(missingMarketCap.replacement, null);
+    assert.equal(GMGN.discoverTokenCards(() => {}), 1);
+    assert.ok(missingMarketCap.replacement);
 
     const changed = quickBuyHarness();
     global.document = changed.document;
@@ -530,10 +582,10 @@ test('non-Pump or unexecutable Solana cards keep or regain the native quick-buy 
     const oldReplacement = changed.replacement;
     changed.card.getAttribute = (name) => name === 'href' ? `https://pump.fun/coin/${SOL_ADDRESS}` : null;
     changed.card.innerText = `${SOL_ADDRESS}\nTEST Test Token\nMC\n$10K`;
-    assert.equal(GMGN.discoverTokenCards(() => {}), 0);
+    assert.equal(GMGN.discoverTokenCards(() => {}), 1);
     assert.equal(oldReplacement.isConnected, false);
-    assert.equal(changed.slot.querySelector('[data-testid="quickbuy"]').isConnected, true);
-    assert.equal(changed.slot.dataset.tangoQuickBuy, undefined);
+    assert.ok(changed.replacement);
+    assert.equal(changed.slot.dataset.tangoTokenAddress, SOL_ADDRESS);
   } finally {
     global.document = original.document;
     global.location = original.location;

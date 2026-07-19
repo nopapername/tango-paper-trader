@@ -17,7 +17,8 @@
     tab: initialTab,
     month: new Date(),
     filters: { search: '', side: 'ALL', result: 'ALL', date: '' },
-    toast: ''
+    toast: '',
+    loadError: ''
   };
 
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -33,15 +34,23 @@
   );
 
   async function load() {
-    const data = await Tango.Store.getAll();
-    runtime.state = data.state;
-    runtime.settings = data.settings;
-    const hasSelectionIntent = runtime.selectionPending?.revision === runtime.selectedChainRevision;
-    if (!hasSelectionIntent) runtime.selectedChain = Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
-    render();
-    if (!runtime.nativePricesRequested && runtime.state.initialized) {
-      runtime.nativePricesRequested = true;
-      refreshNativePrices();
+    try {
+      const data = await Tango.Store.getAll();
+      runtime.state = data.state;
+      runtime.settings = data.settings;
+      runtime.loadError = '';
+      const hasSelectionIntent = runtime.selectionPending?.revision === runtime.selectedChainRevision;
+      if (!hasSelectionIntent) runtime.selectedChain = Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
+      render();
+      if (!runtime.nativePricesRequested && runtime.state.initialized) {
+        runtime.nativePricesRequested = true;
+        refreshNativePrices();
+      }
+      return data;
+    } catch {
+      runtime.loadError = 'storageLoadFailed';
+      render();
+      return null;
     }
   }
 
@@ -59,17 +68,13 @@
     if (runtime.state && runtime.settings) render();
   }
 
-  function queueSettingsMutation(mutate, selectionRevision = 0) {
+  function queueSettingsMutation(patch, selectionRevision = 0) {
     const write = runtime.settingsWrite.then(async () => {
       if (selectionRevision && selectionRevision !== runtime.selectedChainRevision) return runtime.settings;
-      const latest = await Tango.Store.getAll();
-      if (selectionRevision && selectionRevision !== runtime.selectedChainRevision) return runtime.settings;
-      const desiredChain = runtime.selectedChain;
-      const next = { ...mutate(latest.settings), selectedChain: desiredChain };
-      const saved = await Tango.Store.saveSettings(next);
+      const saved = await Tango.Store.patchSettings(patch);
+      runtime.settings = saved;
       const currentSelection = !selectionRevision || selectionRevision === runtime.selectedChainRevision;
       if (currentSelection && saved.selectedChain === runtime.selectedChain) {
-        runtime.settings = saved;
         render();
       }
       return saved;
@@ -84,7 +89,13 @@
     const revision = ++runtime.selectedChainRevision;
     runtime.selectedChain = selected.id;
     render();
-    const promise = queueSettingsMutation((latest) => latest, revision);
+    const promise = queueSettingsMutation({ selectedChain: selected.id }, revision).catch(() => {
+      if (revision === runtime.selectedChainRevision) {
+        runtime.selectedChain = Tango.Chains.get(runtime.settings?.selectedChain)?.id || 'sol';
+        showToast(t('settingsSaveFailed'));
+      }
+      return runtime.settings;
+    });
     const pending = { chainId: selected.id, revision, promise };
     runtime.selectionPending = pending;
     const clearPending = () => {
@@ -106,6 +117,7 @@
   function render() {
     document.documentElement.lang = lang();
     document.documentElement.dataset.theme = runtime.settings?.theme === 'light' ? 'light' : 'dark';
+    if (runtime.loadError) return renderStorageError();
     if (!runtime.state?.initialized) return renderSetupRequired();
     const view = model();
     const titles = {
@@ -125,6 +137,15 @@
       ${renderTab(view)}
     </main></div>${runtime.toast ? `<div class="toast">${esc(runtime.toast)}</div>` : ''}`;
     bind();
+  }
+
+  function renderStorageError() {
+    app.innerHTML = `<div class="onboarding-page"><section class="onboarding card">
+      <div class="brand" style="justify-content:center;padding:0"><span class="dot"></span>TANGO <span class="badge">${t('paper')}</span></div>
+      <h1>${t('storageLoadFailed')}</h1><p>${t('storageLoadFailedHint')}</p>
+      <button class="button primary" id="retry-storage-load">${t('retry')}</button>
+    </section></div>`;
+    app.querySelector('#retry-storage-load')?.addEventListener('click', () => load());
   }
 
   function renderSetupRequired() {
@@ -182,8 +203,11 @@
 
   function historyResults(view, compact = false) {
     const trades = view.trades.slice(0, compact ? 8 : 500);
+    const valuation = (trade) => Tango.DashboardModel.hasDerivedMarketCapPrice(trade)
+      ? `${t('marketCap')} · ${Tango.Format.usd(trade.marketCapUsd, lang(), true)}`
+      : Tango.Format.usd(trade.executionPriceUsd, lang());
     const rows = trades.map((trade) => `<tr><td>${new Date(trade.executedAt).toLocaleString(lang())}</td><td class="token-cell">${esc(trade.symbol || trade.tokenAddress)}</td>
-      <td class="${trade.side === 'BUY' ? 'up' : 'down'}">${trade.side}</td><td>${native(trade.amountNative, view)}</td><td>${Tango.Format.usd(trade.executionPriceUsd, lang())}</td>
+      <td class="${trade.side === 'BUY' ? 'up' : 'down'}">${trade.side}</td><td>${native(trade.amountNative, view)}</td><td>${valuation(trade)}</td>
       <td>${Tango.Format.usd(trade.marketCapUsd, lang(), true)}</td><td class="${cls(trade.realizedPnlNative)}">${trade.side === 'SELL' ? native(trade.realizedPnlNative, view, true) : '—'}</td>
       <td>${trade.side === 'SELL' ? `<button class="button" data-share="${esc(trade.id)}">PNG</button> <button class="button" data-copy-share="${esc(trade.id)}">${t('copyImage')}</button>` : ''}</td></tr>`).join('');
     return rows ? `<div class="table-wrap"><table><thead><tr><th>${t('date')}</th><th>${t('token')}</th><th>${t('side')}</th><th>${t('amount')} · ${esc(view.chain.nativeSymbol)}</th><th>${t('executionPrice')}</th><th>${t('marketCap')}</th><th>${t('realizedPnl')}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">${t('noTrades')}</div>`;
@@ -304,12 +328,9 @@
         soundEnabled: app.querySelector('#setting-sound').checked,
         showListQuickBuy: app.querySelector('#setting-list-buy').checked
       };
-      const saved = await queueSettingsMutation((latest) => {
-        const chainCollectionKey = latest.chainSettings ? 'chainSettings' : 'chains';
-        const chainCollection = latest[chainCollectionKey] || {};
-        const existingChainSettings = chainCollection[chainId] || view.chainSettings;
-        return {
-          ...latest,
+      let saved;
+      try {
+        saved = await queueSettingsMutation({
           language: form.language,
           displayCurrency: form.displayCurrency,
           theme: form.theme,
@@ -321,17 +342,18 @@
           confirmationEnabled: form.confirmationEnabled,
           soundEnabled: form.soundEnabled,
           showListQuickBuy: form.showListQuickBuy,
-          [chainCollectionKey]: {
-            ...chainCollection,
+          chains: {
             [chainId]: {
-              ...existingChainSettings,
               buyPresets: form.buyPresets,
               networkFeeNative: form.networkFeeNative,
               initialBalanceNative: form.initialBalanceNative
             }
           }
-        };
-      });
+        });
+      } catch {
+        showToast(t('settingsSaveFailed'));
+        return;
+      }
       if (runtime.selectedChain === chainId && saved?.selectedChain === chainId) showToast(t('confirm'));
       return;
     }
@@ -361,7 +383,7 @@
       'executedAt', 'chain', 'nativeSymbol', 'tokenAddress', 'symbol', 'side', 'amountNative',
       'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'nativePriceUsd',
       'slippageBps', 'platformFeeNative', 'networkFeeNative', 'realizedPnlNative',
-      'realizedPnlUsd', 'sourceUrl'
+      'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'sourceUrl'
     ];
     const encode = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
     return '\ufeff' + [headers.join(','), ...rows.map((row) => headers.map((key) => encode(row[key])).join(','))].join('\n');

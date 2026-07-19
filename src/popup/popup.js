@@ -1,15 +1,18 @@
 (async function initPopup(global) {
   const Tango = global.Tango;
   const app = document.querySelector('#app');
-  let { state, settings } = await Tango.Store.getAll();
+  let state = null;
+  let settings = null;
   let nativePrices = {};
   let nativePriceObservedAt = {};
   let selectedChainRevision = 0;
-  let selectedChainWrite = Promise.resolve();
+  let settingsWrite = Promise.resolve();
+  let loadError = false;
+  let statusMessage = '';
 
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-  const language = () => Tango.I18n.resolveLanguage(settings.language);
-  const t = (key) => Tango.I18n.t(key, settings.language);
+  const language = () => Tango.I18n.resolveLanguage(settings?.language);
+  const t = (key) => Tango.I18n.t(key, settings?.language);
   const cls = (value) => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : '';
   const selectedChainLabel = () => language() === 'zh-CN' ? '已选链' : 'Selected chain';
   const allChainsLabel = () => language() === 'zh-CN' ? '全部链' : 'All chains';
@@ -26,18 +29,46 @@
     ({ state, settings } = await Tango.Store.getAll());
   }
 
+  async function loadInitial() {
+    try {
+      await reload();
+      loadError = false;
+      statusMessage = '';
+      render();
+      if (state.initialized) refreshNativePrices();
+      return true;
+    } catch {
+      loadError = true;
+      render();
+      return false;
+    }
+  }
+
   function saveSelectedChain(chainId) {
     const revision = ++selectedChainRevision;
-    selectedChainWrite = selectedChainWrite.then(async () => {
-      if (revision !== selectedChainRevision) return;
-      const latest = await Tango.Store.getAll();
-      if (revision !== selectedChainRevision) return;
-      const next = await Tango.Store.saveSettings({ ...latest.settings, selectedChain: chainId });
-      if (revision !== selectedChainRevision) return;
-      settings = next;
-      render();
+    return persistSettings({ selectedChain: chainId }, {
+      isCurrent: () => revision === selectedChainRevision
     });
-    return selectedChainWrite;
+  }
+
+  function persistSettings(patch, { isCurrent = () => true } = {}) {
+    const write = settingsWrite.then(async () => {
+      if (!isCurrent()) return settings;
+      const next = await Tango.Store.patchSettings(patch);
+      settings = next;
+      if (!isCurrent()) return settings;
+      statusMessage = '';
+      render();
+      return settings;
+    });
+    settingsWrite = write.catch(() => undefined);
+    return write.catch(() => {
+      if (isCurrent()) {
+        statusMessage = t('settingsSaveFailed');
+        render();
+      }
+      return settings;
+    });
   }
 
   async function refreshNativePrices() {
@@ -62,6 +93,14 @@
 
   function render() {
     document.documentElement.lang = language();
+    if (loadError || !state || !settings) {
+      app.innerHTML = `<div class="popup"><section class="setup-card storage-error">
+        <h2>${t('storageLoadFailed')}</h2><p>${t('storageLoadFailedHint')}</p>
+        <button class="button" id="retry-storage-load">${t('retry')}</button>
+      </section></div>`;
+      document.querySelector('#retry-storage-load')?.addEventListener('click', () => loadInitial());
+      return;
+    }
     const switchMarkup = `<label class="master-switch"><span><strong>${t('enabled')}</strong><small>${settings.enabled ? 'ON' : 'OFF'}</small></span><input id="master-enabled" type="checkbox" ${settings.enabled ? 'checked' : ''}><i></i></label>`;
     if (!state.initialized) {
       app.innerHTML = `<div class="popup">
@@ -101,21 +140,20 @@
         <button class="button" id="dashboard">${t('openDashboard')}</button><button class="button secondary" id="gmgn">GMGN →</button>
       </div>`;
     }
+    if (statusMessage) app.innerHTML += `<div class="disabled-note storage-status">${esc(statusMessage)}</div>`;
     bind();
   }
 
   function bind() {
     document.querySelector('#master-enabled')?.addEventListener('change', async (event) => {
-      settings = await Tango.Store.saveSettings({ ...settings, enabled: event.target.checked });
-      render();
+      await persistSettings({ enabled: event.target.checked });
     });
     document.querySelector('#setup-language')?.addEventListener('change', (event) => {
       settings.language = event.target.value;
       render();
     });
     document.querySelector('#account-language')?.addEventListener('change', async (event) => {
-      settings = await Tango.Store.saveSettings({ ...settings, language: event.target.value });
-      render();
+      await persistSettings({ language: event.target.value });
     });
     document.querySelector('#popup-chain')?.addEventListener('change', async (event) => {
       await saveSelectedChain(event.target.value);
@@ -145,6 +183,5 @@
     document.querySelector('#gmgn')?.addEventListener('click', () => global.chrome.tabs.create({ url: Tango.Chains.trenchUrl(model().chain.id) }));
   }
 
-  render();
-  if (state.initialized) refreshNativePrices();
+  await loadInitial();
 })(globalThis);

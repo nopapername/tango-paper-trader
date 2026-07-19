@@ -68,6 +68,21 @@ test('Dashboard operational collections contain only the selected chain', () => 
   assert.deepEqual(model.chainSettings.buyPresets, [0.2, 2]);
 });
 
+test('Dashboard global USD uses the same current-native equity and pnl as its chain cards', () => {
+  const prices = { eth: 1_000, bsc: 500 };
+  const model = DashboardModel.build(fixture(), settings, 'eth', prices, {});
+  const pricedCards = model.accounts.filter(({ nativePriceUsd }) => nativePriceUsd > 0);
+  const expectedAssetsUsd = pricedCards.reduce((sum, card) =>
+    sum + card.summary.equityNative * card.nativePriceUsd, 0);
+  const expectedPnlUsd = pricedCards.reduce((sum, card) =>
+    sum + card.summary.totalPnlNative * card.nativePriceUsd, 0);
+
+  assert.equal(model.globalUsd.assetsUsd, expectedAssetsUsd);
+  assert.equal(model.globalUsd.pnlUsd, expectedPnlUsd);
+  assert.equal(model.globalUsd.complete, false);
+  assert.deepEqual(model.globalUsd.missingChains, ['sol', 'base', 'robinhood', 'xlayer']);
+});
+
 test('Dashboard filters only the selected chain collection', () => {
   const state = fixture();
   const model = DashboardModel.build(state, settings, 'eth', {}, {
@@ -86,8 +101,23 @@ test('CSV rows contain only the selected chain and native fields', () => {
     'executedAt', 'chain', 'nativeSymbol', 'tokenAddress', 'symbol', 'side', 'amountNative',
     'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'nativePriceUsd',
     'slippageBps', 'platformFeeNative', 'networkFeeNative', 'realizedPnlNative',
-    'realizedPnlUsd', 'sourceUrl'
+    'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'sourceUrl'
   ]);
+});
+
+test('CSV labels market-cap-derived valuation without exporting its synthetic price', () => {
+  const state = fixture();
+  state.trades[0] = {
+    ...state.trades[0], chain: 'sol', tokenAddress: '11111111111111111111111111111111pump',
+    nativeSymbol: 'SOL', observedPriceUsd: 0.000003, executionPriceUsd: 0.0000031,
+    marketCapUsd: 3_000, valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const row = DashboardModel.tradesCsvRows(state, 'sol')[0];
+  assert.equal(row.observedPriceUsd, '');
+  assert.equal(row.executionPriceUsd, '');
+  assert.equal(row.marketCapUsd, 3_000);
+  assert.equal(row.valuationMode, 'MARKET_CAP');
+  assert.equal(row.priceProvenance, 'MARKET_CAP_DERIVED');
 });
 
 test('calendar values are selected-chain-only', () => {

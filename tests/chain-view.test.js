@@ -31,7 +31,8 @@ test('close orders never include another chain and omit stale valuations', () =>
       bsc: { chain: 'bsc', tokenAddress: BSC_ADDRESS, symbol: 'BSC-TOKEN' }
     }
   };
-  const freshQuote = { priceUsd: 2, nativePriceUsd: 3_000, observedAt: Date.now() };
+  const observedAt = Date.now();
+  const freshQuote = { priceUsd: 2, nativePriceUsd: 3_000, observedAt, nativePriceObservedAt: observedAt };
 
   const orders = View.closeOrders(
     stateWithEthAndBsc,
@@ -50,7 +51,10 @@ test('native formatting uses the requested symbol and keeps sol as a legacy wrap
 });
 
 test('multichain runtime errors are localized in English and Chinese', () => {
-  for (const key of ['unsupportedChain', 'invalidAddress', 'nativePriceUnavailable', 'partialUsdData', 'closeAllPartial']) {
+  for (const key of [
+    'unsupportedChain', 'invalidAddress', 'nativePriceUnavailable', 'partialUsdData', 'closeAllPartial',
+    'storageLoadFailed', 'storageLoadFailedHint', 'settingsSaveFailed', 'retry'
+  ]) {
     assert.notEqual(global.Tango.I18n.t(key, 'en'), key);
     assert.notEqual(global.Tango.I18n.t(key, 'zh-CN'), key);
   }

@@ -68,7 +68,9 @@
     return runtime.settings.chainSettings?.[chain.id] || runtime.settings.chains?.[chain.id] || null;
   }
   function gmgnQuoteKey(chain, address) {
-    return `${String(chain || '').toLowerCase()}:${String(address || '').toLowerCase()}`;
+    const registered = Tango.Chains.get(chain);
+    if (!registered || !Tango.Chains.validateAddress(registered.id, address)) return '';
+    return `${registered.id}:${Tango.Chains.normalizeAddress(registered.id, address)}`;
   }
   function rememberNativePrice(chain, price, observedAt = Date.now()) {
     const numeric = Number(price || 0);
@@ -77,7 +79,7 @@
     runtime.nativePriceObservedAt.set(chain, Number(observedAt));
     return numeric;
   }
-  function freshNativePrice(chain, maxAgeMs = 30_000) {
+  function freshNativePrice(chain, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
     const price = Number(runtime.nativePrices.get(chain) || 0);
     const observedAt = Number(runtime.nativePriceObservedAt.get(chain) || 0);
     return price > 0 && observedAt > 0 && Date.now() - observedAt <= maxAgeMs ? price : 0;
@@ -94,6 +96,7 @@
     runtime.quoteRequests.clear();
     runtime.quoteRetryAt.clear();
     runtime.markerPayloads = new WeakMap();
+    syncChartMarkers(true);
     Tango.GMGN.clearQuickBuy();
     clearHeaderAccountSummary();
     clearShellMarkup();
@@ -110,16 +113,16 @@
       clearChainContext();
       return;
     }
-    let enrichedState = runtime.state;
-    const positionsByAddress = new Map(Tango.ChainView.positions(enrichedState, chain.id)
-      .map((position) => [position.tokenAddress?.toLowerCase(), position]));
+    const positionsByAddress = new Map(Tango.ChainView.positions(runtime.state, chain.id)
+      .map((position) => [Tango.Chains.normalizeAddress(chain.id, position.tokenAddress), position]));
+    const metadataUpdates = [];
     let currentQuoteChanged = false;
     (event.data.quotes || []).forEach((quote) => {
-      if (quote?.chain !== chain.id || !quote?.address) return;
-      const address = String(quote.address).toLowerCase();
+      if (quote?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, quote?.address)) return;
+      const address = Tango.Chains.normalizeAddress(chain.id, quote.address);
       runtime.gmgnQuotes.set(gmgnQuoteKey(chain.id, address), quote);
       const isCurrentToken = runtime.current?.token?.chain === chain.id
-        && runtime.current.token.address?.toLowerCase() === address;
+        && Tango.Chains.normalizeAddress(chain.id, runtime.current.token.address) === address;
       if (isCurrentToken) {
         mergeQuote(runtime.current, quote);
         currentQuoteChanged = true;
@@ -127,7 +130,7 @@
       const position = positionsByAddress.get(address);
       if (position && isCurrentToken && runtime.current?.token?.metadataVerified) {
         const metadata = runtime.current.token;
-        enrichedState = Tango.Engine.updatePositionMetadata(enrichedState, {
+        metadataUpdates.push({
           chain: position.chain, address: position.tokenAddress,
           symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
           metadataVerified: true, metadataSource: metadata.metadataSource
@@ -139,11 +142,9 @@
       [...runtime.gmgnQuotes.keys()].slice(0, overflow).forEach((key) => runtime.gmgnQuotes.delete(key));
     }
     if (currentQuoteChanged) queueRender();
-    if (enrichedState && enrichedState !== runtime.state) {
-      runtime.state = enrichedState;
-      Tango.Store.saveState(runtime.state).catch(() => null);
-      queueRender();
-    }
+    if (metadataUpdates.length) Tango.Store.updatePositionMetadataBatch(metadataUpdates)
+      .then((state) => { runtime.state = state; queueRender(); })
+      .catch(() => null);
   });
   window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
 
@@ -254,12 +255,9 @@
     const positions = Tango.ChainView.positions(runtime.state, chain.id);
     if (!positions.length) return;
     const tokens = Tango.GMGN.readVisibleTokenMetadata(positions.map((position) => position.tokenAddress));
-    let nextState = runtime.state;
-    tokens.filter((token) => token.chain === chain.id)
-      .forEach((token) => { nextState = Tango.Engine.updatePositionMetadata(nextState, token); });
-    if (nextState === runtime.state || !routeCaptureIsCurrent(routeCapture)) return;
-    runtime.state = nextState;
-    await Tango.Store.saveState(runtime.state);
+    const updates = tokens.filter((token) => token.chain === chain.id);
+    if (!updates.length || !routeCaptureIsCurrent(routeCapture)) return;
+    runtime.state = await Tango.Store.updatePositionMetadataBatch(updates);
     if (!routeCaptureIsCurrent(routeCapture)) return;
     queueRender();
   }
@@ -285,12 +283,8 @@
     if (runtime.current) {
       runtime.current.quote.nativePriceUsd = freshNativePrice(chain.id);
       if (currentPosition()) {
-        const enrichedState = Tango.Engine.updatePositionMetadata(runtime.state, runtime.current.token);
-        if (enrichedState !== runtime.state) {
-          runtime.state = enrichedState;
-          await Tango.Store.saveState(runtime.state);
-          if (!routeCaptureIsCurrent(routeCapture)) return;
-        }
+        runtime.state = await Tango.Store.updatePositionMetadata(runtime.current.token);
+        if (!routeCaptureIsCurrent(routeCapture)) return;
       }
     }
     ensureNativePrice(runtime.current, routeCapture);
@@ -298,9 +292,8 @@
     const executable = executableQuote(runtime.current?.token, runtime.current?.quote);
     if (routeCaptureIsCurrent(routeCapture) && executable && currentPosition()
       && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
-      runtime.state = Tango.Engine.updatePositionQuote(runtime.state, runtime.current.token, executable);
+      runtime.state = await Tango.Store.updatePositionQuote(runtime.current.token, executable);
       runtime.lastQuoteWriteAt = Date.now();
-      await Tango.Store.saveState(runtime.state);
       if (!routeCaptureIsCurrent(routeCapture)) return;
     }
     if (!routeCaptureIsCurrent(routeCapture)) return;
@@ -354,6 +347,12 @@
       && candidate?.valuationMode === 'MARKET_CAP'
       && Number(candidate?.marketCapDivisor) === 1_000_000_000
       && Number(candidate?.marketCapUsd || 0) > 0;
+  }
+
+  function displaysMarketCapValuation(quote) {
+    return quote?.valuationMode === 'MARKET_CAP'
+      && String(quote?.source || '').toUpperCase() === 'GMGN_TRENCH_MC'
+      && Number(quote?.marketCapUsd) > 0;
   }
 
   function acceptedTokenObservation(candidate, token, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
@@ -456,7 +455,8 @@
   }
 
   async function sharedQuoteRequest(message, timeoutMs = 650) {
-    const key = `${message.type}:${message.chain || ''}:${String(message.address || '').toLowerCase()}`;
+    const identity = message.address ? gmgnQuoteKey(message.chain, message.address) : String(message.chain || '');
+    const key = `${message.type}:${identity}`;
     if (runtime.quoteRequests.has(key)) return runtime.quoteRequests.get(key);
     const request = requestWithTimeout(message, timeoutMs).finally(() => {
       if (runtime.quoteRequests.get(key) === request) runtime.quoteRequests.delete(key);
@@ -523,14 +523,19 @@
     return runtime.state?.positions?.[Tango.Engine.positionKey(chain, address)] || token;
   }
 
-  function freshExecutableQuote(position) {
+  function freshExecutableQuoteResult(position) {
     const chain = activeChain();
-    if (!chain || position?.chain !== chain.id) return null;
+    if (!chain || position?.chain !== chain.id) return { quote: null, reason: 'unsupportedChain' };
     const address = Tango.Chains.normalizeAddress(chain.id, position.tokenAddress);
     const currentMatches = runtime.current?.token?.chain === chain.id
       && Tango.Chains.normalizeAddress(chain.id, runtime.current.token.address) === address;
     const candidate = currentMatches ? runtime.current.quote : freshGmgnQuote(chain.id, address);
-    return executableQuote(position, candidate);
+    try { return { quote: requireExecutableQuote(position, candidate), reason: null }; }
+    catch (error) { return { quote: null, reason: error?.message || 'invalidQuote' }; }
+  }
+
+  function freshExecutableQuote(position) {
+    return freshExecutableQuoteResult(position).quote;
   }
 
   function positionUrl(position) {
@@ -549,7 +554,7 @@
     const chain = activeChain();
     if (!chain || context?.token?.chain !== chain.id) return showToast(t('unsupportedChain'), 'error');
     const amountNative = Number(context.amountNative ?? context.amountSol);
-    const lockKey = `${chain.id}:${context.token.address.toLowerCase()}:${amountNative}`;
+    const lockKey = `${gmgnQuoteKey(chain.id, context.token.address)}:${amountNative}`;
     const lastHandledAt = Number(runtime.quickBuyLocks.get(lockKey) || 0);
     if (Date.now() - lastHandledAt < 1000) return;
     runtime.quickBuyLocks.set(lockKey, Date.now());
@@ -599,18 +604,24 @@
     if (order.amountNative > account.cashBalanceNative) throw new Error('insufficientBalance');
     if (!requiresConfirmation()) return;
     const fee = order.amountNative * runtime.settings.platformFeeBps / 10_000;
+    const marketCapValuation = displaysMarketCapValuation(order.quote);
     const executionPrice = order.quote.priceUsd * (1 + runtime.settings.slippageBps / 10_000);
+    const valuationRows = marketCapValuation
+      ? [[t('marketCap'), Tango.Format.usd(order.quote.marketCapUsd, language(), true)]]
+      : [
+        [t('observedPrice'), Tango.Format.usd(order.quote.priceUsd, language())],
+        [t('executionPrice'), Tango.Format.usd(executionPrice, language())]
+      ];
     runtime.modal = {
       type: 'confirm',
       orderKey: `${order.token.chain}:${order.token.address || ''}:${order.amountNative}`,
       title: t('simulatedBuy'),
       rows: [
         [t('token'), order.token.symbol], [t('investment'), Tango.Format.native(order.amountNative, chain.nativeSymbol, language())],
-        [t('observedPrice'), Tango.Format.usd(order.quote.priceUsd, language())],
+        ...valuationRows,
         [t('slippage'), Tango.Format.percent(runtime.settings.slippageBps / 100, language())],
         [t('tradingFee'), Tango.Format.native(fee, chain.nativeSymbol, language())],
-        [t('networkFee'), Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())],
-        [t('executionPrice'), Tango.Format.usd(executionPrice, language())]
+        [t('networkFee'), Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())]
       ],
       allowSessionSuppress: true,
       action: () => commitBuy(order, routeCapture)
@@ -625,10 +636,9 @@
     try {
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
       const executableOrder = { ...order, quote: requireExecutableQuote(order.token, order.quote) };
-      const result = Tango.Engine.executeBuy(runtime.state, executableOrder, runtime.settings);
+      const result = await Tango.Store.executeBuy(executableOrder);
       runtime.state = result.state;
       runtime.modal = null;
-      await Tango.Store.saveState(runtime.state);
       playTradeSound('BUY');
       const chain = Tango.Chains.require(order.token.chain);
       showToast(`${t('buySuccess')} · ${Tango.Format.native(order.amountNative, chain.nativeSymbol, language())} ${order.token.symbol}`, 'success');
@@ -648,9 +658,12 @@
       const validation = Tango.Engine.validateQuote(order.quote, Date.now(), undefined, persistedQuoteContext(order.token));
       if (!validation.ok) throw new Error(validation.reason);
       if (requiresConfirmation()) {
+        const valuationRow = displaysMarketCapValuation(order.quote)
+          ? [t('marketCap'), Tango.Format.usd(order.quote.marketCapUsd, language(), true)]
+          : [t('observedPrice'), Tango.Format.usd(order.quote.priceUsd, language())];
         runtime.modal = {
           type: 'confirm', title: t('simulatedSell'),
-          rows: [[t('token'), order.token.symbol], [t('amount'), `${percent}%`], [t('observedPrice'), Tango.Format.usd(order.quote.priceUsd, language())]],
+          rows: [[t('token'), order.token.symbol], [t('amount'), `${percent}%`], valuationRow],
           allowSessionSuppress: true,
           action: () => commitSell(order, routeCapture)
         };
@@ -674,10 +687,9 @@
     try {
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
       const executableOrder = { ...order, quote: requireExecutableQuote(order.token, order.quote) };
-      const result = Tango.Engine.executeSell(runtime.state, executableOrder, runtime.settings);
+      const result = await Tango.Store.executeSell(executableOrder);
       runtime.state = result.state;
       runtime.modal = null;
-      await Tango.Store.saveState(runtime.state);
       playTradeSound('SELL');
       showToast(`${t('sellSuccess')} · ${order.percent}% ${order.token.symbol}`, 'success');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
@@ -709,20 +721,39 @@
       if (!routeCaptureIsCurrent(routeCapture) || !active) throw new Error('unsupportedChain');
       const chain = activeChain().id;
       const positions = Tango.ChainView.positions(runtime.state, chain);
-      const orders = Tango.ChainView.closeOrders(runtime.state, chain, (position) => freshExecutableQuote(position));
-      const result = Tango.Engine.executeCloseAll(runtime.state, chain, orders, runtime.settings);
+      const quoteFailures = new Map();
+      const orders = Tango.ChainView.closeOrders(runtime.state, chain, (position) => {
+        const quoteResult = freshExecutableQuoteResult(position);
+        if (!quoteResult.quote) {
+          quoteFailures.set(Tango.Engine.positionKey(position.chain, position.tokenAddress), quoteResult.reason);
+        }
+        return quoteResult.quote;
+      });
+      const result = await Tango.Store.executeCloseAll(chain, orders);
       runtime.state = result.state;
       runtime.modal = null;
-      await Tango.Store.saveState(runtime.state);
       const closed = result.trades.length;
-      const failures = result.failures.length + Math.max(0, positions.length - orders.length);
+      const orderKeys = new Set(orders.map((order) => Tango.Engine.positionKey(order.token.chain, order.token.address)));
+      const skippedFailures = positions
+        .filter((position) => !orderKeys.has(Tango.Engine.positionKey(position.chain, position.tokenAddress)))
+        .map((position) => ({
+          order: { token: { chain: position.chain, address: position.tokenAddress, symbol: position.symbol } },
+          reason: quoteFailures.get(Tango.Engine.positionKey(position.chain, position.tokenAddress)) || 'staleQuote'
+        }));
+      const failures = [...skippedFailures, ...(result.failures || [])];
+      const failureDetails = failures.map((failure) => {
+        const token = failure?.order?.token || {};
+        const identity = token.symbol || String(token.address || '').slice(0, 10) || t('token');
+        const reason = failure.reason === 'wrongChain' ? 'unsupportedChain' : failure.reason || 'invalidQuote';
+        return `${identity}: ${t(reason)}`;
+      }).join('; ');
       if (closed) {
         playTradeSound('SELL');
-        const message = failures
-          ? `${t('closeAllPartial')} · ${closed}/${positions.length}`
+        const message = failures.length
+          ? `${t('closeAllPartial')} · ${closed}/${positions.length} · ${failureDetails}`
           : `${t('closeAllSuccess')} · ${closed}`;
-        showToast(message, failures ? 'error' : 'success');
-      } else showToast(t(failures ? 'closeAllPartial' : 'invalidQuote'), 'error');
+        showToast(message, failures.length ? 'error' : 'success');
+      } else showToast(failures.length ? `${t('closeAllPartial')} · ${failureDetails}` : t('invalidQuote'), 'error');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
     finally { runtime.tradePending = false; }
   }
@@ -916,16 +947,21 @@
     const readValues = (side) => [...shadow.querySelectorAll(`[data-preset-side="${side}"]`)].map((input) => Number(input.value));
     const buyValues = readValues('buy');
     const sellValues = readValues('sell');
-    const validBuy = buyValues.length === 8 && buyValues.every((value) => value > 0);
-    const validSell = sellValues.length === 8 && sellValues.every((value) => value > 0 && value <= 100);
+    const validBuy = buyValues.length === 8 && buyValues.every((value) => Number.isFinite(value) && value > 0);
+    const validSell = sellValues.length === 8 && sellValues.every((value) => Number.isFinite(value) && value > 0 && value <= 100);
     if (!validBuy || !validSell) return showToast(t('invalidPresets'), 'error');
-    const settings = chainSettings();
-    if (!settings) return showToast(t('unsupportedChain'), 'error');
-    settings.buyPresets = buyValues;
-    runtime.settings.sellPresets = sellValues;
+    const chain = activeChain();
+    if (!chain || !chainSettings()) return showToast(t('unsupportedChain'), 'error');
     runtime.presetEditing = null;
-    await Tango.Store.saveSettings(runtime.settings);
-    showToast(t('presetsSaved'), 'success');
+    try {
+      runtime.settings = await Tango.Store.patchSettings({
+        chains: { [chain.id]: { buyPresets: buyValues } },
+        sellPresets: sellValues
+      });
+      showToast(t('presetsSaved'), 'success');
+    } catch {
+      showToast(t('settingsSaveFailed'), 'error');
+    }
   }
 
   function renderPanel() {
@@ -942,7 +978,9 @@
     const quoteValid = Boolean(liveQuote);
     const symbol = current?.token?.symbol || 'GMGN';
     const tokenTrades = current ? Tango.ChainView.trades(runtime.state, chain.id).filter((trade) =>
-      trade.chain === current.token.chain && trade.tokenAddress.toLowerCase() === current.token.address.toLowerCase()
+      trade.chain === current.token.chain
+      && Tango.Chains.normalizeAddress(trade.chain, trade.tokenAddress)
+        === Tango.Chains.normalizeAddress(current.token.chain, current.token.address)
     ) : [];
     const totalBuy = tokenTrades.filter((trade) => trade.side === 'BUY').reduce((sum, trade) => sum + Number(trade.amountNative || 0), 0);
     const totalSell = tokenTrades.filter((trade) => trade.side === 'SELL').reduce((sum, trade) => sum + Number(trade.amountNative || 0), 0);
@@ -1088,8 +1126,14 @@
       event.stopPropagation();
       const action = element.dataset.action;
       if (action === 'toggle-drawer') { runtime.drawerOpen = !runtime.drawerOpen; render(); }
-      if (action === 'collapse-bar') { runtime.settings.barCollapsed = !runtime.settings.barCollapsed; await Tango.Store.saveSettings(runtime.settings); }
-      if (action === 'collapse-panel') { runtime.settings.panelCollapsed = !runtime.settings.panelCollapsed; await Tango.Store.saveSettings(runtime.settings); }
+      if (action === 'collapse-bar') {
+        const barCollapsed = !runtime.settings.barCollapsed;
+        runtime.settings = await Tango.Store.patchSettings({ barCollapsed });
+      }
+      if (action === 'collapse-panel') {
+        const panelCollapsed = !runtime.settings.panelCollapsed;
+        runtime.settings = await Tango.Store.patchSettings({ panelCollapsed });
+      }
       if (action === 'dashboard') {
         chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD' })
           .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
@@ -1100,7 +1144,11 @@
           .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
           .catch(() => showToast(t('openDashboardFailed'), 'error'));
       }
-      if (action === 'toggle-sound') { runtime.settings.soundEnabled = !runtime.settings.soundEnabled; await Tango.Store.saveSettings(runtime.settings); render(); }
+      if (action === 'toggle-sound') {
+        const soundEnabled = !runtime.settings.soundEnabled;
+        runtime.settings = await Tango.Store.patchSettings({ soundEnabled });
+        render();
+      }
       if (action === 'breakeven') await sellBreakeven();
       if (action === 'close-all') requestCloseAll();
       if (action === 'close-calendar') { runtime.calendarOpen = false; render(); }
@@ -1119,8 +1167,8 @@
         }
       }
     }));
-    shell.querySelectorAll('.tango-preset-editor').forEach((input) => input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') savePresetEdits();
+    shell.querySelectorAll('.tango-preset-editor').forEach((input) => input.addEventListener('keydown', async (event) => {
+      if (event.key === 'Enter') await savePresetEdits();
     }));
     bindDrag();
   }
@@ -1158,7 +1206,7 @@
         const suppressClick = (click) => { click.preventDefault(); click.stopImmediatePropagation(); };
         element.addEventListener('click', suppressClick, true);
         setTimeout(() => element.removeEventListener('click', suppressClick, true), 0);
-        await Tango.Store.saveSettings(runtime.settings);
+        runtime.settings = await Tango.Store.patchSettings({ [settingKey]: runtime.settings[settingKey] });
       };
       global.addEventListener('pointermove', onMove); global.addEventListener('pointerup', onUp); global.addEventListener('pointercancel', onUp);
     });

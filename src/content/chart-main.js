@@ -274,7 +274,7 @@
   window.addEventListener('message', (event) => {
     if (event.data?.source !== 'TANGO_PAPER_PARENT' || event.data?.type !== 'CHART_MARKERS') return;
     const nextState = event.data.payload || null;
-    if (markerState?.tokenAddress !== nextState?.tokenAddress) {
+    if (markerState?.chain !== nextState?.chain || markerState?.tokenAddress !== nextState?.tokenAddress) {
       lastScaleMode = null;
       stableScale = null;
       stableSignature = '';

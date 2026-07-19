@@ -6,6 +6,10 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../src/background.js'), 'utf8');
 const chainsSource = fs.readFileSync(path.resolve(__dirname, '../src/core/chains.js'), 'utf8');
+const constantsSource = fs.readFileSync(path.resolve(__dirname, '../src/shared/constants.js'), 'utf8');
+const stateSource = fs.readFileSync(path.resolve(__dirname, '../src/core/state.js'), 'utf8');
+const engineSource = fs.readFileSync(path.resolve(__dirname, '../src/core/engine.js'), 'utf8');
+const coordinatorSource = fs.readFileSync(path.resolve(__dirname, '../src/core/state-coordinator.js'), 'utf8');
 const ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 const WRAPPED_SOL = 'So11111111111111111111111111111111111111112';
 
@@ -24,6 +28,7 @@ function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
   const listeners = [];
   const fetchCalls = [];
   const openedTabs = [];
+  const storageValues = {};
   class FakeDate extends Date { static now() { return clock.now; } }
   const context = {
     fetch: (...args) => {
@@ -42,12 +47,29 @@ function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
         openOptionsPage: async () => undefined
       },
       tabs: { create: async ({ url }) => { openedTabs.push(url); } },
-      storage: { session: { get: async () => ({}), set: async () => undefined } }
+      storage: {
+        local: {
+          get: async (keys) => Object.fromEntries(keys.filter((key) => key in storageValues).map((key) => [key, structuredClone(storageValues[key])])),
+          set: async (next) => { Object.assign(storageValues, structuredClone(next)); }
+        },
+        session: { get: async () => ({}), set: async () => undefined }
+      }
     }
   };
   vm.runInNewContext(chainsSource, context, { filename: 'src/core/chains.js' });
+  vm.runInNewContext(constantsSource, context, { filename: 'src/shared/constants.js' });
+  vm.runInNewContext(stateSource, context, { filename: 'src/core/state.js' });
+  vm.runInNewContext(engineSource, context, { filename: 'src/core/engine.js' });
+  vm.runInNewContext(coordinatorSource, context, { filename: 'src/core/state-coordinator.js' });
   vm.runInNewContext(source, context, { filename: 'src/background.js' });
-  return { context, api: context.module.exports, listeners, clock, fetchCalls, openedTabs };
+  return { context, api: context.module.exports, listeners, clock, fetchCalls, openedTabs, storageValues };
+}
+
+function send(loaded, message) {
+  return new Promise((resolve) => {
+    const handled = loaded.listeners[0](message, null, resolve);
+    if (!handled) resolve({ ok: false, error: 'unhandled' });
+  });
 }
 
 test('token tab messages accept every registered GMGN chain and reject non-token routes', async () => {
@@ -70,23 +92,73 @@ test('token tab messages accept every registered GMGN chain and reject non-token
   assert.equal(rejected.error, 'Invalid GMGN token URL');
 });
 
+test('the service worker owns one serialized mutation coordinator for every extension context', async () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const initial = loaded.context.Tango.State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  loaded.storageValues[loaded.context.Tango.STORAGE_KEY] = initial;
+  loaded.storageValues[loaded.context.Tango.SETTINGS_KEY] = loaded.context.Tango.State.normalizeSettings({
+    slippageBps: 0,
+    platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 }, bsc: { networkFeeNative: 0 } }
+  });
+  const quote = {
+    priceUsd: 2, nativePriceUsd: 2_000,
+    observedAt: loaded.clock.now, nativePriceObservedAt: loaded.clock.now
+  };
+
+  const [eth, bsc] = await Promise.all([
+    send(loaded, {
+      type: 'TANGO_STORE_MUTATE',
+      command: {
+        type: 'EXECUTE_BUY',
+        order: { token: { chain: 'eth', address: '0x8888888888888888888888888888888888888888' }, quote, amountNative: 1 }
+      }
+    }),
+    send(loaded, {
+      type: 'TANGO_STORE_MUTATE',
+      command: {
+        type: 'EXECUTE_BUY',
+        order: { token: { chain: 'bsc', address: '0x9999999999999999999999999999999999999999' }, quote, amountNative: 1 }
+      }
+    })
+  ]);
+  const snapshot = await send(loaded, { type: 'TANGO_STORE_GET_ALL' });
+
+  assert.equal(eth.ok, true);
+  assert.equal(bsc.ok, true);
+  assert.equal(snapshot.ok, true);
+  assert.equal(snapshot.result.state.accounts.eth.cashBalanceNative, 9);
+  assert.equal(snapshot.result.state.accounts.bsc.cashBalanceNative, 9);
+  assert.equal(snapshot.result.state.stateRevision, 2);
+});
+
 test('ETH native requests coalesce across Ethereum and Base', async () => {
   const loaded = loadBackground(async () => jsonResponse({ ethereum: { usd: 2500 } }));
   const [eth, base] = await Promise.all([loaded.context.getNativePrice('eth'), loaded.context.getNativePrice('base')]);
   assert.equal(eth, 2500); assert.equal(base, 2500); assert.equal(loaded.fetchCalls.length, 1);
 });
 
-test('native price messages preserve the original shared-cache observation timestamp', async () => {
-  const loaded = loadBackground(async () => jsonResponse({ ethereum: { usd: 2500 } }));
+test('shared ETH and Base native cache reuses through quote freshness and refreshes one millisecond later', async () => {
+  let fetchCount = 0;
+  const loaded = loadBackground(async () => {
+    fetchCount += 1;
+    return jsonResponse({ ethereum: { usd: 2_500 + fetchCount } });
+  });
   const send = (chain) => new Promise((resolve) => {
     loaded.listeners[0]({ type: 'TANGO_GET_NATIVE_PRICE', chain }, null, resolve);
   });
   const eth = await send('eth');
-  loaded.clock.now += 29_000;
-  const base = await send('base');
-  assert.equal(eth.ok, true); assert.equal(eth.price, 2500); assert.equal(eth.observedAt, 1_000_000);
-  assert.equal(base.ok, true); assert.equal(base.price, eth.price); assert.equal(base.observedAt, eth.observedAt);
-  assert.equal(loaded.fetchCalls.length, 1);
+  loaded.clock.now += 15_000;
+  const boundary = await send('base');
+  loaded.clock.now += 1;
+  const refreshed = await send('base');
+
+  assert.equal(eth.ok, true); assert.equal(eth.price, 2_501); assert.equal(eth.observedAt, 1_000_000);
+  assert.equal(boundary.ok, true); assert.equal(boundary.price, eth.price); assert.equal(boundary.observedAt, eth.observedAt);
+  assert.equal(refreshed.ok, true); assert.equal(refreshed.price, 2_502);
+  assert.equal(refreshed.observedAt, 1_015_001);
+  assert.equal(loaded.fetchCalls.length, 2);
 });
 
 test('the same EVM address uses independent DEX requests per chain', async () => {
@@ -96,13 +168,37 @@ test('the same EVM address uses independent DEX requests per chain', async () =>
   assert.equal(eth.priceUsd, 1); assert.equal(base.priceUsd, 2); assert.equal(loaded.fetchCalls.length, 2);
 });
 
+test('token quote requests validate addresses before provider access and normalize mixed-case EVM identity', async () => {
+  const mixed = '0xA111111111111111111111111111111111111111';
+  const loaded = loadBackground(async (url) => jsonResponse([{
+    baseToken: { address: mixed }, priceUsd: '2', liquidity: { usd: 10 }
+  }]));
+  assert.equal(await loaded.context.getTokenQuote('eth', 'bad'), null);
+  assert.equal(loaded.fetchCalls.length, 0);
+
+  const quote = await loaded.context.getTokenQuote('eth', mixed);
+  assert.equal(quote.priceUsd, 2);
+  assert.match(String(loaded.fetchCalls[0][0]), /0xa111111111111111111111111111111111111111$/);
+});
+
+test('non-finite provider prices never enter native or token caches', async () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const token = loadBackground(async () => jsonResponse([{
+    baseToken: { address }, priceUsd: Infinity, marketCap: Infinity, liquidity: { usd: Infinity }
+  }]));
+  assert.equal(await token.context.getTokenQuote('eth', address), null);
+
+  const native = loadBackground(async () => jsonResponse({ ethereum: { usd: Infinity } }));
+  await assert.rejects(native.context.getNativePrice('eth'), /unavailable/);
+});
+
 test('a chain without verified DEX mapping fails closed without fetch', async () => {
   const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
   assert.equal(await loaded.context.getTokenQuote('robinhood', '0x1111111111111111111111111111111111111111'), null);
   assert.equal(loaded.fetchCalls.length, 0);
 });
 
-test('concurrent SOL requests share one fetch and preserve the 30 second cache', async () => {
+test('concurrent SOL requests share one fetch through the 15 second execution freshness boundary', async () => {
   const gate = deferred();
   let calls = 0;
   const loaded = loadBackground(() => { calls += 1; return gate.promise; });
@@ -111,7 +207,7 @@ test('concurrent SOL requests share one fetch and preserve the 30 second cache',
   assert.equal(calls, 1);
   gate.resolve(jsonResponse({ solana: { usd: 150 } }));
   assert.deepEqual(await Promise.all([first, second]), [150, 150]);
-  loaded.clock.now += 29_999;
+  loaded.clock.now += 15_000;
   assert.equal(await loaded.context.getSolPrice(), 150);
   assert.equal(calls, 1);
   loaded.clock.now += 1;

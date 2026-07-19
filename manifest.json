@@ -38,6 +38,7 @@
         "src/shared/i18n.js",
         "src/shared/format.js",
         "src/core/engine.js",
+        "src/core/state-coordinator.js",
         "src/core/storage.js",
         "src/adapters/gmgn.js",
         "src/content/chain-view.js",

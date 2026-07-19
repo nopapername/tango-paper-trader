@@ -21,6 +21,12 @@
     return settings?.chainSettings?.[chainId] || settings?.chains?.[chainId] || {};
   }
 
+  function hasDerivedMarketCapPrice(trade) {
+    return String(trade?.priceProvenance || '').startsWith('MARKET_CAP')
+      || trade?.priceProvenance === 'MIXED_DERIVED'
+      || trade?.valuationMode === 'MARKET_CAP';
+  }
+
   function build(state, settings, selectedChain, nativePrices = {}, filters = {}) {
     const chain = Tango.Chains.get(selectedChain) || Tango.Chains.get('sol');
     const positions = Tango.ChainView.positions(state, chain.id);
@@ -46,11 +52,16 @@
       'executedAt', 'chain', 'nativeSymbol', 'tokenAddress', 'symbol', 'side', 'amountNative',
       'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'nativePriceUsd',
       'slippageBps', 'platformFeeNative', 'networkFeeNative', 'realizedPnlNative',
-      'realizedPnlUsd', 'sourceUrl'
+      'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'sourceUrl'
     ];
-    return Tango.ChainView.trades(state, selected.id).map((trade) => Object.fromEntries(
-      fields.map((field) => [field, field === 'executedAt' ? new Date(trade.executedAt).toISOString() : trade[field]])
-    ));
+    return Tango.ChainView.trades(state, selected.id).map((trade) => {
+      const derived = hasDerivedMarketCapPrice(trade);
+      return Object.fromEntries(fields.map((field) => [field,
+        field === 'executedAt' ? new Date(trade.executedAt).toISOString()
+          : derived && (field === 'observedPriceUsd' || field === 'executionPriceUsd') ? ''
+            : trade[field]
+      ]));
+    });
   }
 
   function calendar(state, chain, year, month) {
@@ -79,6 +90,6 @@
     };
   }
 
-  Tango.DashboardModel = { build, matchesFilters, tradesCsvRows, calendar };
+  Tango.DashboardModel = { build, matchesFilters, tradesCsvRows, calendar, hasDerivedMarketCapPrice };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.DashboardModel;
 })(globalThis);

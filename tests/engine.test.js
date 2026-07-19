@@ -19,10 +19,24 @@ const settings = State.normalizeSettings({
   chains: { sol: { networkFeeNative: 0.001 } }
 });
 const token = {
-  chain: 'sol', address: 'TokenAddress111', symbol: 'TANGO', name: 'Tango',
+  chain: 'sol', address: '11111111111111111111111111111112', symbol: 'TANGO', name: 'Tango',
   metadataVerified: true, metadataSource: 'GMGN_DETAIL'
 };
-const quote = { priceUsd: 2, marketCapUsd: 2_000_000, liquidityUsd: 500_000, nativePriceUsd: 100, observedAt: 1_000 };
+const quote = {
+  priceUsd: 2, marketCapUsd: 2_000_000, liquidityUsd: 500_000,
+  nativePriceUsd: 100, observedAt: 1_000, nativePriceObservedAt: 1_000
+};
+
+test('position keys preserve Solana case, normalize EVM case, and reject invalid identity', () => {
+  const solanaAddress = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
+  assert.notEqual(Engine.positionKey('sol', solanaAddress), Engine.positionKey('sol', solanaAddress.toLowerCase()));
+  assert.equal(
+    Engine.positionKey('eth', '0xA111111111111111111111111111111111111111'),
+    'eth:0xa111111111111111111111111111111111111111'
+  );
+  assert.throws(() => Engine.positionKey('eth', 'bad'), /invalidAddress/);
+  assert.throws(() => Engine.positionKey('wat', solanaAddress), /unsupportedChain/);
+});
 
 test('buy reduces the requested chain cash and creates a weighted native position', () => {
   const first = Engine.executeBuy(state(), { token, quote, amountNative: 10 }, settings, 1_000);
@@ -62,7 +76,10 @@ test('the same EVM address remains isolated across chain accounts', () => {
   const address = '0x1111111111111111111111111111111111111111';
   let next = State.createInitialState({ now: 1 }); next.initialized = true;
   const chainSettings = State.normalizeSettings({});
-  const evmQuote = { priceUsd: 2, marketCapUsd: 2_000_000, nativePriceUsd: 2000, observedAt: 1000 };
+  const evmQuote = {
+    priceUsd: 2, marketCapUsd: 2_000_000, nativePriceUsd: 2000,
+    observedAt: 1000, nativePriceObservedAt: 1000
+  };
   next = Engine.executeBuy(next, { token: { chain: 'eth', address, symbol: 'AAA' }, quote: evmQuote, amountNative: 1 }, chainSettings, 1000).state;
   next = Engine.executeBuy(next, { token: { chain: 'base', address, symbol: 'AAA' }, quote: evmQuote, amountNative: 2 }, chainSettings, 1000).state;
   assert.equal(next.accounts.eth.cashBalanceNative, 9);
@@ -72,7 +89,10 @@ test('the same EVM address remains isolated across chain accounts', () => {
 
 test('close all only closes orders for the requested chain', () => {
   const address = '0x1111111111111111111111111111111111111111';
-  const evmQuote = { priceUsd: 2, marketCapUsd: 2_000_000, nativePriceUsd: 2000, observedAt: 1000 };
+  const evmQuote = {
+    priceUsd: 2, marketCapUsd: 2_000_000, nativePriceUsd: 2000,
+    observedAt: 1000, nativePriceObservedAt: 1000
+  };
   let next = State.createInitialState({ now: 1 }); next.initialized = true;
   next = Engine.executeBuy(next, { token: { chain: 'eth', address, symbol: 'AAA' }, quote: evmQuote, amountNative: 1 }, settings, 1000).state;
   next = Engine.executeBuy(next, { token: { chain: 'bsc', address, symbol: 'AAA' }, quote: evmQuote, amountNative: 1 }, settings, 1000).state;
@@ -93,11 +113,15 @@ test('verified Solana Pump market-cap quotes can buy and track native pnl withou
     metadataSource: 'GMGN_TRENCH'
   };
   const marketCapQuote = {
-    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100, observedAt: 1_000,
+    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
     source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
   };
   const bought = Engine.executeBuy(state(), { token: pumpToken, quote: marketCapQuote, amountNative: 1 }, settings, 1_000);
   assert.equal(bought.position.valuationMode, 'MARKET_CAP');
+  assert.equal(bought.trade.valuationMode, 'MARKET_CAP');
+  assert.equal(bought.trade.priceProvenance, 'MARKET_CAP_DERIVED');
+  assert.equal(bought.trade.marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
   const doubled = { ...marketCapQuote, marketCapUsd: 6_000, observedAt: 2_000 };
   const mark = Engine.markPosition(bought.position, doubled);
   assert.ok(mark.valueNative > bought.position.costBasisNative * 1.9);
@@ -163,7 +187,8 @@ test('trusted Pump market-cap provenance survives detail metadata across every e
     metadataSource: 'GMGN_TRENCH'
   };
   const marketCapQuote = {
-    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100, observedAt: 1_000,
+    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
     source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
   };
   const first = Engine.executeBuy(state(), { token: pumpToken, quote: marketCapQuote, amountNative: 1 }, settings, 1_000);
@@ -190,6 +215,7 @@ test('trusted Pump market-cap provenance survives detail metadata across every e
     token: { chain: 'sol', address: pumpToken.address }, quote: doubled, percent: 25
   }, settings, 2_000);
   assert.ok(sold.trade.executionPriceUsd > 0);
+  assert.equal(sold.trade.priceProvenance, 'MARKET_CAP_DERIVED');
   const closed = Engine.executeCloseAll(sold.state, 'sol', [{
     token: { chain: 'sol', address: pumpToken.address }, quote: doubled
   }], settings, 2_000);
@@ -199,7 +225,7 @@ test('trusted Pump market-cap provenance survives detail metadata across every e
 
 test('portfolio summary is chain-local', () => {
   const address = '0x1111111111111111111111111111111111111111';
-  const evmQuote = { priceUsd: 2, nativePriceUsd: 2000, observedAt: 1000 };
+  const evmQuote = { priceUsd: 2, nativePriceUsd: 2000, observedAt: 1000, nativePriceObservedAt: 1000 };
   let next = state();
   next = Engine.executeBuy(next, { token, quote, amountNative: 10 }, settings, 1000).state;
   next = Engine.executeBuy(next, { token: { chain: 'eth', address, symbol: 'AAA' }, quote: evmQuote, amountNative: 2 }, settings, 1000).state;
@@ -219,21 +245,105 @@ test('global USD summary excludes native asset appreciation from paper PnL', () 
   });
 });
 
+test('global USD summary converts the same current-native equity and pnl shown by each chain card', () => {
+  const next = State.createInitialState({ now: 1 });
+  next.accounts.eth.cashBalanceNative = 9;
+  next.positions['eth:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'] = {
+    chain: 'eth',
+    tokenAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    quantity: 1,
+    costBasisNative: 1,
+    lastPriceUsd: 100,
+    lastNativePriceUsd: 100
+  };
+
+  const ethCard = Engine.portfolioSummary(next, 'eth');
+  assert.deepEqual(Engine.globalUsdSummary(next, { eth: 200 }), {
+    assetsUsd: ethCard.equityNative * 200,
+    pnlUsd: ethCard.totalPnlNative * 200,
+    complete: false,
+    missingChains: ['sol', 'bsc', 'base', 'robinhood', 'xlayer']
+  });
+});
+
 test('stale and invalid native quotes are rejected', () => {
   assert.throws(() => Engine.executeBuy(state(), { token, quote: { ...quote, observedAt: 1 }, amountNative: 1 }, settings, 50_000), /staleQuote/);
   assert.throws(() => Engine.executeBuy(state(), { token, quote: { priceUsd: 2, nativePriceUsd: 0, observedAt: 1_000 }, amountNative: 1 }, settings, 1_000), /invalidQuote/);
 });
 
+test('token and native quote timestamps must be independently valid and fresh', () => {
+  const now = 20_000;
+  const fresh = { ...quote, observedAt: 5_000, nativePriceObservedAt: 19_999 };
+  assert.deepEqual(Engine.validateQuote(fresh, now), { ok: true });
+
+  const missingNative = { ...fresh };
+  delete missingNative.nativePriceObservedAt;
+  assert.deepEqual(Engine.validateQuote(missingNative, now), { ok: false, reason: 'invalidQuote' });
+  for (const nativePriceObservedAt of ['19_999', 19_999.5, 0, -1, NaN, Infinity]) {
+    assert.deepEqual(
+      Engine.validateQuote({ ...fresh, nativePriceObservedAt }, now),
+      { ok: false, reason: 'invalidQuote' }
+    );
+  }
+  assert.deepEqual(
+    Engine.validateQuote({ ...fresh, nativePriceObservedAt: now + 5_001 }, now),
+    { ok: false, reason: 'invalidQuote' }
+  );
+  assert.deepEqual(
+    Engine.validateQuote({ ...fresh, nativePriceObservedAt: now - 15_001 }, now),
+    { ok: false, reason: 'staleQuote' }
+  );
+});
+
+test('execution rejects invalid identity, non-finite quote data, and unbounded timestamps', () => {
+  const badEvm = { chain: 'eth', address: '0x1234' };
+  assert.throws(() => Engine.executeBuy(state(), { token: badEvm, quote, amountNative: 1 }, settings, 1_000), /invalidAddress/);
+  assert.throws(() => Engine.executeBuy(state(), { token, quote: { ...quote, priceUsd: Infinity }, amountNative: 1 }, settings, 1_000), /invalidQuote/);
+  assert.throws(() => Engine.executeBuy(state(), { token, quote: { ...quote, nativePriceUsd: Infinity }, amountNative: 1 }, settings, 1_000), /invalidQuote/);
+  assert.throws(() => Engine.executeBuy(state(), { token, quote: { ...quote, marketCapUsd: Infinity }, amountNative: 1 }, settings, 1_000), /invalidQuote/);
+  assert.throws(() => Engine.executeBuy(state(), { token, quote: { ...quote, observedAt: Infinity }, amountNative: 1 }, settings, 1_000), /invalidQuote/);
+  assert.throws(() => Engine.executeBuy(state(), {
+    token, quote: { ...quote, observedAt: 1_000 }, staleMs: Infinity, amountNative: 1
+  }, settings, 1_000), /invalidQuote/);
+});
+
+test('execution rejects non-finite amounts and unsafe fee settings', () => {
+  assert.throws(() => Engine.executeBuy(state(), { token, quote, amountNative: Infinity }, settings, 1_000), /invalidAmount/);
+  assert.throws(() => Engine.executeBuy(state(), { token, quote, amountNative: 1 }, { ...settings, slippageBps: Infinity }, 1_000), /invalidSettings/);
+  assert.throws(() => Engine.executeBuy(state(), { token, quote, amountNative: 1 }, { ...settings, platformFeeBps: -1 }, 1_000), /invalidSettings/);
+  const badNetworkFee = structuredClone(settings);
+  badNetworkFee.chains.sol.networkFeeNative = Infinity;
+  assert.throws(() => Engine.executeBuy(state(), { token, quote, amountNative: 1 }, badNetworkFee, 1_000), /invalidSettings/);
+});
+
+test('execution stores canonical mixed-case EVM identity', () => {
+  const address = '0xA111111111111111111111111111111111111111';
+  const result = Engine.executeBuy(
+    State.createInitialState({ now: 1 }),
+    {
+      token: { chain: 'ETH', address },
+      quote: { priceUsd: 2, nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000 },
+      amountNative: 1
+    },
+    State.normalizeSettings({ slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } } }),
+    1_000
+  );
+  assert.equal(result.trade.chain, 'eth');
+  assert.equal(result.trade.tokenAddress, address.toLowerCase());
+  assert.ok(result.state.positions[`eth:${address.toLowerCase()}`]);
+});
+
 test('breakeven sell computes a native percentage needed to recover remaining cost', () => {
   const bought = Engine.executeBuy(state(), { token, quote, amountNative: 10 }, settings, 1_000);
-  const higherQuote = { ...quote, priceUsd: 4, observedAt: Date.now() };
+  const now = Date.now();
+  const higherQuote = { ...quote, priceUsd: 4, observedAt: now, nativePriceObservedAt: now };
   const percent = Engine.breakevenSellPercent(bought.position, higherQuote, settings);
   assert.ok(percent > 45 && percent < 60);
-  assert.equal(Engine.breakevenSellPercent(bought.position, { ...quote, priceUsd: 0.5, observedAt: Date.now() }, settings), null);
+  assert.equal(Engine.breakevenSellPercent(bought.position, { ...higherQuote, priceUsd: 0.5 }, settings), null);
 });
 
 test('close all settles every valid position and keeps chain daily pnl consistent', () => {
-  const otherToken = { ...token, address: 'TokenAddress222', symbol: 'OTHER' };
+  const otherToken = { ...token, address: '11111111111111111111111111111113', symbol: 'OTHER' };
   const first = Engine.executeBuy(state(), { token, quote, amountNative: 5 }, settings, 1_000);
   const second = Engine.executeBuy(first.state, { token: otherToken, quote, amountNative: 5 }, settings, 1_100);
   const closeQuote = { ...quote, priceUsd: 3, marketCapUsd: 3_000_000, observedAt: 2_000 };
@@ -256,7 +366,8 @@ test('adding a market-cap trench quote to a price position keeps the original va
   };
   const first = Engine.executeBuy(state(), { token: pumpToken, quote, amountNative: 1 }, settings, 1_000);
   const listQuote = {
-    priceUsd: 0, marketCapUsd: 4_000_000, nativePriceUsd: 100, observedAt: 2_000,
+    priceUsd: 0, marketCapUsd: 4_000_000, nativePriceUsd: 100,
+    observedAt: 2_000, nativePriceObservedAt: 2_000,
     source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
   };
   const second = Engine.executeBuy(first.state, { token: pumpToken, quote: listQuote, amountNative: 1 }, settings, 2_000);
@@ -279,8 +390,8 @@ test('detail metadata replaces a trench placeholder without changing chain balan
 });
 
 test('buying on a detail page cannot change another position logo', () => {
-  const trenchToken = { ...token, address: 'TrenchToken111', symbol: 'TRENCH', logoUrl: 'https://example.com/trench.png' };
-  const detailToken = { ...token, address: 'DetailToken222', symbol: 'DETAIL', logoUrl: 'https://example.com/detail.png' };
+  const trenchToken = { ...token, address: '11111111111111111111111111111114', symbol: 'TRENCH', logoUrl: 'https://example.com/trench.png' };
+  const detailToken = { ...token, address: '11111111111111111111111111111115', symbol: 'DETAIL', logoUrl: 'https://example.com/detail.png' };
   const trenchBuy = Engine.executeBuy(state(), { token: trenchToken, quote, amountNative: 1 }, settings, 1_000);
   const detailBuy = Engine.executeBuy(trenchBuy.state, { token: detailToken, quote, amountNative: 1 }, settings, 1_100);
   const detailRebuy = Engine.executeBuy(detailBuy.state, {
@@ -301,9 +412,9 @@ test('buying on a detail page cannot change another position logo', () => {
 
 test('trading one of several positions cannot replace any existing token identity', () => {
   const tokens = [
-    { ...token, address: 'AddressA111', symbol: 'AAA', name: 'Alpha', logoUrl: 'https://example.com/a.png', metadataSource: 'GMGN_TRENCH' },
-    { ...token, address: 'AddressB222', symbol: 'BBB', name: 'Beta', logoUrl: 'https://example.com/b.png', metadataSource: 'GMGN_TRENCH' },
-    { ...token, address: 'AddressC333', symbol: 'CCC', name: 'Gamma', logoUrl: 'https://example.com/c.png', metadataSource: 'GMGN_TRENCH' }
+    { ...token, address: '11111111111111111111111111111117', symbol: 'AAA', name: 'Alpha', logoUrl: 'https://example.com/a.png', metadataSource: 'GMGN_TRENCH' },
+    { ...token, address: '11111111111111111111111111111118', symbol: 'BBB', name: 'Beta', logoUrl: 'https://example.com/b.png', metadataSource: 'GMGN_TRENCH' },
+    { ...token, address: '11111111111111111111111111111119', symbol: 'CCC', name: 'Gamma', logoUrl: 'https://example.com/c.png', metadataSource: 'GMGN_TRENCH' }
   ];
   let next = state();
   tokens.forEach((item, index) => {
@@ -346,7 +457,7 @@ test('only verified address-bound metadata can repair a position and detail outr
 
 test('an unverified new order cannot seed a borrowed name or logo', () => {
   const borrowed = {
-    ...token, address: 'NewAddress444', symbol: 'AAA', name: 'Alpha', logoUrl: 'https://example.com/a.png',
+    ...token, address: '11111111111111111111111111111116', symbol: 'AAA', name: 'Alpha', logoUrl: 'https://example.com/a.png',
     metadataVerified: false, metadataSource: 'GMGN_NETWORK'
   };
   const bought = Engine.executeBuy(state(), { token: borrowed, quote, amountNative: 1 }, settings, 1_000);

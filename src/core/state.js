@@ -2,6 +2,20 @@
   const Tango = global.Tango = global.Tango || {};
   const MARKET_CAP_PROVENANCE = 'SOLANA_PUMP_TRENCH_V1';
   const MARKET_CAP_DIVISOR = 1_000_000_000;
+  const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  const finite = (value) => typeof value === 'number' && Number.isFinite(value);
+  const finiteBetween = (value, minimum, maximum) => finite(value)
+    && value >= minimum && value <= maximum;
+  const validTimestamp = (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  const migrationTimestamp = (value) => Number.isSafeInteger(Number(value)) && Number(value) >= 0;
+  const hasOwn = (value, field) => isRecord(value) && Object.hasOwn(value, field);
+  const optional = (object, field, validate) => !hasOwn(object, field) || validate(object[field]);
+  const alias = (object, modern, legacy, validate) => optional(object, modern, validate)
+    && (!legacy || optional(object, legacy, validate));
+  const canonicalChainIds = () => Tango.Chains.all().map((chain) => chain.id);
+  const sameKeys = (value, keys) => isRecord(value)
+    && Object.keys(value).length === keys.length
+    && keys.every((key) => Object.hasOwn(value, key));
   const accountFor = (balance, now) => ({
     initialBalanceNative: Number(balance), cashBalanceNative: Number(balance), realizedPnlNative: 0,
     createdAt: now, updatedAt: now
@@ -12,30 +26,151 @@
     initialBalanceNative: Number(existing.initialBalanceNative || 10)
   });
   const native = (object, modern, legacy, fallback = 0) => Number(object?.[modern] ?? object?.[legacy] ?? fallback);
-  const migrateTrade = (trade) => ({
-    ...trade,
-    amountNative: native(trade, 'amountNative', 'amountSol'),
-    platformFeeNative: native(trade, 'platformFeeNative', 'platformFeeSol'),
-    networkFeeNative: native(trade, 'networkFeeNative', 'networkFeeSol'),
-    realizedPnlNative: native(trade, 'realizedPnlNative', 'realizedPnlSol'),
-    nativePriceUsd: native(trade, 'nativePriceUsd', 'solPriceUsd'),
-    nativeSymbol: trade.nativeSymbol || 'SOL'
-  });
+
+  function validatePresetList(value, { maximum = Infinity } = {}) {
+    return Array.isArray(value) && value.length > 0 && value.length <= 12
+      && value.every((entry) => finiteBetween(entry, Number.EPSILON, maximum));
+  }
+
+  function validateLayoutPosition(value) {
+    return value == null || (isRecord(value) && finiteBetween(value.x, 0, 1_000_000)
+      && finiteBetween(value.y, 0, 1_000_000));
+  }
+
+  function validateSettings(source, options) {
+    if (!isRecord(source)) throw new Error('invalidSettings');
+    const booleanFields = [
+      'enabled', 'fastMode', 'confirmationEnabled', 'soundEnabled', 'showListQuickBuy',
+      'barCollapsed', 'panelCollapsed'
+    ];
+    if (booleanFields.some((field) => source[field] != null && typeof source[field] !== 'boolean')) {
+      throw new Error('invalidSettings');
+    }
+    if (source.language != null && !['auto', 'en', 'zh-CN'].includes(source.language)) throw new Error('invalidSettings');
+    if (source.displayCurrency != null && !['SOL', 'NATIVE', 'USD'].includes(source.displayCurrency)) throw new Error('invalidSettings');
+    if (source.theme != null && !['auto', 'dark', 'light'].includes(source.theme)) throw new Error('invalidSettings');
+    if (source.pnlBarPosition != null && !['top', 'bottom'].includes(source.pnlBarPosition)) throw new Error('invalidSettings');
+    if (source.selectedChain != null && !Tango.Chains.get(source.selectedChain)) throw new Error('invalidSettings');
+    if (!optional(source, 'slippageBps', (value) => finiteBetween(value, 0, 10_000))) throw new Error('invalidSettings');
+    if (!optional(source, 'platformFeeBps', (value) => finiteBetween(value, 0, 10_000))) throw new Error('invalidSettings');
+    if (!optional(source, 'sellPresets', (value) => validatePresetList(value, { maximum: 100 }))) throw new Error('invalidSettings');
+    if (!optional(source, 'buyPresets', validatePresetList)) throw new Error('invalidSettings');
+    if (!optional(source, 'networkFeeSol', (value) => finiteBetween(value, 0, 1_000_000))) throw new Error('invalidSettings');
+    if (!optional(source, 'initialBalanceSol', (value) => finiteBetween(value, Number.EPSILON, 1e15))) throw new Error('invalidSettings');
+    if (['panelPosition', 'drawerPosition', 'barPosition'].some((field) => !validateLayoutPosition(source[field]))) {
+      throw new Error('invalidSettings');
+    }
+
+    const rawChains = source.chains ?? source.chainSettings;
+    const chainAliases = ['chains', 'chainSettings'].filter((field) => hasOwn(source, field));
+    if (chainAliases.length) {
+      const allowed = new Set(canonicalChainIds());
+      chainAliases.forEach((field) => {
+        const chainSettings = source[field];
+        if (!isRecord(chainSettings)) throw new Error('invalidSettings');
+        if (Object.keys(chainSettings).some((chainId) => !allowed.has(chainId))) throw new Error('invalidSettings');
+        if (options.requireAllChains && chainSettings === rawChains && !sameKeys(chainSettings, canonicalChainIds())) {
+          throw new Error('invalidSettings');
+        }
+        Object.values(chainSettings).forEach((settings) => {
+          if (!isRecord(settings)) throw new Error('invalidSettings');
+          if (!optional(settings, 'buyPresets', validatePresetList)) throw new Error('invalidSettings');
+          if (!optional(settings, 'networkFeeNative', (value) => finiteBetween(value, 0, 1_000_000))) throw new Error('invalidSettings');
+          if (!optional(settings, 'initialBalanceNative', (value) => finiteBetween(value, Number.EPSILON, 1e15))) throw new Error('invalidSettings');
+        });
+      });
+    } else if (options.requireAllChains) throw new Error('invalidSettings');
+  }
+
+  function validateTrade(trade, legacy = false) {
+    if (!isRecord(trade)) throw new Error('invalidTrade');
+    const chain = Tango.Chains.get(trade.chain);
+    if (!chain || trade.chain !== chain.id || (legacy && chain.id !== 'sol')) throw new Error('invalidTrade');
+    if (!Tango.Chains.validateAddress(chain.id, trade.tokenAddress)
+      || trade.tokenAddress !== Tango.Chains.normalizeAddress(chain.id, trade.tokenAddress)) throw new Error('invalidTrade');
+    if (!String(trade.id || '').trim() || !['BUY', 'SELL'].includes(trade.side)) throw new Error('invalidTrade');
+    const nonnegativeFields = legacy
+      ? ['amountSol', 'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'liquidityUsd', 'solPriceUsd', 'slippageBps', 'platformFeeSol', 'networkFeeSol']
+      : ['amountNative', 'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'liquidityUsd', 'nativePriceUsd', 'slippageBps', 'platformFeeNative', 'networkFeeNative'];
+    if (nonnegativeFields.some((field) => !finiteBetween(trade[field], 0, Number.MAX_VALUE))) throw new Error('invalidTrade');
+    if (!(Number(trade.quantity) > 0) || !(Number(legacy ? trade.solPriceUsd : trade.nativePriceUsd) > 0)
+      || !(Number(trade.executionPriceUsd) > 0)) throw new Error('invalidTrade');
+    const signedFields = legacy ? ['realizedPnlSol'] : ['realizedPnlNative', 'realizedPnlUsd'];
+    if (signedFields.some((field) => !optional(trade, field, finite))) throw new Error('invalidTrade');
+    if (legacy && (
+      !optional(trade, 'amountNative', (value) => finiteBetween(value, 0, Number.MAX_VALUE))
+      || !optional(trade, 'platformFeeNative', (value) => finiteBetween(value, 0, Number.MAX_VALUE))
+      || !optional(trade, 'networkFeeNative', (value) => finiteBetween(value, 0, Number.MAX_VALUE))
+      || !optional(trade, 'realizedPnlNative', finite)
+      || !optional(trade, 'nativePriceUsd', (value) => finiteBetween(value, Number.EPSILON, Number.MAX_VALUE))
+    )) throw new Error('invalidTrade');
+    if (!optional(trade, 'entryMarketCapUsd', (value) => finiteBetween(value, 0, Number.MAX_VALUE))) throw new Error('invalidTrade');
+    if (!optional(trade, 'heldMs', (value) => finiteBetween(value, 0, Number.MAX_SAFE_INTEGER))) throw new Error('invalidTrade');
+    if (!validTimestamp(trade.executedAt)) throw new Error('invalidTrade');
+    if (!legacy && trade.nativeSymbol && trade.nativeSymbol !== chain.nativeSymbol) throw new Error('invalidTrade');
+    if (trade.valuationMode != null && !['PRICE', 'MARKET_CAP'].includes(trade.valuationMode)) throw new Error('invalidTrade');
+    if (trade.priceProvenance != null && ![
+      'OBSERVED_PRICE', 'MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED'
+    ].includes(trade.priceProvenance)) throw new Error('invalidTrade');
+  }
+
+  function inferredTradeProvenance(trade, chain) {
+    if (trade?.priceProvenance) return {
+      valuationMode: trade.valuationMode || (String(trade.priceProvenance).startsWith('MARKET_CAP') ? 'MARKET_CAP' : 'PRICE'),
+      priceProvenance: trade.priceProvenance,
+      ...(trade.marketCapProvenance ? { marketCapProvenance: trade.marketCapProvenance } : {})
+    };
+    const price = Number(trade?.observedPriceUsd);
+    const marketCap = Number(trade?.marketCapUsd);
+    const coherentLegacyMarketCap = chain?.id === 'sol'
+      && /pump$/i.test(String(trade?.tokenAddress || ''))
+      && price > 0 && marketCap > 0
+      && Math.abs(marketCap / price - MARKET_CAP_DIVISOR) <= MARKET_CAP_DIVISOR * 0.001;
+    return coherentLegacyMarketCap
+      ? { valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED', marketCapProvenance: MARKET_CAP_PROVENANCE }
+      : { valuationMode: trade?.valuationMode || 'PRICE', priceProvenance: 'OBSERVED_PRICE' };
+  }
+
+  const migrateTrade = (trade, strict) => {
+    if (strict) validateTrade(trade, true);
+    const chain = Tango.Chains.get(trade?.chain);
+    const provenance = inferredTradeProvenance(trade, chain);
+    return {
+      ...trade,
+      chain: chain?.id || trade?.chain,
+      tokenAddress: chain && Tango.Chains.validateAddress(chain.id, trade?.tokenAddress)
+        ? Tango.Chains.normalizeAddress(chain.id, trade.tokenAddress)
+        : trade?.tokenAddress,
+      amountNative: native(trade, 'amountNative', 'amountSol'),
+      platformFeeNative: native(trade, 'platformFeeNative', 'platformFeeSol'),
+      networkFeeNative: native(trade, 'networkFeeNative', 'networkFeeSol'),
+      realizedPnlNative: native(trade, 'realizedPnlNative', 'realizedPnlSol'),
+      nativePriceUsd: native(trade, 'nativePriceUsd', 'solPriceUsd'),
+      nativeSymbol: trade.nativeSymbol || 'SOL',
+      ...provenance
+    };
+  };
   const normalizeV2Trade = (trade, strict) => {
     const chain = Tango.Chains.get(trade?.chain);
     if (!chain) {
       if (strict) throw new Error('invalidTrade');
       return { ...trade };
     }
-    if (strict && trade.nativeSymbol && trade.nativeSymbol !== chain.nativeSymbol) throw new Error('invalidTrade');
+    if (strict) validateTrade(trade);
+    const provenance = inferredTradeProvenance(trade, chain);
     return {
       ...trade,
+      chain: chain.id,
+      tokenAddress: Tango.Chains.validateAddress(chain.id, trade?.tokenAddress)
+        ? Tango.Chains.normalizeAddress(chain.id, trade.tokenAddress)
+        : trade?.tokenAddress,
       amountNative: native(trade, 'amountNative', 'amountSol'),
       platformFeeNative: native(trade, 'platformFeeNative', 'platformFeeSol'),
       networkFeeNative: native(trade, 'networkFeeNative', 'networkFeeSol'),
       realizedPnlNative: native(trade, 'realizedPnlNative', 'realizedPnlSol'),
       nativePriceUsd: native(trade, 'nativePriceUsd', 'solPriceUsd'),
-      nativeSymbol: chain.nativeSymbol
+      nativeSymbol: chain.nativeSymbol,
+      ...provenance
     };
   };
 
@@ -45,11 +180,20 @@
       accountFor(initialBalances[chain.id] || 10, now)
     ]));
     const dailyRealizedByChain = Object.fromEntries(Tango.Chains.all().map((chain) => [chain.id, {}]));
-    return { schemaVersion: 2, accounts, positions: {}, trades: [], dailyRealizedByChain, initialized: false };
+    return {
+      schemaVersion: 2,
+      stateRevision: 0,
+      accounts,
+      positions: {},
+      trades: [],
+      dailyRealizedByChain,
+      initialized: false
+    };
   }
 
-  function normalizeSettings(raw) {
+  function normalizeSettings(raw, options = {}) {
     const source = raw || {};
+    if (options.strict) validateSettings(source, options);
     const existing = source.chains || source.chainSettings || {};
     const chains = Object.fromEntries(Tango.Chains.all().map((chain) => {
       const legacySolSettings = chain.id === 'sol' ? {
@@ -68,12 +212,18 @@
       buyPresets: defaultBuyPresets, networkFeeSol: defaultNetworkFeeSol,
       initialBalanceSol: defaultInitialBalanceSol, ...defaultGlobalSettings
     } = Tango.DEFAULT_SETTINGS;
-    return { ...defaultGlobalSettings, ...globalSettings, chains };
+    const selectedChain = Tango.Chains.get(globalSettings.selectedChain)?.id || 'sol';
+    return { ...defaultGlobalSettings, ...globalSettings, selectedChain, chains };
   }
 
   function normalizeAccount(raw, fallback, strict) {
-    if (strict && raw && (!Number.isFinite(Number(raw.initialBalanceNative)) || !Number.isFinite(Number(raw.cashBalanceNative)) || !Number.isFinite(Number(raw.realizedPnlNative)))) {
-      throw new Error('invalidAccount');
+    if (strict) {
+      if (!isRecord(raw)
+        || !finiteBetween(raw.initialBalanceNative, Number.EPSILON, Number.MAX_VALUE)
+        || !finiteBetween(raw.cashBalanceNative, 0, Number.MAX_VALUE)
+        || !finite(raw.realizedPnlNative)
+        || !validTimestamp(raw.createdAt)
+        || !validTimestamp(raw.updatedAt)) throw new Error('invalidAccount');
     }
     return {
       ...fallback,
@@ -107,7 +257,7 @@
       && ratioMatches(position?.lastMarketCapUsd, position?.lastPriceUsd);
   }
 
-  function normalizePosition(position, key, accounts, strict) {
+  function normalizePosition(position, key, accounts, strict, legacyKey = false) {
     const chainId = String(position?.chain || '').toLowerCase();
     const chain = Tango.Chains.get(chainId);
     const address = position?.tokenAddress ?? position?.address;
@@ -117,34 +267,100 @@
       if (strict) throw new Error('invalidPosition');
       return null;
     }
+    if (strict) {
+      const nonnegativeFields = [
+        ['costBasisNative', 'costBasisSol'], ['averageEntryPriceUsd'], ['averageEntryMarketCap'],
+        ['lastPriceUsd'], ['lastMarketCapUsd'], ['lastNativePriceUsd', 'lastSolPriceUsd'],
+        ['marketCapDivisor']
+      ];
+      if (nonnegativeFields.some(([modern, legacy]) => {
+        const value = position?.[modern] ?? (legacy ? position?.[legacy] : 0);
+        return !alias(position, modern, legacy, (entry) => finiteBetween(entry, 0, Number.MAX_VALUE))
+          || !finiteBetween(value, 0, Number.MAX_VALUE);
+      })) throw new Error('invalidPosition');
+      if (!finiteBetween(position?.quantity, 0, Number.MAX_VALUE)
+        || !alias(position, 'realizedPnlNative', 'realizedPnlSol', finite)
+        || !finite(position?.realizedPnlNative ?? position?.realizedPnlSol ?? 0)
+        || !validTimestamp(position?.openedAt)
+        || !validTimestamp(position?.updatedAt)
+        || !optional(position, 'quoteObservedAt', validTimestamp)
+        || !optional(position, 'metadataUpdatedAt', validTimestamp)) {
+        throw new Error('invalidPosition');
+      }
+    }
+    const normalizedAddress = Tango.Chains.normalizeAddress(chainId, address);
+    const canonicalKey = `${chainId}:${normalizedAddress}`;
+    const expectedKey = legacyKey ? `${chainId}:${String(address).trim().toLowerCase()}` : canonicalKey;
     const marketCapProvenance = coherentLegacyPumpMarketCap(position, chainId, address, quantity)
       ? MARKET_CAP_PROVENANCE
       : position?.marketCapProvenance;
-    return [key, {
+    return [canonicalKey, {
       ...position,
       chain: chainId,
-      tokenAddress: Tango.Chains.normalizeAddress(chainId, address),
+      tokenAddress: normalizedAddress,
       quantity,
       costBasisNative: native(position, 'costBasisNative', 'costBasisSol'),
       realizedPnlNative: native(position, 'realizedPnlNative', 'realizedPnlSol'),
       lastNativePriceUsd: native(position, 'lastNativePriceUsd', 'lastSolPriceUsd'),
       ...(marketCapProvenance ? { marketCapProvenance } : {})
-    }];
+    }, key === expectedKey];
   }
 
-  function normalizeDaily(raw) {
+  function validDateKey(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return false;
+    const [year, month, day] = String(value).split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  }
+
+  function normalizeDaily(raw, strict, legacy = false) {
+    if (strict && !isRecord(raw)) throw new Error('invalidDaily');
     const value = raw && typeof raw === 'object' ? raw : {};
-    return Object.fromEntries(Object.entries(value).map(([date, entry]) => [date, {
-      native: Number(entry?.native ?? entry ?? 0),
-      usdAtExecution: Number(entry?.usdAtExecution ?? 0)
-    }]));
+    return Object.fromEntries(Object.entries(value).map(([date, entry]) => {
+      const nativeValue = entry?.native ?? entry ?? 0;
+      const usdValue = entry?.usdAtExecution ?? 0;
+      if (strict && (
+        !validDateKey(date) || entry == null || (!legacy && !isRecord(entry))
+        || (isRecord(entry) && (!optional(entry, 'native', finite) || !optional(entry, 'usdAtExecution', finite)))
+        || !finite(nativeValue) || !finite(usdValue)
+      )) {
+        throw new Error('invalidDaily');
+      }
+      return [date, { native: Number(nativeValue), usdAtExecution: Number(usdValue) }];
+    }));
   }
 
-  function migrateV1(raw, settings, strict) {
-    const state = createInitialState();
+  function derivedMigrationTimestamp(raw, supplied) {
+    if (migrationTimestamp(supplied)) return Number(supplied);
+    const candidates = [raw?.account?.createdAt, raw?.account?.updatedAt];
+    Object.values(isRecord(raw?.positions) ? raw.positions : {}).forEach((position) => {
+      candidates.push(position?.openedAt, position?.updatedAt);
+    });
+    (Array.isArray(raw?.trades) ? raw.trades : []).forEach((trade) => candidates.push(trade?.executedAt));
+    const valid = candidates.filter(migrationTimestamp).map(Number);
+    return valid.length ? Math.max(...valid) : 0;
+  }
+
+  function migrateV1(raw, settings, strict, migrationNow) {
+    if (strict) {
+      if (!isRecord(raw.account)) throw new Error('invalidAccount');
+      if (!isRecord(raw.positions)) throw new Error('invalidPositions');
+      if (!Array.isArray(raw.trades)) throw new Error('invalidTrades');
+      if (!isRecord(raw.dailyRealized)) throw new Error('invalidDaily');
+      if (typeof raw.initialized !== 'boolean') throw new Error('invalidState');
+    }
+    const state = createInitialState({ now: derivedMigrationTimestamp(raw, migrationNow) });
     const account = raw.account || {};
-    if (strict && ['initialBalanceNative', 'initialBalanceSol', 'cashBalanceNative', 'cashBalanceSol', 'realizedPnlNative', 'realizedPnlSol']
-      .some((field) => account[field] != null && !Number.isFinite(Number(account[field])))) {
+    if (strict && (
+      !alias(account, 'initialBalanceNative', 'initialBalanceSol', (value) => finiteBetween(value, Number.EPSILON, Number.MAX_VALUE))
+      || !alias(account, 'cashBalanceNative', 'cashBalanceSol', (value) => finiteBetween(value, 0, Number.MAX_VALUE))
+      || !alias(account, 'realizedPnlNative', 'realizedPnlSol', finite)
+      || !finiteBetween(account.initialBalanceNative ?? account.initialBalanceSol, Number.EPSILON, Number.MAX_VALUE)
+      || !finiteBetween(account.cashBalanceNative ?? account.cashBalanceSol, 0, Number.MAX_VALUE)
+      || !finite(account.realizedPnlNative ?? account.realizedPnlSol)
+      || !validTimestamp(account.createdAt)
+      || !validTimestamp(account.updatedAt)
+    )) {
       throw new Error('invalidAccount');
     }
     state.accounts.sol = {
@@ -156,11 +372,14 @@
     };
     state.positions = {};
     Object.entries(raw.positions || {}).forEach(([key, position]) => {
-      const normalized = normalizePosition(position, key, state.accounts, strict);
-      if (normalized) state.positions[normalized[0]] = normalized[1];
+      const normalized = normalizePosition(position, key, state.accounts, strict, true);
+      if (!normalized) return;
+      if (state.positions[normalized[0]] && strict) throw new Error('positionCollision');
+      if (strict && !normalized[2]) throw new Error('invalidPosition');
+      state.positions[normalized[0]] = normalized[1];
     });
-    state.trades = Array.isArray(raw.trades) ? raw.trades.slice(0, Tango.MAX_TRADES).map(migrateTrade) : [];
-    state.dailyRealizedByChain.sol = normalizeDaily(raw.dailyRealized);
+    state.trades = Array.isArray(raw.trades) ? raw.trades.slice(0, Tango.MAX_TRADES).map((trade) => migrateTrade(trade, strict)) : [];
+    state.dailyRealizedByChain.sol = normalizeDaily(raw.dailyRealized, strict, true);
     state.initialized = Boolean(raw.initialized);
     return state;
   }
@@ -168,10 +387,21 @@
   function normalizeState(raw, settings, options = {}) {
     const strict = Boolean(options.strict);
     if (!raw) return createInitialState();
-    if (Number(raw.schemaVersion) === 1) return migrateV1(raw, settings, strict);
+    if (strict && !isRecord(raw)) throw new Error('invalidState');
+    if ((strict ? raw.schemaVersion : Number(raw.schemaVersion)) === 1) return migrateV1(raw, settings, strict, options.migrationNow);
     if (Number(raw.schemaVersion) !== 2) {
       if (strict) throw new Error('unsupportedSchema');
       return createInitialState();
+    }
+
+    if (strict) {
+      const chainIds = canonicalChainIds();
+      if (raw.schemaVersion !== 2 || !sameKeys(raw.accounts, chainIds)) throw new Error('invalidAccounts');
+      if (!isRecord(raw.positions)) throw new Error('invalidPositions');
+      if (!Array.isArray(raw.trades)) throw new Error('invalidTrades');
+      if (!sameKeys(raw.dailyRealizedByChain, chainIds)) throw new Error('invalidDaily');
+      if (typeof raw.initialized !== 'boolean') throw new Error('invalidState');
+      if (raw.stateRevision != null && (!Number.isSafeInteger(raw.stateRevision) || raw.stateRevision < 0)) throw new Error('invalidState');
     }
 
     const base = createInitialState();
@@ -181,17 +411,23 @@
     ]));
     const positions = {};
     Object.entries(raw.positions || {}).forEach(([key, position]) => {
-      const normalized = normalizePosition(position, key, raw.accounts || {}, strict);
-      if (normalized) positions[normalized[0]] = normalized[1];
+      const normalized = normalizePosition(position, key, accounts, strict);
+      if (!normalized) return;
+      if (positions[normalized[0]] && strict) throw new Error('positionCollision');
+      if (strict && !normalized[2]) throw new Error('invalidPosition');
+      positions[normalized[0]] = normalized[1];
     });
     const dailyRealizedByChain = Object.fromEntries(Tango.Chains.all().map((chain) => [
       chain.id,
-      normalizeDaily(raw.dailyRealizedByChain?.[chain.id])
+      normalizeDaily(raw.dailyRealizedByChain?.[chain.id], strict)
     ]));
     return {
       ...base,
       ...raw,
       schemaVersion: 2,
+      stateRevision: Number.isSafeInteger(Number(raw.stateRevision)) && Number(raw.stateRevision) >= 0
+        ? Number(raw.stateRevision)
+        : 0,
       accounts,
       positions,
       trades: Array.isArray(raw.trades) ? raw.trades.slice(0, Tango.MAX_TRADES).map((trade) => normalizeV2Trade(trade, strict)) : [],

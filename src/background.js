@@ -1,14 +1,40 @@
-if (typeof importScripts === 'function') importScripts('src/core/chains.js');
+if (typeof importScripts === 'function') {
+  importScripts(
+    'src/core/chains.js',
+    'src/shared/constants.js',
+    'src/core/state.js',
+    'src/core/engine.js',
+    'src/core/state-coordinator.js'
+  );
+}
 const Chains = globalThis.Tango?.Chains || (typeof require === 'function' ? require('./core/chains.js') : null);
+const stateCoordinator = globalThis.Tango?.StateCoordinator?.create({
+  readRaw: (keys) => chrome.storage.local.get(keys),
+  writeRaw: (values) => chrome.storage.local.set(values)
+});
 
 const nativePriceCache = new Map();
 const nativePriceRequests = new Map();
 const tokenQuoteCache = new Map();
 const tokenQuoteRequests = new Map();
-const NATIVE_PRICE_CACHE_MS = 30_000;
+const NATIVE_PRICE_CACHE_MS = Number(globalThis.Tango?.QUOTE_STALE_MS || 15_000);
 const TOKEN_QUOTE_CACHE_MS = 15_000;
+const positiveFinite = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
+const nonnegativeFiniteOrZero = (value) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'TANGO_STORE_GET_ALL') {
+    stateCoordinator.getAll()
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || 'storageFailed' }));
+    return true;
+  }
+  if (message?.type === 'TANGO_STORE_MUTATE') {
+    stateCoordinator.mutate(message.command)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || 'storageFailed' }));
+    return true;
+  }
   if (message?.type === 'TANGO_OPEN_DASHBOARD') {
     const openDashboard = message.tab
       ? chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard.html#${encodeURIComponent(message.tab)}`) })
@@ -73,7 +99,7 @@ async function getNativePrice(chainId) {
 async function getNativePriceObservation(chainId) {
   const chain = Chains.get(chainId); if (!chain) throw new Error('unsupportedChain');
   const key = chain.nativePriceKey; const cached = nativePriceCache.get(key);
-  if (cached?.price > 0 && Date.now() - cached.fetchedAt < NATIVE_PRICE_CACHE_MS) {
+  if (positiveFinite(cached?.price) && Date.now() - cached.fetchedAt <= NATIVE_PRICE_CACHE_MS) {
     return { price: cached.price, observedAt: cached.fetchedAt };
   }
   if (nativePriceRequests.has(key)) return nativePriceRequests.get(key);
@@ -91,15 +117,15 @@ async function fetchNativePriceObservation(chain, key) {
     if (response.ok) {
       const body = await response.json();
       price = Number(body?.[key]?.usd || 0);
-      if (price > 0) observedAt = Date.now();
+       if (positiveFinite(price)) observedAt = Date.now();
     }
   } catch {}
-  if (!(price > 0) && chain.wrappedNativeAddress && chain.dexScreenerChain) {
+  if (!positiveFinite(price) && chain.wrappedNativeAddress && chain.dexScreenerChain) {
     const wrappedNative = await getTokenQuote(chain.id, chain.wrappedNativeAddress);
     price = Number(wrappedNative?.priceUsd || 0);
     observedAt = Number(wrappedNative?.observedAt || 0);
   }
-  if (!(price > 0)) throw new Error(`${chain.nativeSymbol} price is unavailable`);
+  if (!positiveFinite(price)) throw new Error(`${chain.nativeSymbol} price is unavailable`);
   if (!(observedAt > 0)) observedAt = Date.now();
   nativePriceCache.set(key, { price, fetchedAt: observedAt });
   return { price, observedAt };
@@ -111,7 +137,7 @@ function quoteKey(chain, address) {
 
 async function getTokenQuote(chainId, address) {
   const chain = Chains.get(chainId);
-  if (!chain || !address || !chain.dexScreenerChain) return null;
+  if (!chain || !chain.dexScreenerChain || !Chains.validateAddress(chain.id, address)) return null;
   const normalizedAddress = Chains.normalizeAddress(chain.id, address);
   const key = quoteKey(chain, normalizedAddress);
   const now = Date.now();
@@ -133,14 +159,16 @@ async function fetchTokenQuote(chain, address, key) {
   if (!response.ok) throw new Error(`Token quote request failed: ${response.status}`);
   const pairs = await response.json();
   const matching = Array.isArray(pairs) ? pairs.filter((pair) =>
-    Chains.normalizeAddress(chain.id, pair?.baseToken?.address) === address && Number(pair?.priceUsd || 0) > 0
+    Chains.validateAddress(chain.id, pair?.baseToken?.address)
+      && Chains.normalizeAddress(chain.id, pair.baseToken.address) === address
+      && positiveFinite(pair?.priceUsd)
   ) : [];
-  matching.sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0));
+  matching.sort((a, b) => nonnegativeFiniteOrZero(b?.liquidity?.usd) - nonnegativeFiniteOrZero(a?.liquidity?.usd));
   const pair = matching[0];
   const quote = pair ? {
-    priceUsd: Number(pair.priceUsd || 0),
-    marketCapUsd: Number(pair.marketCap || pair.fdv || 0),
-    liquidityUsd: Number(pair?.liquidity?.usd || 0),
+    priceUsd: Number(pair.priceUsd),
+    marketCapUsd: nonnegativeFiniteOrZero(pair.marketCap ?? pair.fdv),
+    liquidityUsd: nonnegativeFiniteOrZero(pair?.liquidity?.usd),
     source: 'DEXSCREENER',
     observedAt: Date.now()
   } : null;

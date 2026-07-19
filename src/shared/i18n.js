@@ -6,6 +6,9 @@
       unsupportedChain: 'This GMGN chain is not supported', invalidAddress: 'The token address is invalid',
       nativePriceUnavailable: 'The native asset price is unavailable', partialUsdData: 'Some USD values are unavailable',
       closeAllPartial: 'Some positions could not be closed with a fresh quote',
+      storageLoadFailed: 'Could not load local paper-trading data',
+      storageLoadFailedHint: 'Check extension storage and try again. No data was changed.',
+      settingsSaveFailed: 'Could not save settings. Your previous settings were restored.', retry: 'Try again',
       paper: 'PAPER', paperBuy: 'Paper Buy', paperSell: 'Paper Sell', balance: 'Balance', equity: 'Total Equity', todayPnl: 'Today PnL',
       totalPnl: 'Total PnL', positions: 'Positions', history: 'History', settings: 'Settings',
       buy: 'Buy', sell: 'Sell', simulateBuy: 'SIMULATE BUY', simulateSell: 'SIMULATE SELL',
@@ -51,6 +54,9 @@
       closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
+      storageLoadFailed: '无法加载本地模拟交易数据',
+      storageLoadFailedHint: '请检查扩展存储后重试。现有数据未被更改。',
+      settingsSaveFailed: '无法保存设置，已恢复之前的设置。', retry: '重试',
       unsupportedChain: '当前 GMGN 链暂不受支持', invalidAddress: '代币地址无效',
       nativePriceUnavailable: '无法获取原生资产价格', partialUsdData: '部分美元数据暂不可用',
       closeAllPartial: '部分持仓因缺少最新报价而无法平仓',

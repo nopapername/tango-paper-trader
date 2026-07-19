@@ -87,14 +87,24 @@ test('page script order requires state after constants and before the engine', (
 });
 
 test('page script order requires storage after the engine', () => {
-  const withoutStorage = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/engine.js"></script>';
+  const withoutStorage = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/engine.js"></script><script src="src/core/state-coordinator.js"></script>';
   assert.match(htmlScriptOrderErrors(withoutStorage, 'popup.html')[0], /src\/core\/storage\.js/);
-  const swappedStorage = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/storage.js"></script><script src="src/core/engine.js"></script>';
+  const swappedStorage = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/state-coordinator.js"></script><script src="src/core/storage.js"></script><script src="src/core/engine.js"></script>';
   assert.match(htmlScriptOrderErrors(swappedStorage, 'popup.html')[0], /dependency order/);
 });
 
+test('every storage client loads the coordinator contract before storage', () => {
+  const coordinatorIndex = REQUIRED_ISOLATED_ORDER.indexOf('src/core/state-coordinator.js');
+  const engineIndex = REQUIRED_ISOLATED_ORDER.indexOf('src/core/engine.js');
+  const storageIndex = REQUIRED_ISOLATED_ORDER.indexOf('src/core/storage.js');
+  assert.ok(engineIndex >= 0 && engineIndex < coordinatorIndex && coordinatorIndex < storageIndex);
+  const manifest = require('../manifest.json');
+  const isolated = manifest.content_scripts.find((entry) => entry.js?.includes('src/content/content.js'));
+  assert.ok(isolated.js.indexOf('src/core/state-coordinator.js') < isolated.js.indexOf('src/core/storage.js'));
+});
+
 test('popup loads the chain view and popup model before its runtime', () => {
-  const html = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/engine.js"></script><script src="src/core/storage.js"></script><script src="src/content/chain-view.js"></script><script src="src/popup/model.js"></script><script src="src/popup/popup.js"></script>';
+  const html = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/engine.js"></script><script src="src/core/state-coordinator.js"></script><script src="src/core/storage.js"></script><script src="src/content/chain-view.js"></script><script src="src/popup/model.js"></script><script src="src/popup/popup.js"></script>';
   assert.deepEqual(popupScriptOrderErrors(html), []);
   assert.match(popupScriptOrderErrors(html.replace('src/popup/model.js', ''))[0], /src\/popup\/model\.js/);
 });

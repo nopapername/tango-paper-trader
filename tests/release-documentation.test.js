@@ -39,6 +39,12 @@ test('README identifies per-chain and global settings', () => {
   assert.match(readme, /Sell presets, slippage, platform fee, confirmation, fast mode, sound, language, theme, enabled state, and selected chain are global/);
 });
 
+test('README describes first-run principal as fixed per chain rather than user-entered', () => {
+  assert.doesNotMatch(readme, /First-run language and paper balance setup/i);
+  assert.match(readme, /First-run setup selects the language; each chain starts with 10 native units/i);
+  assert.match(readme, /principal can be changed later through a selected-chain reset/i);
+});
+
 test('smoke table has the required columns and every registered chain exactly once', () => {
   const table = smokeTable();
   assert.deepEqual(table.columns, [

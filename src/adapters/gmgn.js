@@ -121,25 +121,30 @@
     return candidates.length ? candidates[0] : 0;
   }
 
-  function addressHintMatches(text, address) {
+  function addressHintMatches(text, address, chainId = null) {
     const source = String(text || '').replace(/\s+/g, '');
     const target = String(address || '').trim();
     if (!source || target.length < 8) return false;
-    if (source.toLowerCase().includes(target.toLowerCase())) return true;
+    const caseInsensitive = !chainId || Tango.Chains.get(chainId)?.addressFamily === 'EVM';
+    if ((caseInsensitive ? source.toLowerCase() : source).includes(caseInsensitive ? target.toLowerCase() : target)) return true;
     const prefix = target.slice(0, 4).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const suffix = target.slice(-4).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`${prefix}.{0,8}${suffix}`, 'i').test(source);
+    return new RegExp(`${prefix}.{0,8}${suffix}`, caseInsensitive ? 'i' : '').test(source);
   }
 
-  function elementHasTokenAddress(element, address) {
+  function elementHasTokenAddress(element, address, chainId = null) {
     if (!element) return false;
     const text = String(element.textContent || '');
     // Avoid accepting a page-wide ancestor merely because another widget happens
     // to contain the new route address while GMGN is still rendering the old header.
-    if (text.length <= 4_000 && addressHintMatches(text, address)) return true;
+    if (text.length <= 4_000 && addressHintMatches(text, address, chainId)) return true;
     const nodes = [element, ...Array.from(element.querySelectorAll?.('a[href], [title], [data-address], [data-token-address], [data-mint], [data-ca]') || []).slice(0, 80)];
+    const caseInsensitive = !chainId || Tango.Chains.get(chainId)?.addressFamily === 'EVM';
     return nodes.some((node) => ['href', 'title', 'data-address', 'data-token-address', 'data-mint', 'data-ca']
-      .some((attribute) => String(node.getAttribute?.(attribute) || '').toLowerCase().includes(String(address).toLowerCase())));
+      .some((attribute) => {
+        const value = String(node.getAttribute?.(attribute) || '');
+        return (caseInsensitive ? value.toLowerCase() : value).includes(caseInsensitive ? String(address).toLowerCase() : String(address));
+      }));
   }
 
   function visibleAddressHint(value, chainId = null) {
@@ -179,9 +184,9 @@
         if (hint) evidence.push({ node, hint });
       });
     });
-    if (!evidence.length || evidence.some((item) => !addressHintMatches(item.hint, address))) return null;
+    if (!evidence.length || evidence.some((item) => !addressHintMatches(item.hint, address, chainId))) return null;
 
-    const addressNode = evidence.find((item) => addressHintMatches(item.hint, address))?.node;
+    const addressNode = evidence.find((item) => addressHintMatches(item.hint, address, chainId))?.node;
     const distance = distanceToAncestor(header, scope) + distanceToAncestor(addressNode, scope);
     if (!addressNode || distance > 8) return null;
 
@@ -191,7 +196,8 @@
         catch { return ''; }
       })
       .filter(Boolean);
-    if (linkedAddresses.some((linkedAddress) => String(linkedAddress).toLowerCase() !== String(address).toLowerCase())) return null;
+    if (linkedAddresses.some((linkedAddress) => !Tango.Chains.validateAddress(chainId, linkedAddress)
+      || Tango.Chains.normalizeAddress(chainId, linkedAddress) !== Tango.Chains.normalizeAddress(chainId, address))) return null;
     return addressNode;
   }
 
@@ -217,7 +223,7 @@
         return elementChainBinding(scope, chainId);
       };
       const directMatches = headers
-        .filter((header) => elementHasTokenAddress(header, address))
+        .filter((header) => elementHasTokenAddress(header, address, chainId))
         .map((header) => ({ header, chainBinding: bindingFor(header) }))
         .filter((item) => item.chainBinding === 'MATCH' || (allowUnknownChain && item.chainBinding === 'UNKNOWN'));
       if (directMatches.length === 1) {
@@ -269,18 +275,21 @@
     if (!isTokenDetailPage(url)) return null;
     const chain = chainFromUrl(url);
     const address = Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(url));
-    const previousAddress = String(previous?.token?.address || '').toLowerCase();
-    return address && previous?.token?.chain === chain && previousAddress === address.toLowerCase() ? previous : null;
+    const previousAddress = previous?.token?.chain === chain && Tango.Chains.validateAddress(chain, previous?.token?.address)
+      ? Tango.Chains.normalizeAddress(chain, previous.token.address) : '';
+    return address && previousAddress === address ? previous : null;
   }
 
   function needsCurrentTokenRead(current, url = global.location?.href || '') {
     if (!isTokenDetailPage(url)) return false;
     const chain = chainFromUrl(url);
     const address = Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(url));
-    return !address || current?.token?.chain !== chain || String(current?.token?.address || '').toLowerCase() !== address.toLowerCase();
+    const currentAddress = current?.token?.chain === chain && Tango.Chains.validateAddress(chain, current?.token?.address)
+      ? Tango.Chains.normalizeAddress(chain, current.token.address) : '';
+    return !address || currentAddress !== address;
   }
 
-  function detailTokenIdentity(scope, address) {
+  function detailTokenIdentity(scope, address, chainId = null) {
     const gmgnSymbolNode = scope?.querySelector?.('[data-testid="token-detail-symbol"]')
       || scope?.querySelector?.('#token-base-symbol[data-symbol]');
     const directSymbol = String(
@@ -294,7 +303,7 @@
     ).trim();
     const heading = firstText(['h1', 'h2'], scope)?.text;
     const title = String(directSymbol || heading || '').replace(/\s+/g, ' ').trim();
-    if (!title || addressHintMatches(title, address)) return { symbol: 'TOKEN', name: 'Token' };
+    if (!title || addressHintMatches(title, address, chainId)) return { symbol: 'TOKEN', name: 'Token' };
     let identity;
     if (/^\$?\d+(?:\.\d+)?$/.test(title)) {
       const numeric = title.replace(/^\$/, '');
@@ -314,7 +323,7 @@
       '[class*="token-name"]', '[class*="TokenName"]'
     ], scope)?.text;
     const nameCandidate = String(explicitName || '').replace(/\s+/g, ' ').trim();
-    if (nameCandidate && nameCandidate.length <= 100 && !addressHintMatches(nameCandidate, address)) {
+    if (nameCandidate && nameCandidate.length <= 100 && !addressHintMatches(nameCandidate, address, chainId)) {
       identity.name = nameCandidate;
     } else if (heading && heading !== title) {
       const headingIdentity = tokenIdentityFromText(heading);
@@ -363,13 +372,13 @@
     const address = Tango.Chains.normalizeAddress(chain, rawAddress);
     let detail = findTokenDetailScope(address, chain, true);
     if (!detail) return null;
-    const firstIdentity = detailTokenIdentity(detail.identityScope || detail.scope, address);
+    const firstIdentity = detailTokenIdentity(detail.identityScope || detail.scope, address, chain);
     const firstFingerprint = `${firstIdentity.symbol}\u0000${firstIdentity.name}\u0000${tokenLogo(detail.header)}`;
     await new Promise((resolve) => setTimeout(resolve, 48));
     if (chainFromUrl() !== chain || Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl()) !== address) return null;
     const confirmed = findTokenDetailScope(address, chain, true);
     if (!confirmed) return null;
-    const identity = detailTokenIdentity(confirmed.identityScope || confirmed.scope, address);
+    const identity = detailTokenIdentity(confirmed.identityScope || confirmed.scope, address, chain);
     const fingerprint = `${identity.symbol}\u0000${identity.name}\u0000${tokenLogo(confirmed.header)}`;
     if (fingerprint !== firstFingerprint) return null;
     if (lastVerifiedDetail?.address === address && lastVerifiedDetail.chain !== chain
@@ -453,11 +462,11 @@
     return /[\p{L}\p{N}]/u.test(text);
   }
 
-  function cardIdentityFromText(text, expectedAddress = '') {
+  function cardIdentityFromText(text, expectedAddress = '', chainId = null) {
     const lines = String(text || '').split(/\r?\n/)
       .map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const addressIndex = expectedAddress
-      ? lines.findIndex((line) => addressHintMatches(line, expectedAddress))
+      ? lines.findIndex((line) => addressHintMatches(line, expectedAddress, chainId))
       : lines.findIndex(tokenAddressLine);
     if (addressIndex < 0) return expectedAddress ? null : tokenIdentityFromText(text);
     const candidates = lines.slice(addressIndex + 1, addressIndex + 14).filter(validCardMetadataLine);
@@ -477,8 +486,8 @@
     };
   }
 
-  function cardTokenIdentity(card, expectedAddress = '') {
-    const fromCard = cardIdentityFromText(card?.innerText || card?.textContent || '', expectedAddress);
+  function cardTokenIdentity(card, expectedAddress = '', chainId = null) {
+    const fromCard = cardIdentityFromText(card?.innerText || card?.textContent || '', expectedAddress, chainId);
     if (!fromCard) return null;
     if (fromCard.symbol !== 'TOKEN') return fromCard;
     const selectors = ['[data-testid="token-symbol"]', '[data-token-symbol]', '[class*="token-symbol"]'];
@@ -496,7 +505,7 @@
       ? Tango.Chains.get(chainId)
       : Tango.Chains.all().find((candidate) => Tango.Chains.validateAddress(candidate.id, address));
     if (!chain || !Tango.Chains.validateAddress(chain.id, address)) return null;
-    const identity = cardTokenIdentity(card, address);
+    const identity = cardTokenIdentity(card, address, chain.id);
     if (!identity) return null;
     return { ...identity, logoUrl: cardTokenLogo(card) };
   }
@@ -550,7 +559,7 @@
       .map((link) => {
         const href = normalizedCardHref(link.href || link.getAttribute?.('href') || '', activeChainId);
         const address = href ? tokenAddressFromUrl(href) : '';
-        return { href, address, addressIndex: lines.findIndex((line) => addressHintMatches(line, address)) };
+        return { href, address, addressIndex: lines.findIndex((line) => addressHintMatches(line, address, activeChainId)) };
       })
       .filter((candidate) => candidate.address && candidate.addressIndex >= 0)
       .sort((left, right) => left.addressIndex - right.addressIndex);
@@ -680,10 +689,8 @@
       const existingReplacement = slot.querySelector('.tango-list-quick-buy');
       let nativeControl = slot.querySelector('[data-testid="quickbuy"]');
       const amountSol = cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol);
-      const pumpExecutable = /pump$/i.test(address)
-        && cardMarketCap(card.innerText || card.textContent || '') > 0;
       if (!Tango.Chains.validateAddress(chain, address) || !(amountSol > 0)
-        || !verifiedCardMetadata(card, address, chain) || !pumpExecutable) {
+        || !verifiedCardMetadata(card, address, chain)) {
         if (slot.dataset.tangoQuickBuy === '1') restoreQuickBuySlot(slot);
         continue;
       }
@@ -727,8 +734,9 @@
           const activeHref = cardTokenHref(card, chain);
           const activeAddress = activeHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(activeHref)) : null;
           if (activeAddress !== address || !verifiedCardMetadata(card, address, chain)) return;
-          const executableQuote = await latestCardMarketCap(card);
-          if (!executableQuote) return;
+          const trustedPumpCard = /pump$/i.test(address);
+          const executableQuote = trustedPumpCard ? await latestCardMarketCap(card) : null;
+          if (trustedPumpCard && !executableQuote) return;
           const latestHref = cardTokenHref(card, chain);
           const latestAddress = latestHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(latestHref)) : null;
           if (latestAddress !== address) return;
@@ -736,19 +744,23 @@
           if (!metadata) return;
           const symbol = metadata.symbol;
           if (chainFromUrl() !== chain) return;
-          const marketCapUsd = executableQuote.marketCapUsd;
-          const priceUsd = marketCapUsd / 1_000_000_000;
           await onQuickBuy({
             token: {
               chain, address, symbol, name: metadata.name, logoUrl: metadata.logoUrl,
               metadataVerified: true, metadataSource: 'GMGN_TRENCH'
             },
-            quote: {
-              priceUsd, marketCapUsd, liquidityUsd: 0, nativePriceUsd: 0,
-              source: 'GMGN_TRENCH_MC',
-              valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
-              observedAt: executableQuote.observedAt
-            },
+            quote: trustedPumpCard
+              ? {
+                priceUsd: 0, marketCapUsd: executableQuote.marketCapUsd, liquidityUsd: 0, nativePriceUsd: 0,
+                source: 'GMGN_TRENCH_MC',
+                valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
+                priceProvenance: 'MARKET_CAP_DERIVED',
+                observedAt: executableQuote.observedAt
+              }
+              : {
+                priceUsd: 0, marketCapUsd: 0, liquidityUsd: 0, nativePriceUsd: 0,
+                source: 'GMGN_TRENCH', observedAt: 0
+              },
             amountSol,
             sourceUrl: href
           });

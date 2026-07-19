@@ -102,8 +102,6 @@ function popupRuntime() {
   const state = { initialized: true };
   let persistedSettings = { enabled: true, language: 'en', selectedChain: 'sol', displayCurrency: 'NATIVE', chains: {} };
   const saveCalls = [];
-  const refreshedSettings = deferred();
-  let getAllCalls = 0;
   const Tango = {
     Chains,
     I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key },
@@ -122,15 +120,13 @@ function popupRuntime() {
     },
     Store: {
       getAll() {
-        getAllCalls += 1;
-        if (getAllCalls === 3) return refreshedSettings.promise.then(() => ({ state, settings: persistedSettings }));
         return Promise.resolve({ state, settings: persistedSettings });
       },
-      saveSettings(next) {
+      patchSettings(patch) {
         const gate = deferred();
-        saveCalls.push({ next, gate });
+        saveCalls.push({ patch, gate });
         return gate.promise.then(() => {
-          persistedSettings = { ...next };
+          persistedSettings = { ...persistedSettings, ...patch };
           return persistedSettings;
         });
       },
@@ -138,8 +134,8 @@ function popupRuntime() {
     }
   };
   const source = popupSource.replace(
-    '  render();\n  if (state.initialized) refreshNativePrices();\n})(globalThis);',
-    '  render();\n  global.__popupTest = { getSettings: () => settings };\n})(globalThis);'
+    '  await loadInitial();\n})(globalThis);',
+    '  await loadInitial();\n  global.__popupTest = { getSettings: () => settings };\n})(globalThis);'
   );
   assert.notEqual(source, popupSource, 'popup test harness must replace startup');
   const context = {
@@ -148,7 +144,7 @@ function popupRuntime() {
     confirm: () => true
   };
   return Promise.resolve(vm.runInNewContext(source, context, { filename: 'src/popup/popup.js' })).then(() => ({
-    app, element, saveCalls, refreshedSettings, get persistedSettings() { return persistedSettings; },
+    app, element, saveCalls, get persistedSettings() { return persistedSettings; },
     set persistedSettings(value) { persistedSettings = value; }
   }));
 }
@@ -164,10 +160,9 @@ test('rapid chain selections keep the latest chain and concurrent global setting
   await first;
   assert.doesNotMatch(popup.app.innerHTML, /<option value="eth" selected>/);
   popup.persistedSettings = { ...popup.persistedSettings, displayCurrency: 'USD' };
-  popup.refreshedSettings.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(popup.saveCalls.length, 2);
-  assert.equal(JSON.stringify(popup.saveCalls[1].next), JSON.stringify({ ...popup.persistedSettings, selectedChain: 'bsc' }));
+  assert.equal(JSON.stringify(popup.saveCalls[1].patch), JSON.stringify({ selectedChain: 'bsc' }));
   popup.saveCalls[1].gate.resolve();
   await second;
 

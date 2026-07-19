@@ -1,0 +1,249 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+global.Tango = {};
+const Chains = require('../src/core/chains.js');
+const popupSource = fs.readFileSync(path.resolve(__dirname, '../src/popup/popup.js'), 'utf8');
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+function stateFixture() {
+  return {
+    initialized: true,
+    accounts: Object.fromEntries(Chains.all().map((chain) => [chain.id, {
+      initialBalanceNative: 10, cashBalanceNative: 10, realizedPnlNative: 0
+    }])),
+    positions: {}, trades: [],
+    dailyRealizedByChain: Object.fromEntries(Chains.all().map((chain) => [chain.id, {}]))
+  };
+}
+
+function settingsFixture() {
+  return {
+    selectedChain: 'eth', language: 'en', enabled: true, displayCurrency: 'NATIVE',
+    chains: Object.fromEntries(Chains.all().map((chain) => [chain.id, {
+      buyPresets: [1], networkFeeNative: 0.001, initialBalanceNative: 10
+    }]))
+  };
+}
+
+function mergeSettingsPatch(settings, patch) {
+  const chains = { ...settings.chains };
+  Object.entries(patch.chains || {}).forEach(([chainId, chainPatch]) => {
+    chains[chainId] = { ...chains[chainId], ...chainPatch };
+  });
+  return { ...settings, ...patch, chains };
+}
+
+async function loadPopup({ failFirstGetAll = false } = {}) {
+  const elements = new Map();
+  let document;
+  let markup = '';
+  const createElement = (selector, source = '') => {
+    const listeners = new Map();
+    const selected = source.match(/<option\s+value="([^"]+)"[^>]*\bselected\b/i)?.[1];
+    const value = selected || source.match(/\bvalue="([^"]*)"/i)?.[1] || '';
+    return {
+      selector, value, checked: /\bchecked\b/i.test(source), files: [],
+      addEventListener(type, listener) { listeners.set(type, listener); },
+      emit(type) { return listeners.get(type)?.({ target: this }); },
+      click() { return listeners.get('click')?.({ target: this }); }
+    };
+  };
+  const element = (selector) => {
+    if (selector === '#app') return app;
+    if (elements.has(selector)) return elements.get(selector);
+    if (!selector.startsWith('#')) return null;
+    const id = selector.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const opening = markup.match(new RegExp(`<([a-z]+)[^>]*\\bid="${id}"[^>]*>`, 'i'));
+    if (!opening) return null;
+    const tag = opening[1].toLowerCase();
+    const start = opening.index;
+    const end = tag === 'select' ? markup.indexOf('</select>', start) : start + opening[0].length;
+    const source = markup.slice(start, end < 0 ? start + opening[0].length : end);
+    const node = createElement(selector, source);
+    elements.set(selector, node);
+    return node;
+  };
+  const app = {
+    get innerHTML() { return markup; },
+    set innerHTML(value) { markup = String(value); elements.clear(); }
+  };
+  let persistedState = stateFixture();
+  let persistedSettings = settingsFixture();
+  let getAllCalls = 0;
+  const calls = { saves: [], fullSaves: [] };
+  const Tango = {
+    Chains,
+    I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key },
+    Format: {
+      native: (value, symbol) => `${value} ${symbol}`, usd: (value) => `$${value}`
+    },
+    Engine: {
+      markPosition: () => ({ valueNative: 0 }),
+      portfolioSummary: () => ({ cashBalanceNative: 10, equityNative: 10, totalPnlNative: 0, positionCount: 0 }),
+      globalUsdSummary: () => ({ assetsUsd: 0, pnlUsd: 0, complete: true })
+    },
+    PopupModel: {
+      build(state, settings, selectedChain) {
+        const chain = Chains.get(selectedChain) || Chains.get('sol');
+        return {
+          chain, account: state.accounts[chain.id], summary: Tango.Engine.portfolioSummary(),
+          chainPositions: [], globalUsd: Tango.Engine.globalUsdSummary(), nativeSymbol: chain.nativeSymbol,
+          chainOptions: Chains.all().map(({ id, name, nativeSymbol }) => ({ id, name, nativeSymbol }))
+        };
+      }
+    },
+    Store: {
+      getAll() {
+        getAllCalls += 1;
+        if (failFirstGetAll && getAllCalls === 1) return Promise.reject(new Error('storage unavailable'));
+        return Promise.resolve({ state: persistedState, settings: persistedSettings });
+      },
+      patchSettings(patch) {
+        const gate = deferred();
+        calls.saves.push({ patch, gate });
+        return gate.promise.then(() => {
+          persistedSettings = mergeSettingsPatch(persistedSettings, patch);
+          return persistedSettings;
+        });
+      },
+      saveSettings(next) { calls.fullSaves.push(next); throw new Error('Popup must use patchSettings'); },
+      async initialize() { return { state: persistedState, settings: persistedSettings }; },
+      async resetChain() { return persistedState; },
+      async resetAll() { return persistedState; }
+    }
+  };
+  document = {
+    documentElement: { lang: '' },
+    querySelector: element
+  };
+  const context = {
+    Promise, Object, Number, String, Array, Map, Set, Math, Date, JSON, console, Tango, document,
+    setTimeout: () => 0,
+    confirm: () => true,
+    chrome: {
+      runtime: {
+        async sendMessage() { return { ok: true, price: 100, observedAt: 1 }; },
+        openOptionsPage() {}
+      },
+      tabs: { create() {} }
+    }
+  };
+  const startup = vm.runInNewContext(popupSource, context, { filename: 'src/popup/popup.js' });
+  let startupError = null;
+  try { await startup; } catch (error) { startupError = error; }
+  await new Promise((resolve) => setImmediate(resolve));
+  return {
+    app, calls, element, startupError,
+    get persistedSettings() { return persistedSettings; }
+  };
+}
+
+test('Popup startup storage failure renders a retry that recovers', async () => {
+  const popup = await loadPopup({ failFirstGetAll: true });
+  assert.equal(popup.startupError, null);
+  assert.match(popup.app.innerHTML, /storageLoadFailed/);
+  const retry = popup.element('#retry-storage-load');
+  assert.ok(retry);
+  await retry.click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(popup.app.innerHTML, /id="popup-chain"/);
+});
+
+test('Popup rolls back a selected chain when settings persistence fails', async () => {
+  const popup = await loadPopup();
+  const selector = popup.element('#popup-chain');
+  selector.value = 'bsc';
+  const changing = selector.emit('change');
+  await new Promise((resolve) => setImmediate(resolve));
+  popup.calls.saves[0].gate.reject(new Error('write failed'));
+  const rejection = await changing.then(() => null, (error) => error);
+  assert.equal(rejection, null);
+  assert.equal(popup.persistedSettings.selectedChain, 'eth');
+  assert.equal(popup.element('#popup-chain').value, 'eth');
+  assert.match(popup.app.innerHTML, /settingsSaveFailed/);
+});
+
+test('Popup restores the enabled switch when settings persistence fails', async () => {
+  const popup = await loadPopup();
+  const toggle = popup.element('#master-enabled');
+  toggle.checked = false;
+  const saving = toggle.emit('change');
+  await new Promise((resolve) => setImmediate(resolve));
+  popup.calls.saves[0].gate.reject(new Error('write failed'));
+  const rejection = await saving.then(() => null, (error) => error);
+  assert.equal(rejection, null);
+  assert.equal(popup.element('#master-enabled').checked, true);
+  assert.match(popup.app.innerHTML, /settingsSaveFailed/);
+});
+
+test('Popup preserves a pending chain selection when enabled changes concurrently', async () => {
+  const popup = await loadPopup();
+  const selector = popup.element('#popup-chain');
+  const toggle = popup.element('#master-enabled');
+
+  selector.value = 'bsc';
+  const changingChain = selector.emit('change');
+  await new Promise((resolve) => setImmediate(resolve));
+
+  toggle.checked = false;
+  const changingEnabled = toggle.emit('change');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(popup.calls.saves.length, 1, 'settings writes must share one queue');
+
+  popup.calls.saves[0].gate.resolve();
+  await changingChain;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(JSON.stringify(popup.calls.saves[0].patch), JSON.stringify({ selectedChain: 'bsc' }));
+  assert.equal(JSON.stringify(popup.calls.saves[1].patch), JSON.stringify({ enabled: false }));
+  popup.calls.saves[1].gate.resolve();
+  await changingEnabled;
+
+  assert.equal(popup.persistedSettings.selectedChain, 'bsc');
+  assert.equal(popup.persistedSettings.enabled, false);
+  assert.deepEqual(popup.calls.fullSaves, []);
+});
+
+test('Popup account language persists only the owned language field', async () => {
+  const popup = await loadPopup();
+  const language = popup.element('#account-language');
+  language.value = 'zh-CN';
+  const saving = language.emit('change');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(JSON.stringify(popup.calls.saves[0].patch), JSON.stringify({ language: 'zh-CN' }));
+  popup.calls.saves[0].gate.resolve();
+  await saving;
+  assert.equal(popup.persistedSettings.language, 'zh-CN');
+});
+
+test('Popup rolls back a failed latest chain selection to the last successful queued chain', async () => {
+  const popup = await loadPopup();
+  const selector = popup.element('#popup-chain');
+
+  selector.value = 'bsc';
+  const firstChange = selector.emit('change');
+  await new Promise((resolve) => setImmediate(resolve));
+
+  selector.value = 'sol';
+  const secondChange = selector.emit('change');
+  assert.equal(popup.calls.saves.length, 1);
+
+  popup.calls.saves[0].gate.resolve();
+  await firstChange;
+  await new Promise((resolve) => setImmediate(resolve));
+  popup.calls.saves[1].gate.reject(new Error('write failed'));
+  await secondChange;
+
+  assert.equal(popup.persistedSettings.selectedChain, 'bsc');
+  assert.equal(popup.element('#popup-chain').value, 'bsc');
+  assert.match(popup.app.innerHTML, /settingsSaveFailed/);
+});
