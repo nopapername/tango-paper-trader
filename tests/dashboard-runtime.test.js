@@ -43,25 +43,55 @@ function settingsFixture() {
 
 async function loadDashboard({ deferThirdGetAll = false } = {}) {
   const appElements = new Map();
-  const element = (selector) => {
-    if (!appElements.has(selector)) appElements.set(selector, {
-      value: '', checked: false,
-      addEventListener() {}, click() {}, files: [],
+  let document;
+  let appMarkup = '';
+  const decode = (value) => String(value || '').replaceAll('&quot;', '"').replaceAll('&#39;', "'").replaceAll('&amp;', '&');
+  const createElement = (selector, attributes = '') => {
+    const listeners = new Map();
+    const value = attributes.match(/\bvalue="([^"]*)"/)?.[1] || '';
+    return {
+      selector, value: decode(value), checked: /\bchecked\b/.test(attributes), files: [], innerHTML: '',
+      addEventListener(type, listener) { listeners.set(type, listener); },
+      emit(type) { return listeners.get(type)?.({ target: this }); },
+      focus() { document.activeElement = this; },
+      type(text) {
+        for (const character of String(text)) {
+          if (document.activeElement !== this) break;
+          this.value += character;
+          listeners.get('input')?.({ target: this });
+        }
+      },
+      click() { return listeners.get('click')?.({ target: this }); },
       querySelectorAll() { return []; }
-    });
-    return appElements.get(selector);
+    };
+  };
+  const element = (selector) => {
+    if (appElements.has(selector)) return appElements.get(selector);
+    if (!selector.startsWith('#')) return null;
+    const id = selector.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = appMarkup.match(new RegExp(`<[^>]+\\bid="${id}"[^>]*>`, 'i'));
+    if (!match) return null;
+    const node = createElement(selector, match[0]);
+    if (selector === '#history-results') node.innerHTML = appMarkup;
+    appElements.set(selector, node);
+    return node;
   };
   const app = {
-    innerHTML: '',
+    get innerHTML() { return appMarkup; },
+    set innerHTML(value) {
+      if (document?.activeElement && appElements.has(document.activeElement.selector)) document.activeElement = null;
+      appMarkup = String(value);
+      appElements.clear();
+    },
     querySelector: element,
     querySelectorAll() { return []; }
   };
-  const fileInput = element('#import-file');
+  const fileInput = createElement('#import-file');
   let persistedState = stateFixture();
   let persistedSettings = settingsFixture();
   const refreshedSettings = deferred();
   let getAllCalls = 0;
-  const calls = { saves: [], resetChain: [], resetAll: 0, exportData: 0, downloads: [], nativeMessages: [] };
+  const calls = { saves: [], resetChain: [], resetAll: 0, exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [] };
   const anchors = [];
   const urls = new Map();
   let urlId = 0;
@@ -85,7 +115,15 @@ async function loadDashboard({ deferThirdGetAll = false } = {}) {
         return {
           chain,
           positions: Object.values(state.positions).filter((position) => position.chain === chain.id),
-          trades: state.trades.filter((trade) => trade.chain === chain.id),
+          trades: state.trades.filter((trade) => trade.chain === chain.id).filter((trade) => {
+            const search = String(filters?.search || '').toLowerCase();
+            const matchesSearch = !search || `${trade.symbol} ${trade.tokenAddress || ''}`.toLowerCase().includes(search);
+            const matchesSide = !filters?.side || filters.side === 'ALL' || trade.side === filters.side;
+            const matchesResult = !filters?.result || filters.result === 'ALL'
+              || (filters.result === 'WIN' && Number(trade.realizedPnlNative) > 0)
+              || (filters.result === 'LOSS' && Number(trade.realizedPnlNative) < 0);
+            return matchesSearch && matchesSide && matchesResult;
+          }),
           summary: Tango.Engine.portfolioSummary(), globalUsd: Tango.Engine.globalUsdSummary(),
           chainSettings: settings.chains[chain.id],
           accounts: Chains.all().map((entry) => ({ chain: entry, summary: Tango.Engine.portfolioSummary(), nativePriceUsd: Number(nativePrices[entry.id] || 0) }))
@@ -112,24 +150,27 @@ async function loadDashboard({ deferThirdGetAll = false } = {}) {
       subscribe() {}
     }
   };
+  let confirmImpl = () => true;
+  document = {
+    activeElement: null,
+    documentElement: { lang: '', dataset: {} },
+    querySelector(selector) { return selector === '#app' ? app : selector === '#import-file' ? fileInput : element(selector); },
+    createElement(tag) {
+      if (tag !== 'a') return createElement(tag);
+      const anchor = { href: '', download: '', click() { anchors.push(this); } };
+      return anchor;
+    }
+  };
   const context = {
     Promise, Object, Number, String, Array, Map, Set, Math, Date, JSON, Intl, console, Tango, Blob,
-    document: {
-      documentElement: { lang: '', dataset: {} },
-      querySelector(selector) { return selector === '#app' ? app : selector === '#import-file' ? fileInput : element(selector); },
-      createElement(tag) {
-        if (tag !== 'a') return element(tag);
-        const anchor = { href: '', download: '', click() { anchors.push(this); } };
-        return anchor;
-      }
-    },
+    document,
     location: { hash: '' },
     URL: {
       createObjectURL(blob) { const key = `blob:${++urlId}`; urls.set(key, blob); return key; },
       revokeObjectURL() {}
     },
     setTimeout: (fn) => { fn(); return 0; },
-    confirm: () => true,
+    confirm(message) { calls.confirms.push(message); return confirmImpl(message); },
     navigator: {}, ClipboardItem: class {},
     chrome: {
       runtime: {
@@ -138,17 +179,31 @@ async function loadDashboard({ deferThirdGetAll = false } = {}) {
           return { ok: true, price: message.chain === 'eth' ? 2_000 : 100, observedAt: message.chain === 'eth' ? 111 : 222 };
         }
       },
-      tabs: { create() {} }
+      tabs: { create(details) { calls.tabs.push(details); } }
     }
   };
   vm.runInNewContext(source, context, { filename: 'src/dashboard/dashboard.js' });
   assert.ok(context.__dashboardTest, 'dashboard runtime test API must be exposed');
   await context.__dashboardTest.load();
   return {
-    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings,
+    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings, document,
+    setConfirm(callback) { confirmImpl = callback; },
     get persistedSettings() { return persistedSettings; },
     set persistedSettings(value) { persistedSettings = value; }
   };
+}
+
+function fillSettingsForm(dashboard) {
+  const fields = {
+    '#setting-language': 'en', '#setting-currency': 'NATIVE', '#setting-theme': 'dark',
+    '#setting-buy-presets': '2, 4', '#setting-initial-balance': '30', '#setting-network-fee': '0.005',
+    '#setting-sell-presets': '50, 100', '#setting-slippage': '75', '#setting-platform-fee': '125',
+    '#setting-bar-position': 'top'
+  };
+  Object.entries(fields).forEach(([selector, value]) => { dashboard.element(selector).value = value; });
+  ['#setting-fast', '#setting-confirm', '#setting-sound', '#setting-list-buy'].forEach((selector) => {
+    dashboard.element(selector).checked = true;
+  });
 }
 
 test('rapid Dashboard chain selections persist only the latest chain without clobbering global settings', async () => {
@@ -170,6 +225,106 @@ test('rapid Dashboard chain selections persist only the latest chain without clo
   assert.equal(dashboard.api.runtime.selectedChain, 'bsc');
 });
 
+test('selected-chain reset waits for the visible BSC selection to persist and never targets the old chain', async () => {
+  const dashboard = await loadDashboard();
+  const selection = dashboard.api.saveSelectedChain('bsc');
+  assert.equal(dashboard.api.runtime.selectedChain, 'bsc');
+  assert.match(dashboard.app.innerHTML, /<option value="bsc" selected>/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(dashboard.calls.saves.length, 1);
+  const reset = dashboard.api.action('reset-chain');
+  assert.deepEqual(dashboard.calls.resetChain, []);
+  dashboard.calls.saves[0].gate.resolve();
+  await selection;
+  await reset;
+  assert.deepEqual(dashboard.calls.resetChain, [['bsc', 25]]);
+  assert.match(dashboard.calls.confirms[0], /BNB Chain/);
+  assert.match(dashboard.calls.confirms[0], /other chains.*preserv/i);
+});
+
+test('CSV export waits for selected-chain persistence and contains BSC rather than the old chain', async () => {
+  const dashboard = await loadDashboard();
+  const selection = dashboard.api.saveSelectedChain('bsc');
+  await new Promise((resolve) => setImmediate(resolve));
+  const exporting = dashboard.api.action('export-csv');
+  assert.equal(dashboard.anchors.length, 0);
+  dashboard.calls.saves[0].gate.resolve();
+  await selection;
+  await exporting;
+  const csvAnchor = dashboard.anchors.at(-1);
+  const csv = await dashboard.urls.get(csvAnchor.href).text();
+  assert.match(csv, /bsc/);
+  assert.doesNotMatch(csv, /eth/);
+});
+
+test('selection and immediate full settings save serialize and preserve BSC plus global and per-chain edits', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.tab = 'settings';
+  dashboard.api.render();
+  const selection = dashboard.api.saveSelectedChain('bsc');
+  assert.match(dashboard.app.innerHTML, /Buy presets.*BNB/);
+  fillSettingsForm(dashboard);
+  const settingsSave = dashboard.api.action('save-settings');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(dashboard.calls.saves.length, 1, 'settings save must queue behind selected-chain persistence');
+  dashboard.calls.saves[0].gate.resolve();
+  await selection;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(dashboard.calls.saves.length, 2);
+  const next = dashboard.calls.saves[1].next;
+  assert.equal(next.selectedChain, 'bsc');
+  assert.deepEqual(Array.from(next.chains.bsc.buyPresets), [2, 4]);
+  assert.equal(next.chains.bsc.networkFeeNative, 0.005);
+  assert.deepEqual(next.chains.eth, dashboard.persistedSettings.chains.eth);
+  assert.deepEqual(Array.from(next.sellPresets), [50, 100]);
+  dashboard.calls.saves[1].gate.resolve();
+  await settingsSave;
+  assert.equal(dashboard.persistedSettings.selectedChain, 'bsc');
+});
+
+test('multi-character history search retains focus and updates filtered results incrementally', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.tab = 'history';
+  dashboard.api.render();
+  const search = dashboard.element('#trade-search');
+  search.focus();
+  search.type('ethy');
+  assert.equal(dashboard.document.activeElement, search);
+  assert.equal(search.value, 'ethy');
+  assert.equal(dashboard.api.runtime.filters.search, 'ethy');
+  assert.match(dashboard.element('#history-results').innerHTML, /ETHY/);
+  search.type('x');
+  assert.equal(dashboard.document.activeElement, search);
+  assert.equal(search.value, 'ethyx');
+  assert.doesNotMatch(dashboard.element('#history-results').innerHTML, /ETHY/);
+  assert.match(dashboard.element('#history-results').innerHTML, /noTrades/);
+});
+
+test('selected reset revalidates its chain after confirmation and reset prompts state exact destructive scope', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.selectedChain = 'bsc';
+  dashboard.api.runtime.settings.selectedChain = 'bsc';
+  let changedSelection;
+  dashboard.setConfirm(() => {
+    changedSelection = dashboard.api.saveSelectedChain('eth');
+    return true;
+  });
+  await dashboard.api.action('reset-chain');
+  assert.deepEqual(dashboard.calls.resetChain, []);
+  assert.match(dashboard.calls.confirms[0], /BNB Chain/);
+  assert.match(dashboard.calls.confirms[0], /only/i);
+  assert.match(dashboard.calls.confirms[0], /other chains.*preserv/i);
+  await new Promise((resolve) => setImmediate(resolve));
+  dashboard.calls.saves.at(-1).gate.resolve();
+  await changedSelection;
+
+  dashboard.setConfirm(() => true);
+  await dashboard.api.action('reset-all');
+  assert.match(dashboard.calls.confirms.at(-1), /all chains/i);
+  assert.match(dashboard.calls.confirms.at(-1), /permanent/i);
+  assert.equal(dashboard.calls.resetAll, 1);
+});
+
 test('selected-chain and all-chain reset actions stay separate', async () => {
   const dashboard = await loadDashboard();
   dashboard.api.runtime.selectedChain = 'bsc';
@@ -185,16 +340,9 @@ test('saving Dashboard settings changes chain controls only for the selected cha
   const dashboard = await loadDashboard();
   dashboard.api.runtime.selectedChain = 'bsc';
   dashboard.api.runtime.settings.selectedChain = 'bsc';
-  const fields = {
-    '#setting-language': 'en', '#setting-currency': 'NATIVE', '#setting-theme': 'dark',
-    '#setting-buy-presets': '2, 4', '#setting-initial-balance': '30', '#setting-network-fee': '0.005',
-    '#setting-sell-presets': '50, 100', '#setting-slippage': '75', '#setting-platform-fee': '125',
-    '#setting-bar-position': 'top'
-  };
-  Object.entries(fields).forEach(([selector, value]) => { dashboard.element(selector).value = value; });
-  ['#setting-fast', '#setting-confirm', '#setting-sound', '#setting-list-buy'].forEach((selector) => {
-    dashboard.element(selector).checked = true;
-  });
+  dashboard.api.runtime.tab = 'settings';
+  dashboard.api.render();
+  fillSettingsForm(dashboard);
   const save = dashboard.api.action('save-settings');
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(dashboard.calls.saves.length, 1);

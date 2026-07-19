@@ -9,7 +9,8 @@
     settings: null,
     selectedChain: 'sol',
     selectedChainRevision: 0,
-    selectedChainWrite: Promise.resolve(),
+    settingsWrite: Promise.resolve(),
+    selectionPending: null,
     nativePrices: {},
     nativePriceObservedAt: {},
     nativePricesRequested: false,
@@ -35,7 +36,8 @@
     const data = await Tango.Store.getAll();
     runtime.state = data.state;
     runtime.settings = data.settings;
-    runtime.selectedChain = Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
+    const hasSelectionIntent = runtime.selectionPending?.revision === runtime.selectedChainRevision;
+    if (!hasSelectionIntent) runtime.selectedChain = Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
     render();
     if (!runtime.nativePricesRequested && runtime.state.initialized) {
       runtime.nativePricesRequested = true;
@@ -57,21 +59,48 @@
     if (runtime.state && runtime.settings) render();
   }
 
+  function queueSettingsMutation(mutate, selectionRevision = 0) {
+    const write = runtime.settingsWrite.then(async () => {
+      if (selectionRevision && selectionRevision !== runtime.selectedChainRevision) return runtime.settings;
+      const latest = await Tango.Store.getAll();
+      if (selectionRevision && selectionRevision !== runtime.selectedChainRevision) return runtime.settings;
+      const desiredChain = runtime.selectedChain;
+      const next = { ...mutate(latest.settings), selectedChain: desiredChain };
+      const saved = await Tango.Store.saveSettings(next);
+      const currentSelection = !selectionRevision || selectionRevision === runtime.selectedChainRevision;
+      if (currentSelection && saved.selectedChain === runtime.selectedChain) {
+        runtime.settings = saved;
+        render();
+      }
+      return saved;
+    });
+    runtime.settingsWrite = write.catch(() => undefined);
+    return write;
+  }
+
   function saveSelectedChain(chainId) {
     const selected = Tango.Chains.get(chainId);
-    if (!selected) return Promise.resolve();
+    if (!selected) return Promise.resolve(runtime.settings);
     const revision = ++runtime.selectedChainRevision;
-    runtime.selectedChainWrite = runtime.selectedChainWrite.then(async () => {
-      if (revision !== runtime.selectedChainRevision) return;
-      const latest = await Tango.Store.getAll();
-      if (revision !== runtime.selectedChainRevision) return;
-      const next = await Tango.Store.saveSettings({ ...latest.settings, selectedChain: selected.id });
-      if (revision !== runtime.selectedChainRevision) return;
-      runtime.settings = next;
-      runtime.selectedChain = selected.id;
-      render();
-    });
-    return runtime.selectedChainWrite;
+    runtime.selectedChain = selected.id;
+    render();
+    const promise = queueSettingsMutation((latest) => latest, revision);
+    const pending = { chainId: selected.id, revision, promise };
+    runtime.selectionPending = pending;
+    const clearPending = () => {
+      if (runtime.selectionPending === pending) runtime.selectionPending = null;
+    };
+    promise.then(clearPending, clearPending);
+    return promise;
+  }
+
+  async function selectedModel(chainId = runtime.selectedChain) {
+    const pending = runtime.selectionPending;
+    if (pending?.chainId === chainId) await pending.promise;
+    await runtime.settingsWrite;
+    if (runtime.selectedChain !== chainId || runtime.settings?.selectedChain !== chainId) return null;
+    const view = model();
+    return view.chain.id === chainId ? view : null;
   }
 
   function render() {
@@ -151,16 +180,20 @@
       ${rows ? `<div class="table-wrap"><table><thead><tr><th>${t('token')}</th><th>Chain</th><th>${t('cost')}</th><th>${t('value')}</th><th>${t('pnl')}</th><th>${t('entryMc')}</th><th>${t('currentMc')}</th><th>${t('held')}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">${t('noPositions')}</div>`}</section>`;
   }
 
-  function historyPanel(view, compact = false) {
+  function historyResults(view, compact = false) {
     const trades = view.trades.slice(0, compact ? 8 : 500);
     const rows = trades.map((trade) => `<tr><td>${new Date(trade.executedAt).toLocaleString(lang())}</td><td class="token-cell">${esc(trade.symbol || trade.tokenAddress)}</td>
       <td class="${trade.side === 'BUY' ? 'up' : 'down'}">${trade.side}</td><td>${native(trade.amountNative, view)}</td><td>${Tango.Format.usd(trade.executionPriceUsd, lang())}</td>
       <td>${Tango.Format.usd(trade.marketCapUsd, lang(), true)}</td><td class="${cls(trade.realizedPnlNative)}">${trade.side === 'SELL' ? native(trade.realizedPnlNative, view, true) : '—'}</td>
       <td>${trade.side === 'SELL' ? `<button class="button" data-share="${esc(trade.id)}">PNG</button> <button class="button" data-copy-share="${esc(trade.id)}">${t('copyImage')}</button>` : ''}</td></tr>`).join('');
+    return rows ? `<div class="table-wrap"><table><thead><tr><th>${t('date')}</th><th>${t('token')}</th><th>${t('side')}</th><th>${t('amount')} · ${esc(view.chain.nativeSymbol)}</th><th>${t('executionPrice')}</th><th>${t('marketCap')}</th><th>${t('realizedPnl')}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">${t('noTrades')}</div>`;
+  }
+
+  function historyPanel(view, compact = false) {
     return `<section class="panel card"><div class="panel-header"><h2>${t('tradeHistory')} · ${esc(view.chain.name)}</h2><div class="actions">
       ${compact ? `<button class="button" data-tab="history">${t('history')} →</button>` : `<button class="button" data-action="export-csv">${t('exportCsv')}</button><button class="button" data-action="export-json">${t('exportJson')}</button>`}</div></div>
       ${compact ? '' : `<div class="filters"><input class="input" id="trade-search" value="${esc(runtime.filters.search)}" placeholder="${t('token')} / CA"><input class="input" id="trade-date" type="date" value="${esc(runtime.filters.date)}"><select class="select" id="trade-side"><option value="ALL">ALL</option><option value="BUY" ${runtime.filters.side === 'BUY' ? 'selected' : ''}>BUY</option><option value="SELL" ${runtime.filters.side === 'SELL' ? 'selected' : ''}>SELL</option></select><select class="select" id="trade-result"><option value="ALL">ALL PnL</option><option value="WIN" ${runtime.filters.result === 'WIN' ? 'selected' : ''}>WIN</option><option value="LOSS" ${runtime.filters.result === 'LOSS' ? 'selected' : ''}>LOSS</option></select></div>`}
-      ${rows ? `<div class="table-wrap"><table><thead><tr><th>${t('date')}</th><th>${t('token')}</th><th>${t('side')}</th><th>${t('amount')} · ${esc(view.chain.nativeSymbol)}</th><th>${t('executionPrice')}</th><th>${t('marketCap')}</th><th>${t('realizedPnl')}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">${t('noTrades')}</div>`}</section>`;
+      ${compact ? historyResults(view, true) : `<div id="history-results">${historyResults(view)}</div>`}</section>`;
   }
 
   function calendarPanel(view) {
@@ -205,19 +238,31 @@
     <div class="settings-section"><h3>Data</h3><div class="actions"><button class="button" data-action="export-json">${t('exportJson')}</button><button class="button" data-action="import-json">${t('importJson')}</button><button class="button danger" data-action="reset-chain">${label('Reset selected chain', '重置已选链')} · ${esc(view.chain.name)}</button><button class="button danger" data-action="reset-all">${label('Reset all chains', '重置全部链')}</button></div><p class="muted">${t('resetWarning')}</p></div></section>`;
   }
 
+  function updateHistoryResults() {
+    const results = app.querySelector('#history-results');
+    if (results) {
+      results.innerHTML = historyResults(model());
+      bindShareButtons(results);
+    }
+  }
+
+  function bindShareButtons(root) {
+    root.querySelectorAll('[data-share]').forEach((button) => button.addEventListener('click', () => shareTrade(button.dataset.share)));
+    root.querySelectorAll('[data-copy-share]').forEach((button) => button.addEventListener('click', () => shareTrade(button.dataset.copyShare, 'copy')));
+  }
+
   function bind() {
     app.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => { runtime.tab = button.dataset.tab; render(); }));
     app.querySelectorAll('[data-month]').forEach((button) => button.addEventListener('click', () => { runtime.month = new Date(runtime.month.getFullYear(), runtime.month.getMonth() + Number(button.dataset.month), 1); render(); }));
     app.querySelectorAll('[data-calendar-date]').forEach((button) => button.addEventListener('click', () => { runtime.filters.date = button.dataset.calendarDate; runtime.tab = 'history'; render(); }));
     app.querySelectorAll('[data-account-chain]').forEach((button) => button.addEventListener('click', () => saveSelectedChain(button.dataset.accountChain)));
-    app.querySelectorAll('[data-share]').forEach((button) => button.addEventListener('click', () => shareTrade(button.dataset.share)));
-    app.querySelectorAll('[data-copy-share]').forEach((button) => button.addEventListener('click', () => shareTrade(button.dataset.copyShare, 'copy')));
+    bindShareButtons(app);
     app.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => action(button.dataset.action)));
     app.querySelector('#dashboard-chain')?.addEventListener('change', (event) => saveSelectedChain(event.target.value));
-    const search = app.querySelector('#trade-search'); if (search) search.addEventListener('input', () => { runtime.filters.search = search.value; render(); });
-    const side = app.querySelector('#trade-side'); if (side) side.addEventListener('change', () => { runtime.filters.side = side.value; render(); });
-    const result = app.querySelector('#trade-result'); if (result) result.addEventListener('change', () => { runtime.filters.result = result.value; render(); });
-    const date = app.querySelector('#trade-date'); if (date) date.addEventListener('change', () => { runtime.filters.date = date.value; render(); });
+    const search = app.querySelector('#trade-search'); if (search) search.addEventListener('input', () => { runtime.filters.search = search.value; updateHistoryResults(); });
+    const side = app.querySelector('#trade-side'); if (side) side.addEventListener('change', () => { runtime.filters.side = side.value; updateHistoryResults(); });
+    const result = app.querySelector('#trade-result'); if (result) result.addEventListener('change', () => { runtime.filters.result = result.value; updateHistoryResults(); });
+    const date = app.querySelector('#trade-date'); if (date) date.addEventListener('change', () => { runtime.filters.date = date.value; updateHistoryResults(); });
   }
 
   const parsePresets = (value, fallback) => {
@@ -226,36 +271,30 @@
   };
 
   async function action(name) {
-    const view = model();
-    if (name === 'open-gmgn') return global.chrome.tabs.create({ url: Tango.Chains.trenchUrl(view.chain.id) });
     if (name === 'export-json') return download(`tango-backup-${dateStamp()}.json`, JSON.stringify(await Tango.Store.exportData(), null, 2), 'application/json');
-    if (name === 'export-csv') return download(`tango-trades-${view.chain.id}-${dateStamp()}.csv`, tradesCsv(), 'text/csv;charset=utf-8');
     if (name === 'import-json') return fileInput.click();
-    if (name === 'reset-chain' && global.confirm(label('Reset only this selected chain?', '仅重置当前已选链？'))) {
-      runtime.state = await Tango.Store.resetChain(view.chain.id, Number(view.chainSettings.initialBalanceNative || 10));
-      await load();
-      return;
-    }
-    if (name === 'reset-all' && global.confirm(t('resetConfirm'))) {
+    if (name === 'reset-all') {
+      const confirmed = global.confirm(label(
+        'Permanently reset all chains? This deletes every paper trade, position, and PnL calendar record on all chains.',
+        '永久重置全部链？这会删除所有链上的全部模拟交易、持仓和盈亏日历记录。'
+      ));
+      if (!confirmed) return;
+      await runtime.settingsWrite;
       runtime.state = await Tango.Store.resetAll();
       await load();
       return;
     }
     if (name === 'save-settings') {
-      const chainId = view.chain.id;
-      const chainCollectionKey = runtime.settings.chainSettings ? 'chainSettings' : 'chains';
-      const chainCollection = runtime.settings[chainCollectionKey] || {};
-      const nextChainSettings = {
-        ...view.chainSettings,
-        buyPresets: parsePresets(app.querySelector('#setting-buy-presets').value, view.chainSettings.buyPresets),
-        networkFeeNative: Number(app.querySelector('#setting-network-fee').value),
-        initialBalanceNative: Number(app.querySelector('#setting-initial-balance').value)
-      };
-      const nextSettings = {
-        ...runtime.settings,
+      const chainId = runtime.selectedChain;
+      const view = model();
+      if (view.chain.id !== chainId) return;
+      const form = {
         language: app.querySelector('#setting-language').value,
         displayCurrency: app.querySelector('#setting-currency').value,
         theme: app.querySelector('#setting-theme').value,
+        buyPresets: parsePresets(app.querySelector('#setting-buy-presets').value, view.chainSettings.buyPresets),
+        networkFeeNative: Number(app.querySelector('#setting-network-fee').value),
+        initialBalanceNative: Number(app.querySelector('#setting-initial-balance').value),
         sellPresets: parsePresets(app.querySelector('#setting-sell-presets').value, runtime.settings.sellPresets),
         slippageBps: Number(app.querySelector('#setting-slippage').value),
         platformFeeBps: Number(app.querySelector('#setting-platform-fee').value),
@@ -263,18 +302,61 @@
         fastMode: app.querySelector('#setting-fast').checked,
         confirmationEnabled: app.querySelector('#setting-confirm').checked,
         soundEnabled: app.querySelector('#setting-sound').checked,
-        showListQuickBuy: app.querySelector('#setting-list-buy').checked,
-        [chainCollectionKey]: { ...chainCollection, [chainId]: nextChainSettings }
+        showListQuickBuy: app.querySelector('#setting-list-buy').checked
       };
-      runtime.settings = await Tango.Store.saveSettings(nextSettings);
-      runtime.selectedChain = Tango.Chains.get(runtime.settings.selectedChain)?.id || chainId;
-      showToast(t('confirm'));
-      render();
+      const saved = await queueSettingsMutation((latest) => {
+        const chainCollectionKey = latest.chainSettings ? 'chainSettings' : 'chains';
+        const chainCollection = latest[chainCollectionKey] || {};
+        const existingChainSettings = chainCollection[chainId] || view.chainSettings;
+        return {
+          ...latest,
+          language: form.language,
+          displayCurrency: form.displayCurrency,
+          theme: form.theme,
+          sellPresets: form.sellPresets,
+          slippageBps: form.slippageBps,
+          platformFeeBps: form.platformFeeBps,
+          pnlBarPosition: form.pnlBarPosition,
+          fastMode: form.fastMode,
+          confirmationEnabled: form.confirmationEnabled,
+          soundEnabled: form.soundEnabled,
+          showListQuickBuy: form.showListQuickBuy,
+          [chainCollectionKey]: {
+            ...chainCollection,
+            [chainId]: {
+              ...existingChainSettings,
+              buyPresets: form.buyPresets,
+              networkFeeNative: form.networkFeeNative,
+              initialBalanceNative: form.initialBalanceNative
+            }
+          }
+        };
+      });
+      if (runtime.selectedChain === chainId && saved?.selectedChain === chainId) showToast(t('confirm'));
+      return;
+    }
+
+    const chainId = runtime.selectedChain;
+    const view = await selectedModel(chainId);
+    if (!view) return;
+    if (name === 'open-gmgn') return global.chrome.tabs.create({ url: Tango.Chains.trenchUrl(chainId) });
+    if (name === 'export-csv') return download(`tango-trades-${chainId}-${dateStamp()}.csv`, tradesCsv(chainId), 'text/csv;charset=utf-8');
+    if (name === 'reset-chain') {
+      const confirmed = global.confirm(label(
+        `Permanently reset only ${view.chain.name}? Its paper trades, positions, and PnL calendar records will be deleted; all other chains will be preserved.`,
+        `永久仅重置 ${view.chain.name}？该链的模拟交易、持仓和盈亏日历记录将被删除；其他链会保留。`
+      ));
+      if (!confirmed) return;
+      const executionView = model();
+      if (runtime.selectedChain !== chainId || runtime.settings?.selectedChain !== chainId || executionView.chain.id !== chainId) return;
+      runtime.state = await Tango.Store.resetChain(chainId, Number(executionView.chainSettings.initialBalanceNative || 10));
+      await load();
     }
   }
 
-  function tradesCsv() {
-    const rows = Tango.DashboardModel.tradesCsvRows(runtime.state, model().chain.id);
+  function tradesCsv(chainId = runtime.selectedChain) {
+    const selected = Tango.Chains.get(chainId)?.id || 'sol';
+    const rows = Tango.DashboardModel.tradesCsvRows(runtime.state, selected);
     const headers = [
       'executedAt', 'chain', 'nativeSymbol', 'tokenAddress', 'symbol', 'side', 'amountNative',
       'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'nativePriceUsd',
@@ -297,8 +379,10 @@
     setTimeout(() => { runtime.toast = ''; render(); }, 1_800);
   }
 
-  function shareTrade(id, mode = 'download') {
-    const view = model();
+  async function shareTrade(id, mode = 'download') {
+    const chainId = runtime.selectedChain;
+    const view = await selectedModel(chainId);
+    if (!view) return;
     const trade = view.trades.find((item) => item.id === id);
     if (!trade) return;
     const canvas = document.createElement('canvas'); canvas.width = 1_200; canvas.height = 630;
