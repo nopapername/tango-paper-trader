@@ -23,12 +23,22 @@ button { cursor: pointer; }
 .topbar { align-items: center; display: flex; justify-content: space-between; margin-bottom: 25px; }
 .topbar h1 { font-size: 25px; margin: 0; }
 .topbar p { color: var(--muted); margin: 5px 0 0; }
+.topbar-actions { align-items: center; display: flex; gap: 10px; }
+.chain-select { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 8px; }
+.chain-select select { background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; color: var(--text); min-width: 180px; padding: 9px 12px; }
 .button { appearance: none; background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; color: var(--text); padding: 9px 12px; }
 .button:hover { border-color: rgba(155,124,255,.45); }
 .button.primary { background: linear-gradient(135deg,var(--brand),var(--brand2)); border: 0; font-weight: 800; }
 .button.danger { color: #ff9aaa; }
 .actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .stats { display: grid; gap: 12px; grid-template-columns: repeat(4,minmax(150px,1fr)); margin-bottom: 18px; }
+.global-overview { margin-bottom: 18px; }
+.global-usd-summary { display: grid; gap: 12px; grid-template-columns: repeat(2,minmax(180px,1fr)); }
+.chain-account-grid { display: grid; gap: 10px; grid-template-columns: repeat(3,minmax(160px,1fr)); margin-top: 12px; }
+.chain-account { color: var(--text); display: grid; gap: 7px; padding: 14px; text-align: left; }
+.chain-account span,.chain-account small { color: var(--muted); }
+.chain-account.active { border-color: var(--brand); box-shadow: 0 0 0 1px rgba(155,124,255,.2); }
+.partial-data { color: #e8bd70; font-size: 11px; margin: 8px 2px 0; }
 .card { background: rgba(18,19,27,.93); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 45px rgba(0,0,0,.16); }
 .stat { padding: 16px; }
 .stat span { color: var(--muted); display: block; font-size: 11px; margin-bottom: 8px; }
@@ -66,6 +76,7 @@ tr:last-child td { border-bottom: 0; }
 .settings-section { border-bottom: 1px solid var(--line); margin-bottom: 18px; padding-bottom: 18px; }
 .settings-section:last-child { border: 0; }
 .settings-section h3 { font-size: 13px; margin: 0 0 12px; }
+.settings-actions { margin-top: 15px; }
 .onboarding-page { align-items: center; display: flex; justify-content: center; min-height: 100vh; padding: 30px; }
 .onboarding { max-width: 520px; padding: 32px; text-align: center; width: 100%; }
 .onboarding h1 { margin: 13px 0 6px; }.onboarding p { color: var(--muted); }
@@ -74,5 +85,7 @@ tr:last-child td { border-bottom: 0; }
 .language-options { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; margin-bottom: 14px; }
 .custom-balance { margin: 0 0 10px; width: 100%; }
 .toast { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; bottom: 22px; box-shadow: 0 12px 40px rgba(0,0,0,.4); left: 50%; padding: 11px 15px; position: fixed; transform: translateX(-50%); }
-@media(max-width:1000px){.stats{grid-template-columns:repeat(2,1fr)}.app{grid-template-columns:190px minmax(0,1fr)}}
-@media(max-width:700px){.app{display:block}.sidebar{height:auto;position:static}.nav{grid-template-columns:repeat(5,1fr)}.nav button{text-align:center;padding:8px 3px}.sidebar-bottom{display:none}.main{padding:18px 12px}.settings-grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}
+@media(max-width:1000px){.stats{grid-template-columns:repeat(2,1fr)}.app{grid-template-columns:190px minmax(0,1fr)}.chain-account-grid{grid-template-columns:repeat(2,minmax(160px,1fr))}}
+@media(max-width:900px){.topbar{align-items:flex-start;gap:14px}.topbar-actions{flex-wrap:wrap;justify-content:flex-end}.chain-select{flex-wrap:wrap}.global-usd-summary{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.app{display:block}.sidebar{height:auto;position:static}.nav{grid-template-columns:repeat(5,1fr)}.nav button{text-align:center;padding:8px 3px}.sidebar-bottom{display:none}.main{padding:18px 12px}.topbar{display:block}.topbar-actions{justify-content:flex-start;margin-top:14px}.chain-select select{min-width:0;width:100%}.settings-grid{grid-template-columns:1fr}.stats,.global-usd-summary,.chain-account-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.stats,.global-usd-summary,.chain-account-grid{grid-template-columns:1fr}.filters{flex-wrap:wrap}.input{min-width:0;width:100%}}

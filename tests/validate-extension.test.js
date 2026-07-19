@@ -8,10 +8,12 @@ const {
   contentScriptOrderErrors,
   htmlScriptOrderErrors,
   popupScriptOrderErrors,
+  dashboardScriptOrderErrors,
   javascriptSyntaxErrors,
   mainWorldScriptOrderErrors,
   REQUIRED_ISOLATED_ORDER,
-  REQUIRED_MAIN_ORDER
+  REQUIRED_MAIN_ORDER,
+  REQUIRED_DASHBOARD_ORDER
 } = require('../scripts/validate-extension.js');
 
 test('the current extension satisfies all static contracts', () => {
@@ -87,6 +89,15 @@ test('popup loads the chain view and popup model before its runtime', () => {
   const html = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/engine.js"></script><script src="src/core/storage.js"></script><script src="src/content/chain-view.js"></script><script src="src/popup/model.js"></script><script src="src/popup/popup.js"></script>';
   assert.deepEqual(popupScriptOrderErrors(html), []);
   assert.match(popupScriptOrderErrors(html.replace('src/popup/model.js', ''))[0], /src\/popup\/model\.js/);
+});
+
+test('dashboard loads the chain view and Dashboard model before its runtime', () => {
+  assert.deepEqual(REQUIRED_DASHBOARD_ORDER.slice(-3), [
+    'src/content/chain-view.js', 'src/dashboard/model.js', 'src/dashboard/dashboard.js'
+  ]);
+  const html = REQUIRED_DASHBOARD_ORDER.map((file) => `<script src="${file}"></script>`).join('');
+  assert.deepEqual(dashboardScriptOrderErrors(html), []);
+  assert.match(dashboardScriptOrderErrors(html.replace('<script src="src/dashboard/model.js"></script>', ''))[0], /src\/dashboard\/model\.js/);
 });
 
 test('JavaScript syntax validation reports the exact broken file', () => {
