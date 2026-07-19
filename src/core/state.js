@@ -1,5 +1,7 @@
 (function initState(global) {
   const Tango = global.Tango = global.Tango || {};
+  const MARKET_CAP_PROVENANCE = 'SOLANA_PUMP_TRENCH_V1';
+  const MARKET_CAP_DIVISOR = 1_000_000_000;
   const accountFor = (balance, now) => ({
     initialBalanceNative: Number(balance), cashBalanceNative: Number(balance), realizedPnlNative: 0,
     createdAt: now, updatedAt: now
@@ -82,6 +84,29 @@
     };
   }
 
+  function coherentLegacyPumpMarketCap(position, chainId, address, quantity) {
+    const costBasis = native(position, 'costBasisNative', 'costBasisSol');
+    const nativePrice = native(position, 'lastNativePriceUsd', 'lastSolPriceUsd');
+    const averageMarketCap = Number(position?.averageEntryMarketCap);
+    const averagePrice = Number(position?.averageEntryPriceUsd);
+    const ratioMatches = (marketCap, price) => {
+      const cap = Number(marketCap); const value = Number(price);
+      if (!(cap > 0) || !(value > 0)) return false;
+      return Math.abs(cap / value - MARKET_CAP_DIVISOR) <= MARKET_CAP_DIVISOR * 0.001;
+    };
+    return !position?.marketCapProvenance
+      && chainId === 'sol'
+      && /pump$/i.test(String(address || ''))
+      && position?.valuationMode === 'MARKET_CAP'
+      && Number(position?.marketCapDivisor) === MARKET_CAP_DIVISOR
+      && quantity > 0
+      && Number.isFinite(costBasis) && costBasis > 0
+      && Number.isFinite(nativePrice) && nativePrice > 0
+      && Number.isFinite(averageMarketCap) && averageMarketCap > 0
+      && Number.isFinite(averagePrice) && averagePrice > 0
+      && ratioMatches(position?.lastMarketCapUsd, position?.lastPriceUsd);
+  }
+
   function normalizePosition(position, key, accounts, strict) {
     const chainId = String(position?.chain || '').toLowerCase();
     const chain = Tango.Chains.get(chainId);
@@ -92,6 +117,9 @@
       if (strict) throw new Error('invalidPosition');
       return null;
     }
+    const marketCapProvenance = coherentLegacyPumpMarketCap(position, chainId, address, quantity)
+      ? MARKET_CAP_PROVENANCE
+      : position?.marketCapProvenance;
     return [key, {
       ...position,
       chain: chainId,
@@ -99,7 +127,8 @@
       quantity,
       costBasisNative: native(position, 'costBasisNative', 'costBasisSol'),
       realizedPnlNative: native(position, 'realizedPnlNative', 'realizedPnlSol'),
-      lastNativePriceUsd: native(position, 'lastNativePriceUsd', 'lastSolPriceUsd')
+      lastNativePriceUsd: native(position, 'lastNativePriceUsd', 'lastSolPriceUsd'),
+      ...(marketCapProvenance ? { marketCapProvenance } : {})
     }];
   }
 
