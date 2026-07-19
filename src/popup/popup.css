@@ -16,6 +16,17 @@ body{background:var(--bg);color:var(--text);margin:0;width:360px}
 .master-switch input:checked+i{background:var(--brand)}
 .master-switch input:checked+i:after{transform:translateX(18px)}
 .stats{display:grid;gap:8px;grid-template-columns:1fr 1fr;margin:14px 0}
+.chain-selector{align-items:center;display:flex;gap:8px;margin:14px 0 0}
+.chain-selector span{color:var(--muted);font-size:10px;font-weight:700;white-space:nowrap}
+.chain-selector select{background:#0d0e14;border:1px solid var(--line);border-radius:8px;color:var(--text);font:inherit;font-size:12px;outline:none;padding:8px;width:100%}
+.global-summary{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
+.global-summary h2,.chain-positions h2{font-size:11px;margin:0 0 8px}
+.global-summary .stats{margin:0}
+.partial-data{color:#ffbd75;font-size:10px;line-height:1.4;margin:8px 0 0}
+.chain-positions{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin:0 0 10px;padding:10px}
+.chain-position{align-items:center;border-top:1px solid var(--line);display:flex;font-size:11px;justify-content:space-between;padding:8px 0}
+.chain-position:first-of-type{border-top:0;padding-top:0}.chain-position:last-child{padding-bottom:0}
+.chain-position strong{font-size:11px}.chain-position span{color:var(--muted);font-size:10px}
 .stat,.setup-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
 .stat span{color:var(--muted);display:block;font-size:10px;margin-bottom:4px}
 .stat strong{font-size:14px}

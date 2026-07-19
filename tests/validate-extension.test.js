@@ -7,6 +7,7 @@ const {
   versionConsistencyErrors,
   contentScriptOrderErrors,
   htmlScriptOrderErrors,
+  popupScriptOrderErrors,
   javascriptSyntaxErrors,
   mainWorldScriptOrderErrors,
   REQUIRED_ISOLATED_ORDER,
@@ -80,6 +81,12 @@ test('page script order requires storage after the engine', () => {
   assert.match(htmlScriptOrderErrors(withoutStorage, 'popup.html')[0], /src\/core\/storage\.js/);
   const swappedStorage = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/storage.js"></script><script src="src/core/engine.js"></script>';
   assert.match(htmlScriptOrderErrors(swappedStorage, 'popup.html')[0], /dependency order/);
+});
+
+test('popup loads the chain view and popup model before its runtime', () => {
+  const html = '<script src="src/core/chains.js"></script><script src="src/shared/constants.js"></script><script src="src/core/state.js"></script><script src="src/shared/i18n.js"></script><script src="src/shared/format.js"></script><script src="src/core/engine.js"></script><script src="src/core/storage.js"></script><script src="src/content/chain-view.js"></script><script src="src/popup/model.js"></script><script src="src/popup/popup.js"></script>';
+  assert.deepEqual(popupScriptOrderErrors(html), []);
+  assert.match(popupScriptOrderErrors(html.replace('src/popup/model.js', ''))[0], /src\/popup\/model\.js/);
 });
 
 test('JavaScript syntax validation reports the exact broken file', () => {

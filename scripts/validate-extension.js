@@ -21,6 +21,7 @@ const REQUIRED_MAIN_ORDER = [
   'src/content/page-main.js'
 ];
 const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 7);
+const REQUIRED_POPUP_ORDER = [...REQUIRED_PAGE_ORDER, 'src/content/chain-view.js', 'src/popup/model.js', 'src/popup/popup.js'];
 
 function versionConsistencyErrors({ packageVersion, manifestVersion, constantsSource }) {
   const constantsVersion = String(constantsSource || '').match(/Tango\.VERSION\s*=\s*['\"]([^'\"]+)['\"]/)?.[1] || '';
@@ -57,6 +58,15 @@ function htmlScriptOrderErrors(html, file) {
   const indexes = REQUIRED_PAGE_ORDER.map((script) => scripts.indexOf(script));
   const ordered = indexes.every((index, position) => position === 0 || indexes[position - 1] < index);
   return ordered ? [] : [`Invalid ${file} script dependency order: ${REQUIRED_PAGE_ORDER.join(' -> ')}`];
+}
+
+function popupScriptOrderErrors(html) {
+  const scripts = [...String(html || '').matchAll(/<script\s+[^>]*src="([^"]+)"/g)].map((match) => match[1]);
+  const missing = REQUIRED_POPUP_ORDER.filter((script) => !scripts.includes(script));
+  if (missing.length) return [`Missing popup script dependencies: ${missing.join(', ')}`];
+  const indexes = REQUIRED_POPUP_ORDER.map((script) => scripts.indexOf(script));
+  const ordered = indexes.every((index, position) => position === 0 || indexes[position - 1] < index);
+  return ordered ? [] : [`Invalid popup script dependency order: ${REQUIRED_POPUP_ORDER.join(' -> ')}`];
 }
 
 function javascriptSyntaxErrors(sources) {
@@ -115,6 +125,7 @@ function validateExtension(root = path.resolve(__dirname, '..')) {
     const missingAssets = assets.filter((file) => !fs.existsSync(path.join(root, file)));
     if (missingAssets.length) errors.push(`${htmlFile} references missing files: ${missingAssets.join(', ')}`);
     errors.push(...htmlScriptOrderErrors(html, htmlFile));
+    if (htmlFile === 'popup.html') errors.push(...popupScriptOrderErrors(html));
   }
 
   errors.push(...versionConsistencyErrors({
@@ -146,5 +157,6 @@ module.exports = {
   contentScriptOrderErrors,
   mainWorldScriptOrderErrors,
   htmlScriptOrderErrors,
+  popupScriptOrderErrors,
   javascriptSyntaxErrors
 };
