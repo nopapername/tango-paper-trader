@@ -9,7 +9,11 @@ Tango Paper Trader is a bilingual, local-first Chrome extension for paper tradin
 - Each new chain account is initialized exactly once with 10 units of that chain's native asset; migrations preserve the existing Solana account and initialize only previously absent chain accounts
 - First-run language and paper balance setup inside the extension popup
 - Master enable/disable switch that removes all GMGN overlays and quick-buy replacements
-- Current-chain-only trading, balance, PnL, positions, history, calendar, settings, exports, resets, and close actions
+- Trading and chain-scoped portfolio operations are current-chain-only: balance, PnL, positions, history, calendar, CSV export, and close actions stay on the selected chain
+- JSON import and export form a full six-chain backup
+- The all-chain reset is explicit and permanent, while the selected-chain reset preserves every other chain
+- Buy presets, network fee, and reset principal are per-chain
+- Sell presets, slippage, platform fee, confirmation, fast mode, sound, language, theme, enabled state, and selected chain are global
 - A read-only all-chain USD asset and paper-PnL summary in the Popup and Dashboard; it reports incomplete native-price coverage rather than enabling cross-chain actions
 - Always-visible current-chain paper balance and PnL bar
 - Quick buy presets and percentage sells
