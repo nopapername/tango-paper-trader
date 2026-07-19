@@ -4,6 +4,8 @@
   let { state, settings } = await Tango.Store.getAll();
   let nativePrices = {};
   let nativePriceObservedAt = {};
+  let selectedChainRevision = 0;
+  let selectedChainWrite = Promise.resolve();
 
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   const language = () => Tango.I18n.resolveLanguage(settings.language);
@@ -22,6 +24,20 @@
 
   async function reload() {
     ({ state, settings } = await Tango.Store.getAll());
+  }
+
+  function saveSelectedChain(chainId) {
+    const revision = ++selectedChainRevision;
+    selectedChainWrite = selectedChainWrite.then(async () => {
+      if (revision !== selectedChainRevision) return;
+      const latest = await Tango.Store.getAll();
+      if (revision !== selectedChainRevision) return;
+      const next = await Tango.Store.saveSettings({ ...latest.settings, selectedChain: chainId });
+      if (revision !== selectedChainRevision) return;
+      settings = next;
+      render();
+    });
+    return selectedChainWrite;
   }
 
   async function refreshNativePrices() {
@@ -102,8 +118,7 @@
       render();
     });
     document.querySelector('#popup-chain')?.addEventListener('change', async (event) => {
-      settings = await Tango.Store.saveSettings({ ...settings, selectedChain: event.target.value });
-      render();
+      await saveSelectedChain(event.target.value);
     });
     document.querySelector('#initialize')?.addEventListener('click', async () => {
       const data = await Tango.Store.initialize(10, settings.language);

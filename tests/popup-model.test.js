@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
+const popupSource = fs.readFileSync(path.join(root, 'src', 'popup', 'popup.js'), 'utf8');
 
 function loadPopupModel() {
   const context = vm.createContext({ console, Date, Intl, Number, Object, Array, String, JSON, Map, Set });
@@ -60,4 +61,118 @@ test('unknown selected chain falls back to Solana without changing state', () =>
 
   assert.equal(model.chain.id, 'sol');
   assert.equal(JSON.stringify(state), before);
+});
+
+test('Popup model aggregates every priced chain exactly and reports missing prices', () => {
+  const Tango = loadPopupModel();
+  const state = stateWithEthAndBsc(Tango);
+  const settings = Tango.State.normalizeSettings({ language: 'en' });
+  const prices = { sol: 100, eth: 1_000, bsc: 500, base: 200, robinhood: 1_000, xlayer: 50 };
+
+  const complete = Tango.PopupModel.build(state, settings, 'eth', prices).globalUsd;
+  assert.deepEqual(JSON.parse(JSON.stringify(complete)), { assetsUsd: 30_000, pnlUsd: 1_500, complete: true, missingChains: [] });
+
+  const partial = Tango.PopupModel.build(state, settings, 'eth', { ...prices, bsc: 0 }).globalUsd;
+  assert.deepEqual(JSON.parse(JSON.stringify(partial)), { assetsUsd: 24_500, pnlUsd: 1_000, complete: false, missingChains: ['bsc'] });
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function popupRuntime() {
+  const Chains = require('../src/core/chains.js');
+  const listeners = new Map();
+  const app = { innerHTML: '' };
+  const elements = new Map();
+  function element(selector) {
+    if (!elements.has(selector)) elements.set(selector, {
+      addEventListener(type, listener) { listeners.set(`${selector}:${type}`, listener); },
+      emit(type, value) { return listeners.get(`${selector}:${type}`)?.({ target: { value } }); }
+    });
+    return elements.get(selector);
+  }
+  const document = {
+    documentElement: {},
+    querySelector(selector) { return selector === '#app' ? app : element(selector); },
+    querySelectorAll() { return []; }
+  };
+  const state = { initialized: true };
+  let persistedSettings = { enabled: true, language: 'en', selectedChain: 'sol', displayCurrency: 'NATIVE', chains: {} };
+  const saveCalls = [];
+  const refreshedSettings = deferred();
+  let getAllCalls = 0;
+  const Tango = {
+    Chains,
+    I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key },
+    Format: { native: String, usd: String },
+    Engine: { markPosition: () => ({ valueNative: 0 }) },
+    PopupModel: {
+      build(currentState, currentSettings, selectedChain) {
+        const chain = Chains.get(selectedChain) || Chains.get('sol');
+        return {
+          chain, account: {}, nativeSymbol: chain.nativeSymbol,
+          summary: { cashBalanceNative: 0, equityNative: 0, totalPnlNative: 0, positionCount: 0 },
+          chainPositions: [], globalUsd: { assetsUsd: 0, pnlUsd: 0, complete: true },
+          chainOptions: Chains.all().map(({ id, name, nativeSymbol }) => ({ id, name, nativeSymbol }))
+        };
+      }
+    },
+    Store: {
+      getAll() {
+        getAllCalls += 1;
+        if (getAllCalls === 3) return refreshedSettings.promise.then(() => ({ state, settings: persistedSettings }));
+        return Promise.resolve({ state, settings: persistedSettings });
+      },
+      saveSettings(next) {
+        const gate = deferred();
+        saveCalls.push({ next, gate });
+        return gate.promise.then(() => {
+          persistedSettings = { ...next };
+          return persistedSettings;
+        });
+      },
+      initialize: async () => ({ state, settings: persistedSettings }), resetChain: async () => state, resetAll: async () => state
+    }
+  };
+  const source = popupSource.replace(
+    '  render();\n  if (state.initialized) refreshNativePrices();\n})(globalThis);',
+    '  render();\n  global.__popupTest = { getSettings: () => settings };\n})(globalThis);'
+  );
+  assert.notEqual(source, popupSource, 'popup test harness must replace startup');
+  const context = {
+    Promise, Object, Number, String, Array, Map, Set, Math, console, Tango, document,
+    chrome: { runtime: { sendMessage: async () => ({ ok: false }), openOptionsPage() {} }, tabs: { create() {} } },
+    confirm: () => true
+  };
+  return Promise.resolve(vm.runInNewContext(source, context, { filename: 'src/popup/popup.js' })).then(() => ({
+    app, element, saveCalls, refreshedSettings, get persistedSettings() { return persistedSettings; },
+    set persistedSettings(value) { persistedSettings = value; }
+  }));
+}
+
+test('rapid chain selections keep the latest chain and concurrent global setting', async () => {
+  const popup = await popupRuntime();
+  const selector = popup.element('#popup-chain');
+  const first = selector.emit('change', 'eth');
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = selector.emit('change', 'bsc');
+  assert.equal(popup.saveCalls.length, 1, 'obsolete selection must not start a competing settings write');
+  popup.saveCalls[0].gate.resolve();
+  await first;
+  assert.doesNotMatch(popup.app.innerHTML, /<option value="eth" selected>/);
+  popup.persistedSettings = { ...popup.persistedSettings, displayCurrency: 'USD' };
+  popup.refreshedSettings.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(popup.saveCalls.length, 2);
+  assert.equal(JSON.stringify(popup.saveCalls[1].next), JSON.stringify({ ...popup.persistedSettings, selectedChain: 'bsc' }));
+  popup.saveCalls[1].gate.resolve();
+  await second;
+
+  assert.equal(popup.persistedSettings.selectedChain, 'bsc');
+  assert.equal(popup.persistedSettings.displayCurrency, 'USD');
+  assert.match(popup.app.innerHTML, /<option value="bsc" selected>/);
+  assert.doesNotMatch(popup.app.innerHTML, /<option value="eth" selected>/);
 });
