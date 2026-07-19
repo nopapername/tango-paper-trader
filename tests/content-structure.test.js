@@ -42,7 +42,7 @@ test('content resolves account and settings from the active GMGN chain', () => {
 
 test('drawer and close all operate on current-chain positions only', () => {
   const drawer = between('function renderDrawer(', 'function chartMarkerPayload(');
-  const closeAll = between('async function commitCloseAll()', 'async function sellBreakeven()');
+  const closeAll = between('async function commitCloseAll(', 'async function sellBreakeven()');
   assert.match(drawer, /Tango\.ChainView\.positions\(runtime\.state, activeChain\(\)\.id\)/);
   assert.doesNotMatch(drawer, /Object\.values\(runtime\.state\.positions/);
   assert.match(closeAll, /const chain = activeChain\(\)\.id/);
@@ -60,7 +60,7 @@ test('trading uses native fields without manufacturing fresh quote timestamps', 
   const buy = between('async function buy(', 'function previewBuy(');
   const sell = between('async function sell(', 'async function sellPosition(');
   const sellPosition = between('async function sellPosition(', 'async function commitSell(');
-  const closeAll = between('async function commitCloseAll()', 'async function sellBreakeven()');
+  const closeAll = between('async function commitCloseAll(', 'async function sellBreakeven()');
   assert.match(buy, /amountNative:/);
   assert.doesNotMatch(buy, /amountSol:/);
   assert.match(buy, /requireExecutableQuote\(context\?\.token, context\?\.quote\)/);

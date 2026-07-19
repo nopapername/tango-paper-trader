@@ -76,6 +76,19 @@ test('ETH native requests coalesce across Ethereum and Base', async () => {
   assert.equal(eth, 2500); assert.equal(base, 2500); assert.equal(loaded.fetchCalls.length, 1);
 });
 
+test('native price messages preserve the original shared-cache observation timestamp', async () => {
+  const loaded = loadBackground(async () => jsonResponse({ ethereum: { usd: 2500 } }));
+  const send = (chain) => new Promise((resolve) => {
+    loaded.listeners[0]({ type: 'TANGO_GET_NATIVE_PRICE', chain }, null, resolve);
+  });
+  const eth = await send('eth');
+  loaded.clock.now += 29_000;
+  const base = await send('base');
+  assert.equal(eth.ok, true); assert.equal(eth.price, 2500); assert.equal(eth.observedAt, 1_000_000);
+  assert.equal(base.ok, true); assert.equal(base.price, eth.price); assert.equal(base.observedAt, eth.observedAt);
+  assert.equal(loaded.fetchCalls.length, 1);
+});
+
 test('the same EVM address uses independent DEX requests per chain', async () => {
   const address = '0x1111111111111111111111111111111111111111';
   const loaded = loadBackground(async (url) => jsonResponse([{ baseToken: { address }, priceUsd: url.includes('/base/') ? 2 : 1, liquidity: { usd: 10 } }]));

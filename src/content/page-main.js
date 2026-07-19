@@ -30,8 +30,21 @@
 
   const quoteCache = new Map();
 
-  function responseChain(url) {
-    return Tango.Chains.fromUrl(url)?.id || Tango.Chains.fromUrl(location.href)?.id || null;
+  function explicitGmgnChain(url) {
+    let parsed;
+    try { parsed = new URL(String(url?.url || url || ''), location.href); } catch { return null; }
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname !== 'gmgn.ai' && !hostname.endsWith('.gmgn.ai')) return null;
+    const pathSlug = parsed.pathname.split('/').filter(Boolean)[0];
+    return Tango.Chains.get(pathSlug) || Tango.Chains.get(parsed.searchParams.get('chain'));
+  }
+
+  function requestContext(url) {
+    let requestUrl;
+    try { requestUrl = new URL(String(url?.url || url || ''), location.href).href; }
+    catch { requestUrl = String(url?.url || url || ''); }
+    const chain = explicitGmgnChain(requestUrl)?.id || Tango.Chains.fromUrl(location.href)?.id || null;
+    return { url: requestUrl, chain };
   }
 
   function publish(quotes) {
@@ -43,10 +56,14 @@
     window.postMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes }, '*');
   }
 
-  function inspectPayload(payload, url = location.href) {
-    const chain = responseChain(url);
+  function inspectPayload(payload, chain) {
     if (!chain) return;
     try { publish(Tango.GMGNQuotes.extract(payload, chain, Date.now())); } catch {}
+  }
+
+  function responseMatchesRequestChain(url, chain) {
+    const explicitChain = explicitGmgnChain(url)?.id || null;
+    return Boolean(chain) && (!explicitChain || explicitChain === chain);
   }
 
   function shouldInspectResponse(url, contentType) {
@@ -62,11 +79,14 @@
   if (nativeFetch) {
     window.fetch = new Proxy(nativeFetch, {
       apply(target, thisArg, args) {
+        const requestStart = requestContext(args[0]);
         const request = Reflect.apply(target, thisArg, args);
         request.then((response) => {
           const contentType = response?.headers?.get('content-type') || '';
-          if (response?.ok && shouldInspectResponse(response.url, contentType)) {
-            response.clone().json().then((payload) => inspectPayload(payload, response.url)).catch(() => null);
+          const responseUrl = response?.url || requestStart.url;
+          if (response?.ok && responseMatchesRequestChain(responseUrl, requestStart.chain)
+            && shouldInspectResponse(responseUrl, contentType)) {
+            response.clone().json().then((payload) => inspectPayload(payload, requestStart.chain)).catch(() => null);
           }
         }).catch(() => null);
         return request;
@@ -77,15 +97,19 @@
   const xhrOpen = XMLHttpRequest.prototype.open;
   const xhrSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function tangoXhrOpen(method, url, ...rest) {
-    try { this.__tangoRequestUrl = new URL(String(url || ''), location.href).href; }
-    catch { this.__tangoRequestUrl = String(url || ''); }
+    const requestStart = requestContext(url);
+    this.__tangoRequestUrl = requestStart.url;
+    this.__tangoRequestChain = requestStart.chain;
     return xhrOpen.call(this, method, url, ...rest);
   };
   XMLHttpRequest.prototype.send = function tangoXhrSend(...args) {
     this.addEventListener('load', () => {
       const contentType = this.getResponseHeader('content-type') || '';
-      if (this.status >= 200 && this.status < 300 && shouldInspectResponse(this.__tangoRequestUrl, contentType)) {
-        try { inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText), this.__tangoRequestUrl); } catch {}
+      const responseUrl = this.responseURL || this.__tangoRequestUrl;
+      if (this.status >= 200 && this.status < 300
+        && responseMatchesRequestChain(responseUrl, this.__tangoRequestChain)
+        && shouldInspectResponse(responseUrl, contentType)) {
+        try { inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText), this.__tangoRequestChain); } catch {}
       }
     }, { once: true });
     return xhrSend.apply(this, args);

@@ -12,7 +12,8 @@
     gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-    renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null
+    renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null,
+    routeEpoch: 0, routeIdentity: null
   };
 
   const host = document.createElement('div');
@@ -28,6 +29,35 @@
   shell.addEventListener('pointerdown', () => { runtime.interactionUntil = Date.now() + 500; }, true);
 
   function activeChain() { return Tango.Chains.fromUrl(location.href); }
+  function currentRouteIdentity(url = location.href) {
+    const chain = Tango.Chains.fromUrl(url);
+    if (!chain) return `unsupported:${String(url)}`;
+    let parsed;
+    try { parsed = new URL(url); } catch { return `unsupported:${String(url)}`; }
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length === 3 && parts[0] === chain.gmgnSlug && parts[1].toLowerCase() === 'token') {
+      let address = '';
+      try { address = decodeURIComponent(parts[2]); } catch { return `${chain.id}:invalid-token`; }
+      if (Tango.Chains.validateAddress(chain.id, address)) {
+        return `${chain.id}:token:${Tango.Chains.normalizeAddress(chain.id, address)}`;
+      }
+    }
+    return `${chain.id}:page:${parsed.pathname}${parsed.search}`;
+  }
+  function captureRoute() {
+    const identity = currentRouteIdentity();
+    if (runtime.routeIdentity === null) runtime.routeIdentity = identity;
+    return { epoch: runtime.routeEpoch, identity };
+  }
+  function routeCaptureIsCurrent(capture) {
+    return Boolean(capture) && capture.epoch === runtime.routeEpoch
+      && capture.identity === runtime.routeIdentity
+      && capture.identity === currentRouteIdentity();
+  }
+  function advanceRouteEpoch() {
+    runtime.routeEpoch += 1;
+    runtime.routeIdentity = currentRouteIdentity();
+  }
   function activeAccount() {
     const chain = activeChain();
     return chain && runtime.state ? runtime.state.accounts[chain.id] : null;
@@ -217,7 +247,8 @@
     });
   }
 
-  async function syncVisiblePositionMetadata() {
+  async function syncVisiblePositionMetadata(routeCapture = captureRoute()) {
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     const chain = activeChain();
     if (!chain) return;
     const positions = Tango.ChainView.positions(runtime.state, chain.id);
@@ -226,13 +257,15 @@
     let nextState = runtime.state;
     tokens.filter((token) => token.chain === chain.id)
       .forEach((token) => { nextState = Tango.Engine.updatePositionMetadata(nextState, token); });
-    if (nextState === runtime.state) return;
+    if (nextState === runtime.state || !routeCaptureIsCurrent(routeCapture)) return;
     runtime.state = nextState;
     await Tango.Store.saveState(runtime.state);
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     queueRender();
   }
 
   async function performQuoteTick() {
+    const routeCapture = captureRoute();
     const chain = activeChain();
     if (!chain) {
       clearChainContext();
@@ -246,10 +279,7 @@
     const previousKey = previousCurrent?.token
       ? Tango.Engine.positionKey(previousCurrent.token.chain, previousCurrent.token.address) : '';
     const observedCurrent = await Tango.GMGN.readCurrentToken();
-    if (activeChain()?.id !== chain.id) {
-      clearChainContext();
-      return;
-    }
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     runtime.current = Tango.GMGN.resolveCurrentTokenRead(previousCurrent, observedCurrent);
     if (runtime.current?.token?.chain !== chain.id) runtime.current = null;
     if (runtime.current) {
@@ -259,19 +289,24 @@
         if (enrichedState !== runtime.state) {
           runtime.state = enrichedState;
           await Tango.Store.saveState(runtime.state);
+          if (!routeCaptureIsCurrent(routeCapture)) return;
         }
       }
     }
-    ensureNativePrice(runtime.current);
-    ensureTokenQuote(runtime.current);
+    ensureNativePrice(runtime.current, routeCapture);
+    ensureTokenQuote(runtime.current, routeCapture);
     const executable = executableQuote(runtime.current?.token, runtime.current?.quote);
-    if (executable && currentPosition() && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
+    if (routeCaptureIsCurrent(routeCapture) && executable && currentPosition()
+      && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
       runtime.state = Tango.Engine.updatePositionQuote(runtime.state, runtime.current.token, executable);
       runtime.lastQuoteWriteAt = Date.now();
       await Tango.Store.saveState(runtime.state);
+      if (!routeCaptureIsCurrent(routeCapture)) return;
     }
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     syncQuickBuyButtons();
-    await syncVisiblePositionMetadata();
+    await syncVisiblePositionMetadata(routeCapture);
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     const currentKey = runtime.current?.token
       ? Tango.Engine.positionKey(runtime.current.token.chain, runtime.current.token.address) : '';
     if (previousKey !== currentKey || runtime.current) queueRender();
@@ -279,7 +314,7 @@
 
   const tickQuote = coalesceAsync(performQuoteTick);
 
-  function ensureNativePrice(context) {
+  function ensureNativePrice(context, routeCapture = captureRoute()) {
     const chain = activeChain();
     if (!chain || (context && context.token?.chain !== chain.id)) return;
     const cached = freshNativePrice(chain.id);
@@ -295,45 +330,62 @@
       .then((response) => {
         const price = Number(response?.price || 0);
         if (!(price > 0)) return;
-        rememberNativePrice(chain.id, price);
-        if (activeChain()?.id === chain.id && runtime.current?.token?.chain === chain.id) {
+        rememberNativePrice(chain.id, price, Number(response?.observedAt || 0));
+        if (routeCaptureIsCurrent(routeCapture) && activeChain()?.id === chain.id
+          && runtime.current?.token?.chain === chain.id) {
           runtime.current.quote.nativePriceUsd = price;
           runtime.current.quote.nativePriceObservedAt = runtime.nativePriceObservedAt.get(chain.id);
+          queueRender();
         }
-        queueRender();
       })
       .catch(() => null)
       .finally(() => { runtime.nativePricePromises.delete(chain.id); });
     runtime.nativePricePromises.set(chain.id, request);
   }
 
-  function ensureTokenQuote(context) {
+  function acceptedTokenObservation(candidate, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
+    const source = String(candidate?.source || '').toUpperCase();
+    const acceptedSource = source === 'DEXSCREENER' || source.startsWith('GMGN');
+    const hasValue = Number(candidate?.priceUsd || 0) > 0 || Number(candidate?.marketCapUsd || 0) > 0;
+    const observedAt = Number(candidate?.observedAt || 0);
+    return acceptedSource && hasValue && observedAt > 0 && Date.now() - observedAt <= maxAgeMs;
+  }
+
+  function ensureTokenQuote(context, routeCapture = captureRoute()) {
     const chain = activeChain();
-    if (!chain || context?.token?.chain !== chain.id || !context?.token?.address
-      || (context.quote.priceUsd > 0 && context.quote.marketCapUsd > 0)) return;
+    if (!routeCaptureIsCurrent(routeCapture) || !chain || context?.token?.chain !== chain.id
+      || !context?.token?.address || acceptedTokenObservation(context.quote)) return;
     const address = context.token.address;
     const requestKey = gmgnQuoteKey(chain.id, address);
     const gmgnQuote = freshGmgnQuote(chain.id, address);
-    if (Number(gmgnQuote?.priceUsd) > 0) {
+    if (acceptedTokenObservation(gmgnQuote)) {
       mergeQuote(context, gmgnQuote);
       queueRender();
       return;
     }
     if (Date.now() < Number(runtime.quoteRetryAt.get(requestKey) || 0)) return;
+    const requestIsCurrent = () => routeCaptureIsCurrent(routeCapture)
+      && activeChain()?.id === chain.id
+      && context?.token?.chain === chain.id
+      && context?.token?.address === address;
     sharedQuoteRequest({ type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address }, 1500)
       .then((response) => {
+        if (!requestIsCurrent()) return;
         const quote = response?.quote;
-        if (!quote) {
+        if (!acceptedTokenObservation(quote)) {
           runtime.quoteRetryAt.set(requestKey, Date.now() + 15_000);
           return;
         }
         runtime.quoteRetryAt.delete(requestKey);
-        if (activeChain()?.id !== chain.id || runtime.current?.token?.chain !== chain.id
+        if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain.id
+          || runtime.current?.token?.chain !== chain.id
           || runtime.current.token.address !== address) return;
         mergeQuote(runtime.current, quote);
         queueRender();
       })
-      .catch(() => runtime.quoteRetryAt.set(requestKey, Date.now() + 15_000));
+      .catch(() => {
+        if (requestIsCurrent()) runtime.quoteRetryAt.set(requestKey, Date.now() + 15_000);
+      });
   }
 
   function requestWithTimeout(message, timeoutMs = 650) {
@@ -352,15 +404,15 @@
     return !String(value || '').trim() || /^(TOKEN|UNKNOWN|N\/A)$/i.test(String(value).trim());
   }
 
-  async function waitForGmgnQuote(chain, address, timeoutMs = 900, requireMetadata = false) {
+  async function waitForGmgnQuote(chain, address, timeoutMs = 900, requireMetadata = false,
+    routeCapture = captureRoute()) {
     window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-      if (activeChain()?.id !== chain) return null;
+      if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain) return null;
       const quote = freshGmgnQuote(chain, address);
-      const hasValue = Number(quote?.priceUsd) > 0 || Number(quote?.marketCapUsd) > 0;
       const hasMetadata = !isPlaceholderTokenLabel(quote?.symbol) || !isPlaceholderTokenLabel(quote?.name);
-      if (hasValue && (!requireMetadata || hasMetadata)) return quote;
+      if (acceptedTokenObservation(quote) && (!requireMetadata || hasMetadata)) return quote;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return null;
@@ -391,21 +443,24 @@
   async function sharedQuoteRequest(message, timeoutMs = 650) {
     const key = `${message.type}:${message.chain || ''}:${String(message.address || '').toLowerCase()}`;
     if (runtime.quoteRequests.has(key)) return runtime.quoteRequests.get(key);
-    const request = requestWithTimeout(message, timeoutMs).finally(() => runtime.quoteRequests.delete(key));
+    const request = requestWithTimeout(message, timeoutMs).finally(() => {
+      if (runtime.quoteRequests.get(key) === request) runtime.quoteRequests.delete(key);
+    });
     runtime.quoteRequests.set(key, request);
     return request;
   }
 
-  async function resolveQuickBuyQuote(context) {
+  async function resolveQuickBuyQuote(context, routeCapture = captureRoute()) {
     const chain = activeChain();
-    if (!chain || context?.token?.chain !== chain.id) return null;
+    if (!routeCaptureIsCurrent(routeCapture) || !chain || context?.token?.chain !== chain.id) return null;
     let networkQuote = freshGmgnQuote(chain.id, context.token.address);
-    if (networkQuote) mergeQuote(context, networkQuote);
-    let hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
+    if (acceptedTokenObservation(networkQuote)) mergeQuote(context, networkQuote);
+    let hasTokenValue = acceptedTokenObservation(context.quote);
     if (!hasTokenValue) {
-      networkQuote = await waitForGmgnQuote(chain.id, context.token.address, 900, false);
-      if (networkQuote) mergeQuote(context, networkQuote);
-      hasTokenValue = Number(context.quote.priceUsd) > 0 || Number(context.quote.marketCapUsd) > 0;
+      networkQuote = await waitForGmgnQuote(chain.id, context.token.address, 900, false, routeCapture);
+      if (!routeCaptureIsCurrent(routeCapture)) return null;
+      if (acceptedTokenObservation(networkQuote)) mergeQuote(context, networkQuote);
+      hasTokenValue = acceptedTokenObservation(context.quote);
     }
     const tokenRequest = hasTokenValue ? Promise.resolve(null) : sharedQuoteRequest({
       type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address: context.token.address
@@ -414,10 +469,10 @@
       ? Promise.resolve(null)
       : sharedQuoteRequest({ type: 'TANGO_GET_NATIVE_PRICE', chain: chain.id });
     const [tokenResponse, nativeResponse] = await Promise.all([tokenRequest, nativeRequest]);
-    if (activeChain()?.id !== chain.id) return null;
-    mergeQuote(context, tokenResponse?.quote);
+    if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain.id) return null;
+    if (acceptedTokenObservation(tokenResponse?.quote)) mergeQuote(context, tokenResponse.quote);
     const nativePrice = nativeResponse?.price
-      ? rememberNativePrice(chain.id, nativeResponse.price)
+      ? rememberNativePrice(chain.id, nativeResponse.price, Number(nativeResponse.observedAt || 0))
       : freshNativePrice(chain.id);
     context.quote.nativePriceUsd = nativePrice;
     context.quote.nativePriceObservedAt = nativePrice ? runtime.nativePriceObservedAt.get(chain.id) : 0;
@@ -468,6 +523,7 @@
 
   async function handleQuickBuy(context) {
     if (!runtime.settings?.enabled) return;
+    const routeCapture = captureRoute();
     const chain = activeChain();
     if (!chain || context?.token?.chain !== chain.id) return showToast(t('unsupportedChain'), 'error');
     const amountNative = Number(context.amountNative ?? context.amountSol);
@@ -478,15 +534,17 @@
     if (runtime.quickBuyLocks.size > 100) {
       [...runtime.quickBuyLocks.entries()].filter(([, at]) => Date.now() - at > 5000).forEach(([key]) => runtime.quickBuyLocks.delete(key));
     }
-    await resolveQuickBuyQuote(context);
+    await resolveQuickBuyQuote(context, routeCapture);
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     if (!executableQuote(context.token, context.quote)) {
       return showToast(t('quoteLoading'), 'error');
     }
-    await buy(amountNative, context);
+    await buy(amountNative, context, routeCapture);
   }
 
-  async function buy(amountNative, context = runtime.current) {
+  async function buy(amountNative, context = runtime.current, routeCapture = captureRoute()) {
     primeTradeAudio();
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     if (!runtime.state.initialized) return showToast(t('startPaperTrading'), 'error');
     const chain = activeChain();
     const order = {
@@ -500,13 +558,15 @@
       order.quote = requireExecutableQuote(context?.token, context?.quote);
       const orderKey = `${order.token.chain}:${order.token.address || ''}:${order.amountNative}`;
       if (runtime.modal?.type === 'confirm' && runtime.modal.orderKey === orderKey) return;
-      previewBuy(order);
+      if (!routeCaptureIsCurrent(routeCapture)) return;
+      previewBuy(order, routeCapture);
       if (requiresConfirmation()) return;
-      await commitBuy(order);
+      await commitBuy(order, routeCapture);
     } catch (error) { showToast(t(error.message), 'error'); }
   }
 
-  function previewBuy(order) {
+  function previewBuy(order, routeCapture) {
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     const chain = activeChain();
     const account = activeAccount();
     const settings = chainSettings();
@@ -531,16 +591,17 @@
         [t('executionPrice'), Tango.Format.usd(executionPrice, language())]
       ],
       allowSessionSuppress: true,
-      action: () => commitBuy(order)
+      action: () => commitBuy(order, routeCapture)
     };
     render();
   }
 
-  async function commitBuy(order) {
+  async function commitBuy(order, routeCapture = captureRoute()) {
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     if (runtime.tradePending) return;
     runtime.tradePending = true;
     try {
-      if (activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
+      if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
       const executableOrder = { ...order, quote: requireExecutableQuote(order.token, order.quote) };
       const result = Tango.Engine.executeBuy(runtime.state, executableOrder, runtime.settings);
       runtime.state = result.state;
@@ -553,8 +614,9 @@
     finally { runtime.tradePending = false; }
   }
 
-  async function sell(percent, context = runtime.current) {
+  async function sell(percent, context = runtime.current, routeCapture = captureRoute()) {
     primeTradeAudio();
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     const order = { token: context?.token, quote: null, percent: Number(percent), sourceUrl: location.href };
     try {
       if (activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
@@ -568,11 +630,11 @@
           type: 'confirm', title: t('simulatedSell'),
           rows: [[t('token'), order.token.symbol], [t('amount'), `${percent}%`], [t('observedPrice'), Tango.Format.usd(order.quote.priceUsd, language())]],
           allowSessionSuppress: true,
-          action: () => commitSell(order)
+          action: () => commitSell(order, routeCapture)
         };
         return render();
       }
-      await commitSell(order);
+      await commitSell(order, routeCapture);
     } catch (error) { showToast(t(error.message), 'error'); }
   }
 
@@ -583,11 +645,12 @@
     await sell(percent, { token: { chain: position.chain, address: position.tokenAddress, symbol: position.symbol }, quote });
   }
 
-  async function commitSell(order) {
+  async function commitSell(order, routeCapture = captureRoute()) {
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     if (runtime.tradePending) return;
     runtime.tradePending = true;
     try {
-      if (activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
+      if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
       const executableOrder = { ...order, quote: requireExecutableQuote(order.token, order.quote) };
       const result = Tango.Engine.executeSell(runtime.state, executableOrder, runtime.settings);
       runtime.state = result.state;
@@ -600,6 +663,7 @@
   }
 
   function requestCloseAll() {
+    const routeCapture = captureRoute();
     const chain = activeChain();
     if (!chain) return showToast(t('unsupportedChain'), 'error');
     const positions = Tango.ChainView.positions(runtime.state, chain.id);
@@ -609,17 +673,18 @@
       type: 'confirm', title: t('closeAllConfirm'),
       rows: [[t('positions'), positions.length], [t('positionTotal'), accountMoney(summary.positionsValueNative)]],
       note: t('closeAllHint'),
-      action: commitCloseAll
+      action: () => commitCloseAll(routeCapture)
     };
     render();
   }
 
-  async function commitCloseAll() {
+  async function commitCloseAll(routeCapture = captureRoute()) {
+    if (!routeCaptureIsCurrent(routeCapture)) return;
     if (runtime.tradePending) return;
     runtime.tradePending = true;
     try {
       const active = activeChain();
-      if (!active) throw new Error('unsupportedChain');
+      if (!routeCaptureIsCurrent(routeCapture) || !active) throw new Error('unsupportedChain');
       const chain = activeChain().id;
       const positions = Tango.ChainView.positions(runtime.state, chain);
       const orders = Tango.ChainView.closeOrders(runtime.state, chain, (position) => freshExecutableQuote(position));
@@ -1079,15 +1144,17 @@
 
   function handleRouteChange() {
     if (location.href === runtime.lastUrl) return;
+    const previousRouteIdentity = runtime.routeIdentity ?? currentRouteIdentity(runtime.lastUrl);
     runtime.lastUrl = location.href;
+    advanceRouteEpoch();
     const nextChainId = activeChain()?.id || null;
-    if (nextChainId !== runtime.activeChainId) {
+    const currentNoLongerMatches = runtime.current
+      && Tango.GMGN.resolveCurrentTokenRead(runtime.current, null) !== runtime.current;
+    if (nextChainId !== runtime.activeChainId || runtime.routeIdentity !== previousRouteIdentity
+      || currentNoLongerMatches) {
       clearChainContext();
-      runtime.activeChainId = nextChainId;
-    } else if (runtime.current
-      && Tango.GMGN.resolveCurrentTokenRead(runtime.current, null) !== runtime.current) {
-      clearChainContext();
-    }
+    } else runtime.modal = null;
+    runtime.activeChainId = nextChainId;
     if (!nextChainId) {
       clearChainContext();
       return;
@@ -1096,6 +1163,7 @@
   }
 
   async function start() {
+    runtime.routeIdentity = currentRouteIdentity();
     const session = await chrome.runtime.sendMessage({ type: 'TANGO_GET_SESSION_CONFIRM' }).catch(() => null);
     runtime.suppressConfirmForSession = Boolean(session?.suppressed);
     runtime.activeChainId = activeChain()?.id || null;

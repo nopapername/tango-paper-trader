@@ -659,19 +659,34 @@
       return 0;
     }
     ensureQuickBuyStyle();
-    const nativeSlots = document.querySelectorAll('.BuyButton-continer');
+    const nativeSlots = Array.from(document.querySelectorAll('.BuyButton-continer')).slice(0, 80);
+    const candidateSlots = new Set(nativeSlots);
+    document.querySelectorAll('.tango-native-buy-overridden').forEach((slot) => {
+      if (!candidateSlots.has(slot)) restoreQuickBuySlot(slot);
+    });
     let injected = 0;
     for (const slot of nativeSlots) {
-      if (injected >= 80) break;
       const card = slot.closest('[class~="group/a"]');
-      if (!card || !trenchColumn(card)) continue;
+      if (!card || !trenchColumn(card)) {
+        if (slot.dataset.tangoQuickBuy === '1') restoreQuickBuySlot(slot);
+        continue;
+      }
       const href = cardTokenHref(card, chain);
-      if (!href) continue;
+      if (!href) {
+        if (slot.dataset.tangoQuickBuy === '1') restoreQuickBuySlot(slot);
+        continue;
+      }
       const address = Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(href));
       const existingReplacement = slot.querySelector('.tango-list-quick-buy');
       let nativeControl = slot.querySelector('[data-testid="quickbuy"]');
       const amountSol = cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol);
-      if (!Tango.Chains.validateAddress(chain, address) || !(amountSol > 0) || !verifiedCardMetadata(card, address, chain)) continue;
+      const pumpExecutable = /pump$/i.test(address)
+        && cardMarketCap(card.innerText || card.textContent || '') > 0;
+      if (!Tango.Chains.validateAddress(chain, address) || !(amountSol > 0)
+        || !verifiedCardMetadata(card, address, chain) || !pumpExecutable) {
+        if (slot.dataset.tangoQuickBuy === '1') restoreQuickBuySlot(slot);
+        continue;
+      }
       if (slot.dataset.tangoQuickBuy === '1' && existingReplacement &&
         slot.dataset.tangoTokenAddress === address && Number(slot.dataset.tangoAmountSol) === amountSol &&
         slot.dataset.tangoPaperLabel === paperLabel) {
@@ -712,8 +727,6 @@
           const activeHref = cardTokenHref(card, chain);
           const activeAddress = activeHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(activeHref)) : null;
           if (activeAddress !== address || !verifiedCardMetadata(card, address, chain)) return;
-          const isPumpToken = chain === 'sol' && /pump$/i.test(address);
-          if (!isPumpToken) return;
           const executableQuote = await latestCardMarketCap(card);
           if (!executableQuote) return;
           const latestHref = cardTokenHref(card, chain);
@@ -773,7 +786,8 @@
     const original = slot.__tangoOriginalQuickBuy;
     quickBuyActions.delete(String(slot.dataset.tangoActionId || ''));
     quickBuyResizeObserver?.unobserve(slot);
-    if (replacement?.isConnected && original) replacement.replaceWith(original);
+    if (replacement?.isConnected && original?.isConnected) replacement.remove();
+    else if (replacement?.isConnected && original) replacement.replaceWith(original);
     else if (replacement?.isConnected) replacement.remove();
     else if (original && !original.isConnected && slot.isConnected && !slot.querySelector('[data-testid="quickbuy"]')) slot.appendChild(original);
     delete slot.__tangoOriginalQuickBuy;

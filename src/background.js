@@ -36,12 +36,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === 'TANGO_GET_NATIVE_PRICE') {
-    getNativePrice(message.chain).then((price) => sendResponse({ ok: true, price }))
+    getNativePriceObservation(message.chain).then((observation) => sendResponse({ ok: true, ...observation }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
   if (message?.type === 'TANGO_GET_SOL_PRICE') {
-    getNativePrice('sol').then((price) => sendResponse({ ok: true, price }))
+    getNativePriceObservation('sol').then((observation) => sendResponse({ ok: true, ...observation }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
@@ -67,15 +67,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function getNativePrice(chainId) {
+  return (await getNativePriceObservation(chainId)).price;
+}
+
+async function getNativePriceObservation(chainId) {
   const chain = Chains.get(chainId); if (!chain) throw new Error('unsupportedChain');
   const key = chain.nativePriceKey; const cached = nativePriceCache.get(key);
-  if (cached?.price > 0 && Date.now() - cached.fetchedAt < NATIVE_PRICE_CACHE_MS) return cached.price;
+  if (cached?.price > 0 && Date.now() - cached.fetchedAt < NATIVE_PRICE_CACHE_MS) {
+    return { price: cached.price, observedAt: cached.fetchedAt };
+  }
   if (nativePriceRequests.has(key)) return nativePriceRequests.get(key);
-  const request = fetchNativePrice(chain, key).finally(() => nativePriceRequests.delete(key));
+  const request = fetchNativePriceObservation(chain, key).finally(() => nativePriceRequests.delete(key));
   nativePriceRequests.set(key, request); return request;
 }
 
-async function fetchNativePrice(chain, key) {
+async function fetchNativePriceObservation(chain, key) {
   let price = 0;
   try {
     const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(chain.coingeckoId)}&vs_currencies=usd`, {
@@ -91,8 +97,9 @@ async function fetchNativePrice(chain, key) {
     price = Number(wrappedNative?.priceUsd || 0);
   }
   if (!(price > 0)) throw new Error(`${chain.nativeSymbol} price is unavailable`);
-  nativePriceCache.set(key, { price, fetchedAt: Date.now() });
-  return price;
+  const observedAt = Date.now();
+  nativePriceCache.set(key, { price, fetchedAt: observedAt });
+  return { price, observedAt };
 }
 
 function quoteKey(chain, address) {
