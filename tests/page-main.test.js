@@ -166,6 +166,21 @@ test('major_coin_prices publishes passive native observations without a new requ
   }]);
 });
 
+test('major_coin_prices publishes on a chainless GMGN page', async () => {
+  const loaded = loadPageMain(async () => jsonResponse(
+    { data: [{ symbol: 'ETH', price: 3500 }] },
+    'https://gmgn.ai/api/v1/major_coin_prices'
+  ));
+  loaded.context.location.href = 'https://gmgn.ai/';
+  await loaded.context.fetch('/api/v1/major_coin_prices');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(loaded.nativePublished.length, 1);
+  assert.deepEqual(loaded.nativePublished[0], {
+    symbol: 'ETH', priceUsd: 3500, observedAt: loaded.nativePublished[0].observedAt,
+    source: 'GMGN_MAJOR_COIN'
+  });
+});
+
 test('page tap does not create a WebSocket or include GMGN execution endpoints', () => {
   assert.doesNotMatch(source, /new\s+WebSocket\s*\(/);
   assert.doesNotMatch(source, /strategy_order|wallet\/list|swap\/route|sendTransaction|signTransaction/);

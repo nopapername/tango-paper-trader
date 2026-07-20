@@ -67,7 +67,7 @@
     if (chain) {
       try { publish(Tango.GMGNQuotes.extract(payload, chain, Date.now())); } catch {}
     }
-    if (/\/api\/v1\/major_coin_prices(?:\?|$)/i.test(String(url || ''))) {
+    if (isMajorCoinPricesResponse(url)) {
       try {
         const prices = Tango.GMGNQuotes.extractNativePrices(payload, Date.now());
         if (prices.length) window.postMessage({
@@ -80,6 +80,10 @@
   function responseMatchesRequestChain(url, chain) {
     const explicitChain = explicitGmgnChain(url)?.id || null;
     return Boolean(chain) && (!explicitChain || explicitChain === chain);
+  }
+
+  function isMajorCoinPricesResponse(url) {
+    return /\/api\/v1\/major_coin_prices(?:\?|$)/i.test(String(url || ''));
   }
 
   function shouldInspectResponse(url, contentType) {
@@ -100,8 +104,9 @@
         request.then((response) => {
           const contentType = response?.headers?.get('content-type') || '';
           const responseUrl = response?.url || requestStart.url;
-          if (response?.ok && responseMatchesRequestChain(responseUrl, requestStart.chain)
-            && shouldInspectResponse(responseUrl, contentType)) {
+          if (response?.ok && shouldInspectResponse(responseUrl, contentType)
+            && (isMajorCoinPricesResponse(responseUrl)
+              || responseMatchesRequestChain(responseUrl, requestStart.chain))) {
             response.clone().json().then((payload) => inspectPayload(payload, requestStart.chain, responseUrl)).catch(() => null);
           }
         }).catch(() => null);
@@ -122,9 +127,9 @@
     this.addEventListener('load', () => {
       const contentType = this.getResponseHeader('content-type') || '';
       const responseUrl = this.responseURL || this.__tangoRequestUrl;
-      if (this.status >= 200 && this.status < 300
-        && responseMatchesRequestChain(responseUrl, this.__tangoRequestChain)
-        && shouldInspectResponse(responseUrl, contentType)) {
+      if (this.status >= 200 && this.status < 300 && shouldInspectResponse(responseUrl, contentType)
+        && (isMajorCoinPricesResponse(responseUrl)
+          || responseMatchesRequestChain(responseUrl, this.__tangoRequestChain))) {
         try {
           inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText),
             this.__tangoRequestChain, responseUrl);
