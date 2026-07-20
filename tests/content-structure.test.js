@@ -104,10 +104,15 @@ test('header balance is read from the active account', () => {
 test('paper execution paths contain no quote wait, pending intent, or network await', () => {
   const resolver = between('function resolvePaperTradeQuote(', 'function requireExecutableQuote(');
   const execution = between('async function buy(', 'function showToast(');
+  const buy = between('async function buy(', 'function previewBuy(');
+  const sell = between('async function sell(', 'async function sellPosition(');
+  const sellPosition = between('async function sellPosition(', 'async function commitSell(');
+  const closeAll = between('async function commitCloseAll(', 'async function sellBreakeven()');
+  const breakeven = between('async function sellBreakeven(', 'function showToast(');
   assert.doesNotMatch(resolver, /await|setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote/);
   assert.doesNotMatch(execution, /queuePendingPaperIntent|pendingTradeIntents|quoteQueued/);
-  for (const name of ['buy', 'sell', 'sellPosition', 'commitCloseAll', 'sellBreakeven']) {
-    assert.match(execution, new RegExp(`resolvePaperTradeQuote\\(`), name);
+  for (const [name, entryPoint] of Object.entries({ buy, sell, sellPosition, closeAll, breakeven })) {
+    assert.match(entryPoint, /resolvePaperTradeQuote\(/, name);
   }
 });
 

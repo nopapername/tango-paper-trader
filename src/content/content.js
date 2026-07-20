@@ -661,9 +661,22 @@
     const position = options?.position === undefined ? persistedQuoteContext(token) : options.position;
     const exact = runtime.gmgnQuotes.get(gmgnQuoteKey(chain.id, normalizedAddress)) || null;
     const candidateSource = String(candidate?.source || '').toUpperCase();
-    const candidateIsTrusted = candidateSource === 'DEXSCREENER' || candidateSource.startsWith('GMGN');
+    const candidateAddresses = [candidate?.address, candidate?.tokenAddress]
+      .filter((value) => value != null);
+    const candidateIdentityMatches = (candidate?.chain == null || candidate.chain === chain.id)
+      && candidateAddresses.every((value) => Tango.Chains.validateAddress(chain.id, value)
+        && Tango.Chains.normalizeAddress(chain.id, value) === normalizedAddress);
+    const candidateIsTrusted = candidateIdentityMatches
+      && (candidateSource === 'DEXSCREENER' || candidateSource.startsWith('GMGN'));
+    const candidateSupplySource = String(candidate?.supplySource || candidate?.totalSupplySource || '');
+    const candidateExactSupply = candidateIsTrusted && candidateSource.startsWith('GMGN')
+      && ['GMGN_EXACT', 'GMGN_NETWORK_EXACT'].includes(candidateSupplySource)
+      && Number.isFinite(Number(candidate?.totalSupply)) && Number(candidate.totalSupply) > 0;
     const boundCandidate = candidateIsTrusted ? {
-      ...(candidate || {}), chain: chain.id, address: normalizedAddress
+      ...(candidate || {}), chain: chain.id, address: normalizedAddress,
+      totalSupply: candidateExactSupply ? Number(candidate.totalSupply) : 0,
+      totalSupplySource: candidateExactSupply ? 'GMGN_EXACT' : '',
+      supplySource: candidateExactSupply ? 'GMGN_EXACT' : ''
     } : null;
     const merged = exact && boundCandidate
       ? Tango.GMGNQuotes.mergeObservation(exact, boundCandidate)
@@ -683,11 +696,19 @@
       && boundPosition?.valuationMode === 'MARKET_CAP'
       && Number(boundPosition?.marketCapDivisor) === 1_000_000_000
       ? 1_000_000_000 : 0;
+    const localSupplySource = String(local.supplySource || local.totalSupplySource || '');
+    const localExactSupply = String(local.source || '').toUpperCase().startsWith('GMGN')
+      && ['GMGN_EXACT', 'GMGN_NETWORK_EXACT'].includes(localSupplySource)
+      && Number.isFinite(Number(local.totalSupply)) && Number(local.totalSupply) > 0
+      ? Number(local.totalSupply) : 0;
+    const positionExactSupply = boundPosition?.supplySource === 'GMGN_EXACT'
+      && Number.isFinite(Number(boundPosition?.totalSupply)) && Number(boundPosition.totalSupply) > 0
+      ? Number(boundPosition.totalSupply) : 0;
     const supply = Tango.Supply.resolve({
       chain: chain.id,
-      totalSupply: local.totalSupply || boundPosition?.totalSupply || legacyPumpSupply,
-      supplySource: local.supplySource || local.totalSupplySource || boundPosition?.supplySource
-        || (legacyPumpSupply ? 'LEGACY_PUMP_RULE' : ''),
+      totalSupply: localExactSupply || positionExactSupply || legacyPumpSupply,
+      supplySource: localExactSupply || positionExactSupply ? 'GMGN_EXACT'
+        : legacyPumpSupply ? 'LEGACY_PUMP_RULE' : '',
       priceUsd: safeObservedPrice,
       marketCapUsd: safeMarketCapUsd,
       launchpad: token.launchpad || local.launchpad || boundPosition?.launchpad,

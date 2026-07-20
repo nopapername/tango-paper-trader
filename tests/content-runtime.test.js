@@ -707,20 +707,120 @@ test('provisional copy is shown only for provisional panel and confirmation quot
   assert.doesNotMatch(observed.api.renderPanel(), /provisionalQuote/);
 });
 
-test('local paper quotes bind observations to the normalized active route identity', () => {
+test('local paper quotes normalize the target and bind an identityless candidate', () => {
   const normalizedAddress = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const mixedCaseAddress = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
   const loaded = loadContent({ href: `https://gmgn.ai/base/token/${normalizedAddress}` });
   loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
   const quote = loaded.api.resolvePaperTradeQuote(
     { chain: 'base', address: mixedCaseAddress, symbol: 'BOUND' },
-    { chain: 'eth', address: ADDRESS_B, priceUsd: 2, observedAt: loaded.clock.now, source: 'DEXSCREENER' }
+    { priceUsd: 2, observedAt: loaded.clock.now, source: 'DEXSCREENER' }
   );
   assert.equal(quote.chain, 'base');
   assert.equal(quote.address, normalizedAddress);
   assert.equal(loaded.api.resolvePaperTradeQuote({ chain: 'eth', address: ADDRESS_A }, {}), null);
   assert.equal(loaded.api.resolvePaperTradeQuote({ chain: 'base', address: 'invalid' }, {}), null);
   assert.equal(loaded.api.paperExecutableQuote({ chain: 'base', address: 'invalid' }, quote), null);
+});
+
+test('local paper quotes discard an explicit cross-chain candidate identity', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  const quote = loaded.api.resolvePaperTradeQuote(
+    { chain: 'base', address: ADDRESS_A, symbol: 'TARGET' },
+    { chain: 'eth', address: ADDRESS_A, priceUsd: 2, observedAt: loaded.clock.now, source: 'DEXSCREENER' }
+  );
+  assert.equal(quote.priceUsd, 1);
+  assert.equal(quote.source, 'TANGO_SYNTHETIC');
+  assert.equal(quote.provisional, true);
+});
+
+test('local paper quotes discard a same-chain candidate for another address', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  const quote = loaded.api.resolvePaperTradeQuote(
+    { chain: 'base', address: ADDRESS_A, symbol: 'TARGET' },
+    { chain: 'base', address: ADDRESS_B, priceUsd: 2, observedAt: loaded.clock.now, source: 'GMGN_NETWORK' }
+  );
+  assert.equal(quote.priceUsd, 1);
+  assert.equal(quote.source, 'TANGO_SYNTHETIC');
+  assert.equal(quote.provisional, true);
+});
+
+test('candidate direct supply with unknown provenance cannot become GMGN exact through the resolver or Engine', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  const token = { chain: 'base', address: ADDRESS_A, symbol: 'UNKNOWN' };
+  const quote = loaded.api.resolvePaperTradeQuote(token, {
+    priceUsd: 2, totalSupply: 7, supplySource: 'CALLER_UNKNOWN',
+    observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+  });
+  assert.notEqual(quote.supplySource, 'GMGN_EXACT');
+  assert.notEqual(quote.totalSupply, 7);
+  assert.notEqual(quote.marketCapDivisor, 7);
+
+  const initial = RealState.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const settings = RealState.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { base: { networkFeeNative: 0 } }
+  });
+  const result = RealEngine.executeBuy(initial, { token, quote, amountNative: 1 }, settings, loaded.clock.now);
+  assert.notEqual(result.position.totalSupply, 7);
+  assert.notEqual(result.position.marketCapDivisor, 7);
+});
+
+test('resolver quotes preserve valid GMGN exact, ratio, and verified launchpad-rule supply', () => {
+  const cases = [];
+
+  const exactLoaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  exactLoaded.api.rememberNativePrice('base', 2_000, exactLoaded.clock.now);
+  exactLoaded.api.runtime.gmgnQuotes.set(`base:${ADDRESS_A}`, GMGNQuotes.mergeObservation(null, {
+    chain: 'base', address: ADDRESS_A, priceUsd: 2, totalSupply: 10_000,
+    totalSupplySource: 'GMGN_NETWORK_EXACT', observedAt: exactLoaded.clock.now,
+    source: 'GMGN_NETWORK'
+  }));
+  cases.push({
+    name: 'exact', loaded: exactLoaded,
+    token: { chain: 'base', address: ADDRESS_A, symbol: 'EXACT' }, candidate: {},
+    source: 'GMGN_EXACT', supply: 10_000
+  });
+
+  const ratioLoaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  ratioLoaded.api.rememberNativePrice('base', 2_000, ratioLoaded.clock.now);
+  cases.push({
+    name: 'ratio', loaded: ratioLoaded,
+    token: { chain: 'base', address: ADDRESS_A, symbol: 'RATIO' },
+    candidate: { priceUsd: 2, marketCapUsd: 20_000, observedAt: ratioLoaded.clock.now, source: 'GMGN_NETWORK' },
+    source: 'GMGN_RATIO', supply: 10_000
+  });
+
+  const ruleLoaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  ruleLoaded.api.rememberNativePrice('base', 2_000, ruleLoaded.clock.now);
+  cases.push({
+    name: 'rule', loaded: ruleLoaded,
+    token: {
+      chain: 'base', address: ADDRESS_A, symbol: 'RULE', launchpad: 'Clanker',
+      metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    },
+    candidate: { marketCapUsd: 200_000, observedAt: ruleLoaded.clock.now, source: 'GMGN_TRENCH' },
+    source: 'LAUNCHPAD_RULE', supply: 100_000_000_000
+  });
+
+  for (const item of cases) {
+    const quote = item.loaded.api.resolvePaperTradeQuote(item.token, item.candidate);
+    assert.equal(quote.supplySource, item.source, item.name);
+    assert.equal(quote.totalSupply, item.supply, item.name);
+    const initial = RealState.createInitialState({ now: 1 });
+    initial.initialized = true;
+    const settings = RealState.normalizeSettings({
+      slippageBps: 0, platformFeeBps: 0, chains: { base: { networkFeeNative: 0 } }
+    });
+    const result = RealEngine.executeBuy(
+      initial, { token: item.token, quote, amountNative: 1 }, settings, item.loaded.clock.now
+    );
+    assert.equal(result.position.supplySource, item.source, item.name);
+    assert.equal(result.position.totalSupply, item.supply, item.name);
+  }
 });
 
 test('header native balance attaches to connected wallet or stable header-actions fallback', () => {
