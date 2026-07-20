@@ -57,7 +57,7 @@ function mergeSettingsPatch(settings, patch) {
 function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurrentToken, sendMessage, patchSettings } = {}) {
   assert.notEqual(instrumentedSource, contentSource, 'content test harness must replace startup with runtime exports');
   const messages = [];
-  const calls = { buy: 0, buyOrders: [], patches: [], fullSaves: [], getAll: 0 };
+  const calls = { buy: 0, buyOrders: [], patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: [] };
   const clock = { now: 1_000_000 };
   class FakeDate extends Date {
     constructor(...args) { super(args.length ? args[0] : clock.now); }
@@ -180,7 +180,9 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
       executeBuy(state, order) { calls.buy += 1; calls.buyOrders.push(order); return { state, trade: {} }; },
       executeSell: (state) => ({ state, trade: {} }), executeCloseAll: (state) => ({ state, trades: [], failures: [] }),
       markPosition(position, quote) {
-        const priceUsd = Number(quote?.priceUsd || position?.lastPriceUsd || 0);
+        const priceUsd = quote
+          ? Number(quote.priceUsd || 0)
+          : Number(position?.lastPriceUsd || position?.averageEntryPriceUsd || 0);
         const nativePriceUsd = Number(quote?.nativePriceUsd || position?.lastNativePriceUsd || 0);
         const valueNative = priceUsd > 0 && nativePriceUsd > 0
           ? Number(position?.quantity || 0) * priceUsd / nativePriceUsd
@@ -203,10 +205,12 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
       },
       chainUsdSummary(state, chain, nativePriceUsd) {
         if (!(Number(nativePriceUsd) > 0)) throw new Error('invalidNativePrice');
+        calls.chainUsdSummaries.push({ state, chain, nativePriceUsd });
         const account = state.accounts[chain];
         const positionsUsd = Object.values(state.positions || {})
           .filter((position) => position.chain === chain)
-          .reduce((sum, position) => sum + Number(position.quantity || 0) * Number(position.lastPriceUsd || 0), 0);
+          .reduce((sum, position) => sum + Number(position.quantity || 0)
+            * context.Tango.Engine.markPosition(position).priceUsd, 0);
         const cashUsd = Number(account.cashBalanceNative) * Number(nativePriceUsd);
         const principalUsd = Number(account.initialBalanceNative) * Number(nativePriceUsd);
         const assetsUsd = cashUsd + positionsUsd;
@@ -393,8 +397,13 @@ test('content USD aggregate and position renders use canonical token USD marks',
   loaded.api.runtime.drawerOpen = true;
   const summary = loaded.context.Tango.Engine.portfolioSummary(loaded.api.runtime.state, 'eth');
   const usdSummary = loaded.context.Tango.Engine.chainUsdSummary(loaded.api.runtime.state, 'eth', 200);
+  loaded.calls.chainUsdSummaries.length = 0;
 
   const bar = loaded.api.renderBar(summary);
+  assert.equal(loaded.calls.chainUsdSummaries.length, 1, 'renderBar invokes the canonical USD helper once');
+  assert.equal(loaded.calls.chainUsdSummaries[0].state, loaded.api.runtime.state);
+  assert.equal(loaded.calls.chainUsdSummaries[0].chain, 'eth');
+  assert.equal(loaded.calls.chainUsdSummaries[0].nativePriceUsd, 200);
   const drawer = loaded.api.renderDrawer(summary);
   loaded.api.requestCloseAll();
 
