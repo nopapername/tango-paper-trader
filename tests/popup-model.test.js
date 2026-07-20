@@ -149,7 +149,7 @@ function popupRuntime() {
     }
   };
   const source = popupSource.replace(
-    '  await loadInitial();\n})(globalThis);',
+    /  await loadInitial\(\);\r?\n}\)\(globalThis\);(?=\s*$)/,
     '  await loadInitial();\n  global.__popupTest = { getSettings: () => settings };\n})(globalThis);'
   );
   assert.notEqual(source, popupSource, 'popup test harness must replace startup');
