@@ -360,6 +360,23 @@ test('strict v2 import requires exact collection and registered-account structur
   }
 });
 
+test('strict v2 import rejects non-array calibrations while allowing omission', () => {
+  for (const value of [{}, null, 'calibration']) {
+    const state = State.createInitialState({ now: 1 });
+    state.calibrations = value;
+    assert.throws(
+      () => State.normalizeState(state, State.normalizeSettings({}), { strict: true }),
+      /invalidCalibration/
+    );
+  }
+  const legacyV2 = State.createInitialState({ now: 1 });
+  delete legacyV2.calibrations;
+  assert.deepEqual(
+    State.normalizeState(legacyV2, State.normalizeSettings({}), { strict: true }).calibrations,
+    []
+  );
+});
+
 test('strict v2 import rejects malformed account, position, trade, and daily economics', () => {
   const settings = State.normalizeSettings({});
   const account = State.createInitialState({ now: 1000 });

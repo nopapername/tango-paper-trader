@@ -470,7 +470,6 @@
       if (!isRecord(raw.account)) throw new Error('invalidAccount');
       if (!isRecord(raw.positions)) throw new Error('invalidPositions');
       if (!Array.isArray(raw.trades)) throw new Error('invalidTrades');
-      if (!optional(raw, 'calibrations', Array.isArray)) throw new Error('invalidCalibration');
       if (!isRecord(raw.dailyRealized)) throw new Error('invalidDaily');
       if (typeof raw.initialized !== 'boolean') throw new Error('invalidState');
     }
@@ -524,6 +523,7 @@
       if (raw.schemaVersion !== 2 || !sameKeys(raw.accounts, chainIds)) throw new Error('invalidAccounts');
       if (!isRecord(raw.positions)) throw new Error('invalidPositions');
       if (!Array.isArray(raw.trades)) throw new Error('invalidTrades');
+      if (!optional(raw, 'calibrations', Array.isArray)) throw new Error('invalidCalibration');
       if (!sameKeys(raw.dailyRealizedByChain, chainIds)) throw new Error('invalidDaily');
       if (typeof raw.initialized !== 'boolean') throw new Error('invalidState');
       if (raw.stateRevision != null && (!Number.isSafeInteger(raw.stateRevision) || raw.stateRevision < 0)) throw new Error('invalidState');
