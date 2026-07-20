@@ -10,6 +10,7 @@ const {
   popupScriptOrderErrors,
   dashboardScriptOrderErrors,
   javascriptSyntaxErrors,
+  paperOnlySafetyErrors,
   mainWorldScriptOrderErrors,
   REQUIRED_ISOLATED_ORDER,
   REQUIRED_MAIN_ORDER,
@@ -30,6 +31,38 @@ test('extension host permissions remain limited to supported market data hosts',
     'https://api.coingecko.com/*',
     'https://api.dexscreener.com/*'
   ]);
+});
+
+test('paper-only static validator rejects representative wallet, RPC, approval, swap, and broadcast paths', () => {
+  assert.equal(typeof paperOnlySafetyErrors, 'function');
+  const dangerousFixtures = [
+    ['ethereum request', 'ethereum.request({ method: "eth_chainId" });'],
+    ['wallet RPC property access', 'const request = window.ethereum.request;'],
+    ['personal sign', 'ethereum.request({ method: "personal_sign" });'],
+    ['eth sign', 'window.ethereum.request({ method: "eth_sign" });'],
+    ['typed-data signature', 'globalThis.ethereum?.request({ method: "eth_signTypedData_v4" });'],
+    ['transaction submission', 'ethereum.request({ method: "eth_sendTransaction" });'],
+    ['raw transaction broadcast', 'ethereum.request({ method: "eth_sendRawTransaction" });'],
+    ['wallet permissions', 'ethereum.request({ method: "wallet_requestPermissions" });'],
+    ['wallet chain switch', 'ethereum.request({ method: "wallet_switchEthereumChain" });'],
+    ['wallet chain addition', 'ethereum.request({ method: "wallet_addEthereumChain" });'],
+    ['wallet connection helper', 'connectWallet();'],
+    ['signature helper', 'requestSignature(); signTransaction();'],
+    ['transaction helper', 'sendTransaction(); broadcastTransaction();'],
+    ['transaction helper property access', 'const submit = sendTransaction;'],
+    ['token approval', 'token.approve(spender, amount);'],
+    ['token approval property access', 'const approval = token.approve;'],
+    ['strategy order', 'strategy_order({ side: "buy" });'],
+    ['strategy order property access', 'const order = strategy_order;'],
+    ['swap route', 'fetch("/swap/route");'],
+    ['websocket in MAIN script', 'new WebSocket("wss://example.test");'],
+    ['websocket in isolated content', 'new WebSocket("wss://example.test");']
+  ];
+
+  for (const [name, source] of dangerousFixtures) {
+    const file = name.includes('isolated') ? 'src/content/content.js' : 'src/content/page-main.js';
+    assert.ok(paperOnlySafetyErrors([{ file, source }]).length > 0, name);
+  }
 });
 
 test('static validation enforces worker-relative bootstrap imports', () => {

@@ -35,6 +35,15 @@ const REQUIRED_WORKER_IMPORT_ORDER = [
   'core/engine.js',
   'core/state-coordinator.js'
 ];
+const PAPER_ONLY_SAFETY_RULES = [
+  ['wallet RPC transport', /\b(?:(?:window|globalThis)\s*\.\s*)?(?:ethereum|provider|wallet)\s*(?:\.|\?\.)\s*(?:request|send|sendAsync)\b/],
+  ['wallet signing or transaction RPC', /\b(?:personal_sign|eth_sign(?:TypedData(?:_[A-Za-z0-9]+)?)?|eth_send(?:Raw)?Transaction|wallet_requestPermissions|wallet_switchEthereumChain|wallet_addEthereumChain)\b/],
+  ['wallet transaction helper', /\b(?:connectWallet|requestSignature|signTransaction|sendTransaction|broadcastTransaction)\b/],
+  ['token approval', /\b(?:approve|approveToken|approveTransaction)\b/],
+  ['strategy order', /\bstrategy_order\b/],
+  ['swap route', /\bswap\s*\/\s*route\b/],
+  ['WebSocket transport', /\bnew\s+WebSocket\s*\(/]
+];
 
 function versionConsistencyErrors({ packageVersion, manifestVersion, constantsSource }) {
   const constantsVersion = String(constantsSource || '').match(/Tango\.VERSION\s*=\s*['\"]([^'\"]+)['\"]/)?.[1] || '';
@@ -112,6 +121,16 @@ function javascriptSyntaxErrors(sources) {
   return errors;
 }
 
+function paperOnlySafetyErrors(sources) {
+  const errors = [];
+  for (const { file, source } of sources || []) {
+    for (const [name, pattern] of PAPER_ONLY_SAFETY_RULES) {
+      if (pattern.test(String(source || ''))) errors.push(`Paper-only violation in ${file}: ${name}`);
+    }
+  }
+  return errors;
+}
+
 function collectJavaScriptSources(root) {
   const sources = [];
   for (const directory of ['src', 'tests', 'scripts']) {
@@ -174,6 +193,9 @@ function validateExtension(root = path.resolve(__dirname, '..')) {
   if (workerFile && fs.existsSync(path.join(root, workerFile))) {
     errors.push(...workerImportErrors(workerFile, fs.readFileSync(path.join(root, workerFile), 'utf8')));
   }
+  errors.push(...paperOnlySafetyErrors(['src/content/page-main.js', 'src/content/content.js']
+    .filter((file) => fs.existsSync(path.join(root, file)))
+    .map((file) => ({ file, source: fs.readFileSync(path.join(root, file), 'utf8') }))));
   errors.push(...javascriptSyntaxErrors(collectJavaScriptSources(root)));
   return { errors, manifest, referenced };
 }
@@ -201,5 +223,6 @@ module.exports = {
   popupScriptOrderErrors,
   dashboardScriptOrderErrors,
   workerImportErrors,
-  javascriptSyntaxErrors
+  javascriptSyntaxErrors,
+  paperOnlySafetyErrors
 };

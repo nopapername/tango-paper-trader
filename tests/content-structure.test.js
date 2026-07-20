@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { paperOnlySafetyErrors } = require('../scripts/validate-extension.js');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const cssSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.css'), 'utf8');
@@ -132,9 +133,10 @@ test('extension permissions and code remain paper-only', () => {
   const content = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
   assert.deepEqual(manifest.permissions, ['storage']);
   assert.equal(manifest.permissions.includes('web3'), false);
-  assert.doesNotMatch(`${pageMain}\n${content}`,
-    /connectWallet|requestSignature|signTransaction|sendTransaction|eth_sendTransaction|wallet_requestPermissions|strategy_order|swap\/route/);
-  assert.doesNotMatch(pageMain, /new\s+WebSocket\s*\(/);
+  assert.deepEqual(paperOnlySafetyErrors([{
+    file: 'combined content scripts',
+    source: `${pageMain}\n${content}`
+  }]), []);
 });
 
 test('native prices and GMGN quotes are explicitly keyed by chain', () => {
