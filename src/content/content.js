@@ -86,9 +86,13 @@
   }
   function rememberNativePrice(chain, price, observedAt = Date.now()) {
     const numeric = Number(price || 0);
-    if (!(numeric > 0)) return 0;
+    const nextObservedAt = Number(observedAt || 0);
+    const previousObservedAt = Number(runtime.nativePriceObservedAt.get(chain) || 0);
+    if (!(numeric > 0) || !(nextObservedAt > 0) || nextObservedAt < previousObservedAt) {
+      return Number(runtime.nativePrices.get(chain) || 0);
+    }
     runtime.nativePrices.set(chain, numeric);
-    runtime.nativePriceObservedAt.set(chain, Number(observedAt));
+    runtime.nativePriceObservedAt.set(chain, nextObservedAt);
     return numeric;
   }
   function freshNativePrice(chain, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
@@ -700,7 +704,10 @@
       && Number(boundPosition?.marketCapDivisor) === 1_000_000_000
       ? 1_000_000_000 : 0;
     const localSupplySource = String(local.supplySource || local.totalSupplySource || '');
-    const localExactSupply = String(local.source || '').toUpperCase().startsWith('GMGN')
+    const localSupplyObservationSource = String(
+      local.totalSupplyObservationSource || local.source || ''
+    ).toUpperCase();
+    const localExactSupply = localSupplyObservationSource.startsWith('GMGN')
       && ['GMGN_EXACT', 'GMGN_NETWORK_EXACT'].includes(localSupplySource)
       && Number.isFinite(Number(local.totalSupply)) && Number(local.totalSupply) > 0
       ? Number(local.totalSupply) : 0;

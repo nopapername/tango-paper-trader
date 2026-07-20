@@ -774,6 +774,15 @@ test('passive native prices update every chain sharing the symbol without mergin
   assert.notEqual(baseAccount, robinhoodAccount);
 });
 
+test('an older native observation cannot replace a newer cached price', () => {
+  const loaded = loadContent();
+  loaded.api.rememberNativePrice('eth', 3_500, loaded.clock.now);
+  loaded.api.rememberNativePrice('eth', 3_000, loaded.clock.now - 1_000);
+
+  assert.equal(loaded.api.runtime.nativePrices.get('eth'), 3_500);
+  assert.equal(loaded.api.runtime.nativePriceObservedAt.get('eth'), loaded.clock.now);
+});
+
 test('provisional copy is shown only for provisional panel and confirmation quotes', async () => {
   const provisional = loadContent();
   provisional.api.runtime.current = {
@@ -909,6 +918,28 @@ test('resolver quotes preserve valid GMGN exact, ratio, and verified launchpad-r
     assert.equal(result.position.supplySource, item.source, item.name);
     assert.equal(result.position.totalSupply, item.supply, item.name);
   }
+});
+
+test('a newer DEX price keeps an older exact GMGN supply and its field provenance', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  loaded.api.runtime.gmgnQuotes.set(`base:${ADDRESS_A}`, GMGNQuotes.mergeObservation(null, {
+    chain: 'base', address: ADDRESS_A, priceUsd: 1, totalSupply: 10_000,
+    totalSupplySource: 'GMGN_NETWORK_EXACT', observedAt: loaded.clock.now - 1_000,
+    source: 'GMGN_NETWORK'
+  }));
+
+  const quote = loaded.api.resolvePaperTradeQuote(
+    { chain: 'base', address: ADDRESS_A, symbol: 'MIXED' },
+    { chain: 'base', address: ADDRESS_A, priceUsd: 2, observedAt: loaded.clock.now, source: 'DEXSCREENER' }
+  );
+
+  assert.equal(quote.priceUsd, 2);
+  assert.equal(quote.source, 'DEXSCREENER');
+  assert.equal(quote.priceSource, 'DEXSCREENER');
+  assert.equal(quote.supplySource, 'GMGN_EXACT');
+  assert.equal(quote.totalSupply, 10_000);
+  assert.equal(quote.totalSupplyObservationSource, 'GMGN_NETWORK');
 });
 
 test('header native balance attaches to connected wallet or stable header-actions fallback', () => {

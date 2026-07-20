@@ -39,20 +39,37 @@
     return String(value).trim().slice(0, maxLength);
   }
 
-  function newerPositive(previous, next, valueField, timeField, fallbackTime) {
+  function newerPositive(previous, next, valueField, timeField, sourceField, fallbackTime) {
     const previousTime = Number(previous?.[timeField]
       || (Number(previous?.[valueField]) > 0 ? previous?.observedAt : 0) || 0);
     const nextTime = Number(next?.[timeField] || fallbackTime || 0);
-    return Number(next?.[valueField]) > 0 && nextTime >= previousTime
-      ? { value: Number(next[valueField]), observedAt: nextTime }
-      : { value: Number(previous?.[valueField] || 0), observedAt: previousTime };
+    const useNext = Number(next?.[valueField]) > 0 && nextTime >= previousTime;
+    const selected = useNext ? next : previous;
+    const value = Number(selected?.[valueField] || 0);
+    return {
+      value,
+      observedAt: useNext ? nextTime : previousTime,
+      source: value > 0 ? metadataText(selected?.[sourceField] || selected?.source, 64) : '',
+      fromNext: useNext
+    };
   }
 
-  function newerText(previous, next, field, fallbackTime, maxLength) {
-    const previousTime = Number(previous?.metadataObservedAt || 0);
-    const nextTime = Number(next?.metadataObservedAt || fallbackTime || 0);
-    const value = metadataText(next?.[field], maxLength);
-    return value && nextTime >= previousTime ? value : metadataText(previous?.[field], maxLength);
+  function newerText(previous, next, field, timeField, sourceField, fallbackTime, maxLength) {
+    const clean = field === 'symbol' ? symbolText : (value) => metadataText(value, maxLength);
+    const previousValue = clean(previous?.[field]);
+    const nextValue = clean(next?.[field]);
+    const previousTime = previousValue
+      ? Number(previous?.[timeField] || previous?.metadataObservedAt || previous?.observedAt || 0) : 0;
+    const nextTime = nextValue
+      ? Number(next?.[timeField] || next?.metadataObservedAt || fallbackTime || 0) : 0;
+    const useNext = Boolean(nextValue) && (!previousValue || nextTime >= previousTime);
+    const selected = useNext ? next : previous;
+    const value = useNext ? nextValue : previousValue;
+    return {
+      value,
+      observedAt: useNext ? nextTime : previousTime,
+      source: value ? metadataText(selected?.[sourceField] || selected?.source, 64) : ''
+    };
   }
 
   function symbolText(value) {
@@ -68,23 +85,29 @@
         || Tango.Chains.normalizeAddress(previous.chain, previous.address) !== address) return null;
     }
     const nextObservedAt = Number(next.observedAt || 0);
-    const price = newerPositive(previous, next, 'priceUsd', 'priceObservedAt', nextObservedAt);
-    const marketCap = newerPositive(previous, next, 'marketCapUsd', 'marketCapObservedAt', nextObservedAt);
-    const liquidity = newerPositive(previous, next, 'liquidityUsd', 'liquidityObservedAt', nextObservedAt);
-    const totalSupply = newerPositive(previous, next, 'totalSupply', 'totalSupplyObservedAt', nextObservedAt);
-    const previousMetadataAt = Number(previous?.metadataObservedAt
-      || ((symbolText(previous?.symbol) || metadataText(previous?.name, 100)
-        || metadataText(previous?.logoUrl, 1000) || metadataText(previous?.launchpad, 100)
-        || metadataText(previous?.launchMode, 100)) ? previous?.observedAt : 0) || 0);
-    const nextMetadataAt = Number(next?.metadataObservedAt || nextObservedAt || 0);
-    const hasNewMetadata = Boolean(symbolText(next?.symbol) || metadataText(next?.name, 100)
-      || metadataText(next?.logoUrl, 1000) || metadataText(next?.launchpad, 100)
-      || metadataText(next?.launchMode, 100));
-    const metadataObservedAt = hasNewMetadata && nextMetadataAt >= previousMetadataAt
-      ? nextMetadataAt : previousMetadataAt;
-    const supplyFromNext = Number(next?.totalSupply) > 0
-      && Number(next?.totalSupplyObservedAt || nextObservedAt || 0) >= Number(previous?.totalSupplyObservedAt
-        || (Number(previous?.totalSupply) > 0 ? previous?.observedAt : 0) || 0);
+    const price = newerPositive(previous, next, 'priceUsd', 'priceObservedAt', 'priceSource', nextObservedAt);
+    const marketCap = newerPositive(previous, next, 'marketCapUsd', 'marketCapObservedAt', 'marketCapSource', nextObservedAt);
+    const liquidity = newerPositive(previous, next, 'liquidityUsd', 'liquidityObservedAt', 'liquiditySource', nextObservedAt);
+    const totalSupply = newerPositive(
+      previous, next, 'totalSupply', 'totalSupplyObservedAt', 'totalSupplyObservationSource', nextObservedAt
+    );
+    const symbol = newerText(previous, next, 'symbol', 'symbolObservedAt', 'symbolSource', nextObservedAt, 32);
+    const name = newerText(previous, next, 'name', 'nameObservedAt', 'nameSource', nextObservedAt, 100);
+    const logoUrl = newerText(previous, next, 'logoUrl', 'logoUrlObservedAt', 'logoUrlSource', nextObservedAt, 1000);
+    const launchpad = newerText(previous, next, 'launchpad', 'launchpadObservedAt', 'launchpadSource', nextObservedAt, 100);
+    const launchMode = newerText(previous, next, 'launchMode', 'launchModeObservedAt', 'launchModeSource', nextObservedAt, 100);
+    const metadataObservedAt = Math.max(
+      symbol.observedAt, name.observedAt, logoUrl.observedAt, launchpad.observedAt, launchMode.observedAt
+    );
+    const observedAt = price.value > 0 ? price.observedAt
+      : marketCap.value > 0 ? marketCap.observedAt
+        : liquidity.value > 0 ? liquidity.observedAt
+          : totalSupply.value > 0 ? totalSupply.observedAt : metadataObservedAt;
+    const source = price.value > 0 ? price.source
+      : marketCap.value > 0 ? marketCap.source
+        : liquidity.value > 0 ? liquidity.source
+          : totalSupply.value > 0 ? totalSupply.source
+            : symbol.source || name.source || logoUrl.source || launchpad.source || launchMode.source;
     return {
       chain: next.chain,
       address,
@@ -93,19 +116,34 @@
       liquidityUsd: liquidity.value,
       totalSupply: totalSupply.value,
       totalSupplySource: totalSupply.value > 0
-        ? (supplyFromNext ? metadataText(next.totalSupplySource, 64) : metadataText(previous?.totalSupplySource, 64)) || 'GMGN_NETWORK_EXACT'
+        ? (totalSupply.fromNext ? metadataText(next.totalSupplySource, 64) : metadataText(previous?.totalSupplySource, 64)) || 'GMGN_NETWORK_EXACT'
         : '',
-      symbol: newerText(previous, next, 'symbol', nextObservedAt, 32).replace(/^\$/, ''),
-      name: newerText(previous, next, 'name', nextObservedAt, 100),
-      logoUrl: newerText(previous, next, 'logoUrl', nextObservedAt, 1000),
-      launchpad: newerText(previous, next, 'launchpad', nextObservedAt, 100),
-      launchMode: newerText(previous, next, 'launchMode', nextObservedAt, 100),
+      totalSupplyObservationSource: totalSupply.source,
+      symbol: symbol.value,
+      name: name.value,
+      logoUrl: logoUrl.value,
+      launchpad: launchpad.value,
+      launchMode: launchMode.value,
       priceObservedAt: price.observedAt,
+      priceSource: price.source,
       marketCapObservedAt: marketCap.observedAt,
+      marketCapSource: marketCap.source,
+      liquidityObservedAt: liquidity.observedAt,
+      liquiditySource: liquidity.source,
       totalSupplyObservedAt: totalSupply.observedAt,
+      symbolObservedAt: symbol.observedAt,
+      symbolSource: symbol.source,
+      nameObservedAt: name.observedAt,
+      nameSource: name.source,
+      logoUrlObservedAt: logoUrl.observedAt,
+      logoUrlSource: logoUrl.source,
+      launchpadObservedAt: launchpad.observedAt,
+      launchpadSource: launchpad.source,
+      launchModeObservedAt: launchMode.observedAt,
+      launchModeSource: launchMode.source,
       metadataObservedAt,
-      observedAt: price.value > 0 ? price.observedAt : marketCap.observedAt,
-      source: 'GMGN_NETWORK'
+      observedAt,
+      source
     };
   }
 
@@ -139,7 +177,8 @@
         const logoUrl = metadataText(firstValue(value, LOGO_KEYS), 1000);
         const launchpad = metadataText(firstValue(value, LAUNCHPAD_KEYS), 100);
         const launchMode = metadataText(firstValue(value, LAUNCH_MODE_KEYS), 100);
-        if (priceUsd > 0 || marketCapUsd > 0) {
+        if (priceUsd > 0 || marketCapUsd > 0 || liquidityUsd > 0 || totalSupply > 0
+          || symbol || name || logoUrl || launchpad || launchMode) {
           const previous = found.get(address) || null;
           found.set(address, mergeObservation(previous, {
             chain: chain.id,
@@ -156,8 +195,23 @@
             launchMode,
             observedAt,
             priceObservedAt: priceUsd > 0 ? observedAt : 0,
+            priceSource: priceUsd > 0 ? 'GMGN_NETWORK' : '',
             marketCapObservedAt: marketCapUsd > 0 ? observedAt : 0,
+            marketCapSource: marketCapUsd > 0 ? 'GMGN_NETWORK' : '',
+            liquidityObservedAt: liquidityUsd > 0 ? observedAt : 0,
+            liquiditySource: liquidityUsd > 0 ? 'GMGN_NETWORK' : '',
             totalSupplyObservedAt: totalSupply > 0 ? observedAt : 0,
+            totalSupplyObservationSource: totalSupply > 0 ? 'GMGN_NETWORK' : '',
+            symbolObservedAt: symbol ? observedAt : 0,
+            symbolSource: symbol ? 'GMGN_NETWORK' : '',
+            nameObservedAt: name ? observedAt : 0,
+            nameSource: name ? 'GMGN_NETWORK' : '',
+            logoUrlObservedAt: logoUrl ? observedAt : 0,
+            logoUrlSource: logoUrl ? 'GMGN_NETWORK' : '',
+            launchpadObservedAt: launchpad ? observedAt : 0,
+            launchpadSource: launchpad ? 'GMGN_NETWORK' : '',
+            launchModeObservedAt: launchMode ? observedAt : 0,
+            launchModeSource: launchMode ? 'GMGN_NETWORK' : '',
             metadataObservedAt: symbol || name || logoUrl || launchpad || launchMode ? observedAt : 0,
             source: 'GMGN_NETWORK'
           }));

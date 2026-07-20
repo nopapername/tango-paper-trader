@@ -14,7 +14,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function loadPageMain(fetchImpl) {
+function loadPageMain(fetchImpl, clock = null) {
   const published = [];
   const nativePublished = [];
   const listeners = new Map();
@@ -29,7 +29,7 @@ function loadPageMain(fetchImpl) {
   }
   const context = {
     console,
-    Date,
+    Date: clock ? class extends Date { static now() { return clock.now; } } : Date,
     Element: FakeElement,
     URL,
     XMLHttpRequest: FakeXhr,
@@ -61,6 +61,7 @@ function loadPageMain(fetchImpl) {
         },
         mergeObservation(previous, next) {
           if (previous && (previous.chain !== next.chain || previous.address !== next.address)) return null;
+          if (previous && Number(next.observedAt || 0) < Number(previous.observedAt || 0)) return previous;
           return {
             ...(previous || {}), ...next,
             priceUsd: next.priceUsd || previous?.priceUsd || 0,
@@ -151,6 +152,33 @@ test('quote replay preserves metadata when a later response contains only price'
   assert.equal(loaded.published[0].symbol, 'RIGHT');
   assert.equal(loaded.published[0].name, 'Right Token');
   assert.equal(loaded.published[0].logoUrl, 'right.png');
+});
+
+test('an older fetch request completing last cannot replace a newer token observation', async () => {
+  const first = deferred();
+  const second = deferred();
+  const requests = [first, second];
+  const clock = { now: 100 };
+  const loaded = loadPageMain(() => requests.shift().promise, clock);
+
+  const olderRequest = loaded.context.fetch('/api/token/quote');
+  clock.now = 200;
+  const newerRequest = loaded.context.fetch('/api/token/quote');
+  clock.now = 300;
+  second.resolve(jsonResponse({ address: EVM_ADDRESS, priceUsd: 2 }));
+  await newerRequest;
+  await new Promise((resolve) => setImmediate(resolve));
+  clock.now = 400;
+  first.resolve(jsonResponse({ address: EVM_ADDRESS, priceUsd: 1 }));
+  await olderRequest;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  loaded.published.length = 0;
+  loaded.context.__messageData = { source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' };
+  vm.runInNewContext("__listeners.get('message')({ source: window, data: __messageData })", loaded.context);
+  assert.equal(loaded.published.length, 1);
+  assert.equal(loaded.published[0].priceUsd, 2);
+  assert.equal(loaded.published[0].observedAt, 200);
 });
 
 test('major_coin_prices publishes passive native observations without a new request', async () => {

@@ -11,6 +11,7 @@ const {
   dashboardScriptOrderErrors,
   javascriptSyntaxErrors,
   paperOnlySafetyErrors,
+  collectProductionJavaScriptSources,
   mainWorldScriptOrderErrors,
   REQUIRED_ISOLATED_ORDER,
   REQUIRED_MAIN_ORDER,
@@ -60,18 +61,33 @@ test('paper-only static validator rejects representative wallet, RPC, approval, 
     ['strategy order', 'strategy_order({ side: "buy" });'],
     ['strategy order property access', 'const order = strategy_order;'],
     ['swap route', 'fetch("/swap/route");'],
+    ['service worker transaction helper', 'sendTransaction();', 'src/background.js'],
+    ['adapter wallet RPC', 'window.ethereum.request({ method: "eth_chainId" });', 'src/adapters/gmgn.js'],
     ['websocket in MAIN script', 'new WebSocket("wss://example.test");'],
     ['websocket in isolated content', 'new WebSocket("wss://example.test");']
   ];
 
-  for (const [name, source] of dangerousFixtures) {
-    const file = name.includes('isolated') ? 'src/content/content.js' : 'src/content/page-main.js';
+  for (const [name, source, explicitFile] of dangerousFixtures) {
+    const file = explicitFile || (name.includes('isolated') ? 'src/content/content.js' : 'src/content/page-main.js');
     assert.ok(paperOnlySafetyErrors([{ file, source }]).length > 0, name);
   }
   assert.deepEqual(paperOnlySafetyErrors([{
     file: 'src/content/page-main.js',
     source: 'const label = "ethereum request";'
   }]), []);
+});
+
+test('release safety scanning collects every packaged production JavaScript file', () => {
+  assert.equal(typeof collectProductionJavaScriptSources, 'function');
+  const sources = collectProductionJavaScriptSources(path.resolve(__dirname, '..'));
+  const files = new Set(sources.map(({ file }) => file.replaceAll('\\', '/')));
+
+  assert.ok(files.has('src/background.js'));
+  assert.ok(files.has('src/adapters/gmgn.js'));
+  assert.ok(files.has('src/core/engine.js'));
+  assert.ok(files.has('src/popup/popup.js'));
+  assert.ok(files.has('src/dashboard/dashboard.js'));
+  assert.ok([...files].every((file) => file.startsWith('src/') && file.endsWith('.js')));
 });
 
 test('static validation enforces worker-relative bootstrap imports', () => {

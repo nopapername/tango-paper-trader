@@ -29,6 +29,12 @@
   paperTradeEvents.forEach((type) => window.addEventListener(type, blockGmgnPaperAction, { capture: true, passive: false }));
 
   const quoteCache = new Map();
+  let lastRequestObservedAt = 0;
+
+  function nextRequestObservedAt() {
+    lastRequestObservedAt = Math.max(Date.now(), lastRequestObservedAt + 1);
+    return lastRequestObservedAt;
+  }
 
   function explicitGmgnChain(url) {
     let parsed;
@@ -44,7 +50,7 @@
     try { requestUrl = new URL(String(url?.url || url || ''), location.href).href; }
     catch { requestUrl = String(url?.url || url || ''); }
     const chain = explicitGmgnChain(requestUrl)?.id || Tango.Chains.fromUrl(location.href)?.id || null;
-    return { url: requestUrl, chain };
+    return { url: requestUrl, chain, observedAt: nextRequestObservedAt() };
   }
 
   function publish(quotes) {
@@ -63,13 +69,13 @@
     window.postMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: merged }, '*');
   }
 
-  function inspectPayload(payload, chain, url) {
+  function inspectPayload(payload, chain, url, observedAt) {
     if (chain) {
-      try { publish(Tango.GMGNQuotes.extract(payload, chain, Date.now())); } catch {}
+      try { publish(Tango.GMGNQuotes.extract(payload, chain, observedAt)); } catch {}
     }
     if (isMajorCoinPricesResponse(url)) {
       try {
-        const prices = Tango.GMGNQuotes.extractNativePrices(payload, Date.now());
+        const prices = Tango.GMGNQuotes.extractNativePrices(payload, observedAt);
         if (prices.length) window.postMessage({
           source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES', prices
         }, '*');
@@ -107,7 +113,9 @@
           if (response?.ok && shouldInspectResponse(responseUrl, contentType)
             && (isMajorCoinPricesResponse(responseUrl)
               || responseMatchesRequestChain(responseUrl, requestStart.chain))) {
-            response.clone().json().then((payload) => inspectPayload(payload, requestStart.chain, responseUrl)).catch(() => null);
+            response.clone().json().then((payload) => inspectPayload(
+              payload, requestStart.chain, responseUrl, requestStart.observedAt
+            )).catch(() => null);
           }
         }).catch(() => null);
         return request;
@@ -121,6 +129,7 @@
     const requestStart = requestContext(url);
     this.__tangoRequestUrl = requestStart.url;
     this.__tangoRequestChain = requestStart.chain;
+    this.__tangoRequestObservedAt = requestStart.observedAt;
     return xhrOpen.call(this, method, url, ...rest);
   };
   XMLHttpRequest.prototype.send = function tangoXhrSend(...args) {
@@ -132,7 +141,7 @@
           || responseMatchesRequestChain(responseUrl, this.__tangoRequestChain))) {
         try {
           inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText),
-            this.__tangoRequestChain, responseUrl);
+            this.__tangoRequestChain, responseUrl, this.__tangoRequestObservedAt);
         } catch {}
       }
     }, { once: true });

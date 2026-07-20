@@ -131,9 +131,9 @@ function paperOnlySafetyErrors(sources) {
   return errors;
 }
 
-function collectJavaScriptSources(root) {
+function collectJavaScriptSources(root, directories = ['src', 'tests', 'scripts']) {
   const sources = [];
-  for (const directory of ['src', 'tests', 'scripts']) {
+  for (const directory of directories) {
     const start = path.join(root, directory);
     if (!fs.existsSync(start)) continue;
     const pending = [start];
@@ -149,6 +149,10 @@ function collectJavaScriptSources(root) {
     }
   }
   return sources;
+}
+
+function collectProductionJavaScriptSources(root) {
+  return collectJavaScriptSources(root, ['src']);
 }
 
 function validateExtension(root = path.resolve(__dirname, '..')) {
@@ -193,9 +197,7 @@ function validateExtension(root = path.resolve(__dirname, '..')) {
   if (workerFile && fs.existsSync(path.join(root, workerFile))) {
     errors.push(...workerImportErrors(workerFile, fs.readFileSync(path.join(root, workerFile), 'utf8')));
   }
-  errors.push(...paperOnlySafetyErrors(['src/content/page-main.js', 'src/content/content.js']
-    .filter((file) => fs.existsSync(path.join(root, file)))
-    .map((file) => ({ file, source: fs.readFileSync(path.join(root, file), 'utf8') }))));
+  errors.push(...paperOnlySafetyErrors(collectProductionJavaScriptSources(root)));
   errors.push(...javascriptSyntaxErrors(collectJavaScriptSources(root)));
   return { errors, manifest, referenced };
 }
@@ -224,5 +226,6 @@ module.exports = {
   dashboardScriptOrderErrors,
   workerImportErrors,
   javascriptSyntaxErrors,
-  paperOnlySafetyErrors
+  paperOnlySafetyErrors,
+  collectProductionJavaScriptSources
 };
