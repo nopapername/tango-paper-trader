@@ -134,6 +134,44 @@ test('implicit legacy Pump provenance cannot launder an unrelated caller total s
   }
 });
 
+test('new Pump buys reject forged token-level legacy supply provenance', () => {
+  const pumpToken = {
+    ...token,
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
+  const unverifiedMarketCapQuote = {
+    priceUsd: 0, marketCapUsd: 4_000, nativePriceUsd: 100,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP',
+    priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const forgedTokens = [
+    {
+      ...pumpToken,
+      marketCapDivisor: 1_000_000_000,
+      marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+    },
+    {
+      ...pumpToken,
+      totalSupply: 1_000_000_000,
+      supplySource: 'LEGACY_PUMP_RULE',
+      marketCapDivisor: 1_000_000_000,
+      marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+    }
+  ];
+
+  for (const forgedToken of forgedTokens) {
+    const input = state();
+    const snapshot = structuredClone(input);
+    assert.throws(() => Engine.executeBuy(input, {
+      token: forgedToken, quote: unverifiedMarketCapQuote, amountNative: 1
+    }, paperSettings, 1_000), /invalidQuote/);
+    assert.deepEqual(input, snapshot);
+  }
+});
+
 test('explicit rule supply claims require their canonical chain and launch context', () => {
   const pumpToken = {
     ...token,
@@ -342,6 +380,34 @@ test('provisional fallback flags require a resolved market-cap supply dimension'
   assert.equal(later, initial);
   assert.deepEqual(initial.positions, {});
   assert.equal(Engine.portfolioSummary(initial, 'eth').equityNative, initial.accounts.eth.cashBalanceNative);
+});
+
+test('naked fallback confidence cannot create PRICE calibration state or change equity on refresh', () => {
+  const nakedFallbackPrice = {
+    priceUsd: 2, nativePriceUsd: 2_000,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE',
+    priceProvenance: 'OBSERVED_PRICE', supplyConfidence: 'fallback'
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: ethToken, quote: nakedFallbackPrice, amountNative: 1
+  }, paperSettings, 1_000);
+  assert.equal(bought.position.needsCalibration, false);
+  assert.equal(bought.position.provisional, false);
+  assert.equal(bought.position.totalSupply, 0);
+  assert.equal(bought.position.supplySource, '');
+
+  const equityBefore = Engine.markPosition(bought.position).valueNative;
+  const updated = Engine.updatePositionQuote(bought.state, ethToken, {
+    ...nakedFallbackPrice, observedAt: 2_000, nativePriceObservedAt: 2_000
+  }, 2_000);
+  const key = Engine.positionKey('eth', ethToken.address);
+  const position = updated.positions[key];
+  assert.equal(position.needsCalibration, false);
+  assert.equal(position.provisional, false);
+  assert.equal(position.quantity, bought.position.quantity);
+  assert.equal(position.costBasisNative, bought.position.costBasisNative);
+  assert.equal(Engine.markPosition(position).valueNative, equityBefore);
 });
 
 test('fallback-supply provisional calibration preserves equity on the later exact observation', () => {
@@ -557,6 +623,27 @@ test('a stronger exact supply neutrally corrects a legacy market-cap position', 
   assert.ok(Math.abs(Engine.markPosition(position).valueNative - before) < 1e-9);
   assert.ok(Math.abs(position.quantity - bought.position.quantity * 2) < 1e-6);
   assert.equal(corrected.calibrations[0].reason, 'SUPPLY');
+  assert.equal(position.totalSupply, 2_000_000_000);
+  assert.equal(position.supplySource, 'GMGN_EXACT');
+  assert.equal(Object.hasOwn(position, 'marketCapProvenance'), false);
+  assert.doesNotThrow(() => State.normalizeState(corrected, paperSettings, { strict: true }));
+
+  const sold = Engine.executeSell(corrected, {
+    token: pumpToken,
+    quote: {
+      ...legacyQuote,
+      totalSupply: 2_000_000_000,
+      supplySource: 'GMGN_EXACT',
+      source: 'GMGN_NETWORK',
+      observedAt: 3_000,
+      nativePriceObservedAt: 3_000
+    },
+    percent: 50
+  }, paperSettings, 3_000);
+  assert.equal(sold.trade.supplySource, 'GMGN_EXACT');
+  assert.equal(Object.hasOwn(sold.trade, 'marketCapProvenance'), false);
+  assert.equal(Object.hasOwn(sold.position, 'marketCapProvenance'), false);
+  assert.doesNotThrow(() => State.normalizeState(sold.state, paperSettings, { strict: true }));
 });
 
 test('synthetic Pump PRICE calibration persists trusted legacy provenance for strict roundtrip', () => {
@@ -1210,6 +1297,26 @@ test('ordinary sells reject derived proceeds and PnL overflow or underflow witho
     native: Number.MAX_VALUE, usdAtExecution: 0
   };
   expectUnchanged(dailyOverflow, { priceUsd: 4 }, 'daily realized rounding overflow');
+});
+
+test('partial sells reject positive cost basis collapse before mutating state', () => {
+  const normalQuote = {
+    priceUsd: 2, nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  };
+  const input = Engine.executeBuy(state(), {
+    token: ethToken, quote: normalQuote, amountNative: 1
+  }, paperSettings, 1_000).state;
+  const key = Engine.positionKey('eth', ethToken.address);
+  input.positions[key].costBasisNative = Number.MIN_VALUE;
+  const snapshot = structuredClone(input);
+
+  assert.throws(() => Engine.executeSell(input, {
+    token: ethToken,
+    quote: { ...normalQuote, observedAt: 2_000, nativePriceObservedAt: 2_000 },
+    percent: 75
+  }, paperSettings, 2_000), /invalidArithmetic/);
+  assert.deepEqual(input, snapshot);
 });
 
 test('execution stores canonical mixed-case EVM identity', () => {

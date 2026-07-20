@@ -61,6 +61,16 @@
     return token?.metadataVerified === true && METADATA_SOURCE_RANK[source] ? source : '';
   }
 
+  function callerTokenSupplyContext(token, chain, tokenAddress) {
+    return {
+      chain,
+      tokenAddress,
+      address: tokenAddress,
+      launchpad: token?.launchpad,
+      launchMode: token?.launchMode
+    };
+  }
+
   function validIdentityText(value, maxLength) {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     return text && text.length <= maxLength && !/^(TOKEN|UNKNOWN|N\/A)$/i.test(text) ? text : '';
@@ -352,14 +362,15 @@
   function calibrationStillNeeded(existing, quote, supply) {
     const unresolvedSupply = existing?.needsCalibration === true
       && supplyRank(supply?.supplySource) <= supplyRank('LAUNCHPAD_RULE');
+    const resolvedFallbackSupply = quote?.valuationMode === 'MARKET_CAP'
+      && ['LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE'].includes(String(supply?.supplySource || ''));
     return Boolean(
       unresolvedSupply
       || existing?.provisionalTokenPrice
       || existing?.provisionalNativePrice
-      || quote?.provisional
       || quote?.syntheticTokenPrice
       || quote?.syntheticNativePrice
-      || quote?.supplyConfidence === 'fallback'
+      || resolvedFallbackSupply
     );
   }
 
@@ -449,6 +460,9 @@
         ? { marketCapProvenance: MARKET_CAP_PROVENANCE }
         : {})
     };
+    if (selectedSupply?.source !== 'LEGACY_PUMP_RULE') {
+      delete nextState.positions[key].marketCapProvenance;
+    }
     const event = {
       id: cryptoId(Number(now)),
       chain: existing.chain,
@@ -480,10 +494,11 @@
     const tokenAddress = Tango.Chains.normalizeAddress(chain, order?.token?.address);
     const key = positionKey(chain, tokenAddress);
     const originalPosition = state.positions[key];
+    const callerSupplyContext = callerTokenSupplyContext(order.token, chain, tokenAddress);
     const executionSettings = validatedExecutionSettings(settings, chain);
-    const originalTrustContext = trustedSupply(originalPosition) ? originalPosition : order.token;
+    const originalTrustContext = originalPosition || callerSupplyContext;
     const quoteValidation = validateQuote(
-      order.quote, now, order.staleMs, originalPosition || order.token, originalTrustContext
+      order.quote, now, order.staleMs, originalPosition || callerSupplyContext, originalTrustContext
     );
     if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
     const calibration = originalPosition
@@ -493,7 +508,7 @@
     const workingState = calibration.state;
     const account = chainAccount(workingState, chain);
     const existing = workingState.positions[key];
-    const trustContext = existing?.marketCapProvenance === MARKET_CAP_PROVENANCE ? existing : (existing || order.token);
+    const trustContext = existing || callerSupplyContext;
     const amountNative = Number(order.amountNative);
     if (!finiteBetween(amountNative, Number.EPSILON, Number.MAX_VALUE)) throw new Error('invalidAmount');
     const cashBalanceNative = checkedArithmetic(account.cashBalanceNative, 'nonnegative');
@@ -509,7 +524,7 @@
     const valuationMode = existing
       ? (usesMarketCapValuation(existing) ? 'MARKET_CAP' : 'PRICE')
       : (trustedMarketCap && trustedMarketCap.source !== 'GMGN_RATIO' ? 'MARKET_CAP' : 'PRICE');
-    const provenanceContext = existing || { ...order.token, chain };
+    const provenanceContext = existing || callerSupplyContext;
     const executionSupply = supplyIdentity(order.quote, provenanceContext);
     const executionTotalSupply = checkedArithmetic(executionSupply.totalSupply, 'nonnegative');
     const marketCapDivisor = checkedArithmetic(
@@ -517,12 +532,12 @@
     );
     const valuationContext = existing || (valuationMode === 'MARKET_CAP'
       ? {
-        ...order.token, ...executionSupply, valuationMode, marketCapDivisor,
+        ...callerSupplyContext, ...executionSupply, valuationMode, marketCapDivisor,
         ...(executionSupply.supplySource === 'LEGACY_PUMP_RULE'
           ? { marketCapProvenance: MARKET_CAP_PROVENANCE }
           : {})
       }
-      : order.token);
+      : callerSupplyContext);
     const priceProvenance = priceProvenanceForQuote(order.quote, existing || valuationContext, trustedMarketCap);
     const observedPriceUsd = checkedArithmetic(
       effectiveQuotePrice(order.quote, valuationContext, trustContext), 'positive'
@@ -623,6 +638,7 @@
         : existingEntryProvenance || priceProvenance,
       ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {})
     };
+    if (!legacyExecutionSupply) delete nextState.positions[key].marketCapProvenance;
     nextState.trades = [trade, ...(workingState.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
     return { state: nextState, trade, position: nextState.positions[key] };
   }
@@ -677,16 +693,21 @@
     const netBeforeFloor = checkedArithmetic(grossProceedsNative - platformFeeNative - networkFeeNative);
     const netProceedsNative = checkedArithmetic(Math.max(0, netBeforeFloor), 'nonnegative');
     const existingCostBasisNative = checkedArithmetic(existing.costBasisNative, 'nonnegative');
+    const remainingQuantity = checkedArithmetic(Math.max(0, existingQuantity - quantity), 'nonnegative');
+    const partialPositionWithCost = existingCostBasisNative > 0 && remainingQuantity > 0;
     const costShareNative = checkedArithmetic(
       existingCostBasisNative * quantity / existingQuantity,
       existingCostBasisNative > 0 ? 'positive' : 'nonnegative'
     );
+    if (partialPositionWithCost && costShareNative >= existingCostBasisNative) {
+      throw new Error('invalidArithmetic');
+    }
+    const remainingCost = checkedArithmetic(
+      Math.max(0, existingCostBasisNative - costShareNative),
+      partialPositionWithCost ? 'positive' : 'nonnegative'
+    );
     const realizedPnlNative = checkedArithmetic(netProceedsNative - costShareNative);
     const realizedPnlUsd = checkedArithmetic(realizedPnlNative * nativePriceUsd);
-    const remainingQuantity = checkedArithmetic(Math.max(0, existingQuantity - quantity), 'nonnegative');
-    const remainingCost = checkedArithmetic(
-      Math.max(0, existingCostBasisNative - costShareNative), 'nonnegative'
-    );
     const quoteMarketCapUsd = checkedArithmetic(order.quote.marketCapUsd ?? 0, 'nonnegative');
     const quoteLiquidityUsd = checkedArithmetic(order.quote.liquidityUsd ?? 0, 'nonnegative');
     const entryMarketCapUsd = checkedArithmetic(existing.averageEntryMarketCap ?? 0, 'nonnegative');
@@ -720,6 +741,9 @@
     const roundedRemainingCost = checkedRound(
       remainingCost, remainingCost > 0 ? 'positive' : 'nonnegative'
     );
+    if (existingCostBasisNative > 0 && roundedRemainingQuantity > 0 && roundedRemainingCost <= 0) {
+      throw new Error('invalidArithmetic');
+    }
     const roundedNextPositionRealizedPnlNative = checkedRound(nextPositionRealizedPnlNative);
     const roundedNextDayNative = checkedRound(nextDayNative);
     const roundedNextDayUsdAtExecution = checkedRound(nextDayUsdAtExecution);
@@ -745,9 +769,7 @@
       launchMode: executionSupply.launchMode,
       quoteObservedAtOriginal: Number(order.quote.originalObservedAt || order.quote.observedAt),
       nativePriceObservedAtOriginal: Number(order.quote.nativeOriginalObservedAt || order.quote.nativePriceObservedAt),
-      ...(existing.marketCapProvenance || legacyExecutionSupply
-        ? { marketCapProvenance: existing.marketCapProvenance || MARKET_CAP_PROVENANCE }
-        : {})
+      ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {})
     };
 
     const nextState = structuredCloneSafe(workingState);
@@ -773,6 +795,7 @@
         provisionalNativePrice: existing.provisionalNativePrice === true || order.quote.syntheticNativePrice === true,
         ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {})
       };
+      if (!legacyExecutionSupply) delete nextState.positions[key].marketCapProvenance;
     }
     nextState.trades = [trade, ...(workingState.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
     nextState.dailyRealizedByChain[chain][dayKey] = {
@@ -902,6 +925,9 @@
         ? { marketCapProvenance: MARKET_CAP_PROVENANCE }
         : {})
     };
+    if (executionSupply.supplySource !== 'LEGACY_PUMP_RULE') {
+      delete nextState.positions[key].marketCapProvenance;
+    }
     return nextState;
   }
 
