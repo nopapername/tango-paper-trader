@@ -1,6 +1,7 @@
 if (typeof importScripts === 'function') {
   importScripts(
     'core/chains.js',
+    'core/supply.js',
     'shared/constants.js',
     'core/state.js',
     'core/engine.js',

@@ -4,6 +4,7 @@ const vm = require('node:vm');
 
 const REQUIRED_ISOLATED_ORDER = [
   'src/core/chains.js',
+  'src/core/supply.js',
   'src/shared/constants.js',
   'src/core/state.js',
   'src/shared/i18n.js',
@@ -19,14 +20,16 @@ const REQUIRED_ISOLATED_ORDER = [
 ];
 const REQUIRED_MAIN_ORDER = [
   'src/core/chains.js',
+  'src/core/supply.js',
   'src/adapters/gmgn-quotes.js',
   'src/content/page-main.js'
 ];
-const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 8);
+const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 9);
 const REQUIRED_POPUP_ORDER = [...REQUIRED_PAGE_ORDER, 'src/content/chain-view.js', 'src/popup/model.js', 'src/popup/popup.js'];
 const REQUIRED_DASHBOARD_ORDER = [...REQUIRED_PAGE_ORDER, 'src/content/chain-view.js', 'src/dashboard/model.js', 'src/dashboard/dashboard.js'];
 const REQUIRED_WORKER_IMPORT_ORDER = [
   'core/chains.js',
+  'core/supply.js',
   'shared/constants.js',
   'core/state.js',
   'core/engine.js',

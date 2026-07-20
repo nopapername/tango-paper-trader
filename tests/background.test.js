@@ -114,6 +114,7 @@ test('packaged MV3 worker executes its real worker-relative import sequence befo
   assert.doesNotThrow(() => { loaded = loadPackagedWorker(); });
   assert.deepEqual(loaded.imported.map(({ specifier }) => specifier), [
     'core/chains.js',
+    'core/supply.js',
     'shared/constants.js',
     'core/state.js',
     'core/engine.js',
@@ -121,6 +122,7 @@ test('packaged MV3 worker executes its real worker-relative import sequence befo
   ]);
   assert.deepEqual(loaded.imported.map(({ relative }) => relative), [
     'src/core/chains.js',
+    'src/core/supply.js',
     'src/shared/constants.js',
     'src/core/state.js',
     'src/core/engine.js',
