@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 global.Tango = {};
 require('../src/core/chains.js');
+require('../src/core/supply.js');
 const GMGN = require('../src/adapters/gmgn.js');
 
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
@@ -85,7 +86,10 @@ function quickBuyHarness({ chain = 'sol', address = PUMP_ADDRESS, marketCap = '$
   };
 }
 
-function detailDocument({ chain, address, priceUsd, marketCapUsd, liquidityUsd, linked = true }) {
+function detailDocument({
+  chain, address, priceUsd, marketCapUsd, liquidityUsd,
+  totalSupply = '0', launchpad = '', linked = true
+}) {
   const infoItem = (title, value) => ({
     querySelector(selector) {
       if (selector === '.info-item-title') return title == null ? null : { textContent: title };
@@ -95,10 +99,16 @@ function detailDocument({ chain, address, priceUsd, marketCapUsd, liquidityUsd, 
   });
   const priceView = {
     querySelectorAll: () => [
-      infoItem('Price', priceUsd), infoItem(null, marketCapUsd), infoItem('Liquidity', liquidityUsd)
+      infoItem('Price', priceUsd), infoItem(null, marketCapUsd),
+      infoItem('Liquidity', liquidityUsd), infoItem('Total Supply', totalSupply)
     ]
   };
   const link = { href: `https://gmgn.ai/${chain}/token/${address}`, getAttribute: () => null };
+  const launchpadLink = {
+    href: launchpad ? `https://${launchpad.toLowerCase()}.fun/token/${address}` : '',
+    getAttribute: () => null
+  };
+  const scopedLinks = linked ? [link, ...(launchpad ? [launchpadLink] : [])] : [];
   const symbolNode = { textContent: 'TEST', getAttribute: () => 'TEST', parentElement: null };
   const header = {
     textContent: `Test Token TEST ${address}`,
@@ -107,7 +117,7 @@ function detailDocument({ chain, address, priceUsd, marketCapUsd, liquidityUsd, 
       if (selector === '[data-testid="token-detail-symbol"]') return symbolNode;
       return null;
     },
-    querySelectorAll(selector) { return linked && selector.includes('a[href') ? [link] : []; }
+    querySelectorAll(selector) { return selector.includes('a[href') ? scopedLinks : []; }
   };
   const bar = {
     tagName: 'DIV', textContent: header.textContent, parentElement: {},
@@ -117,7 +127,7 @@ function detailDocument({ chain, address, priceUsd, marketCapUsd, liquidityUsd, 
     },
     querySelectorAll(selector) {
       if (selector === '[data-sentry-component="TokenHeader"]') return [header];
-      if (linked && selector.includes('a[href')) return [link];
+      if (selector.includes('a[href')) return scopedLinks;
       return [];
     }
   };
@@ -506,7 +516,7 @@ test('trench column amount takes priority over the replaced native button amount
   assert.equal(GMGN._selectQuickBuyAmount('', '', '2', 0.1), 2);
 });
 
-test('quick-buy rejects an undated cached market cap after the live card value disappears', async () => {
+test('quick-buy does not reuse a cached market cap after the live card value disappears', async () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame, timeout: global.setTimeout };
   const harness = quickBuyHarness();
   const orders = [];
@@ -518,7 +528,9 @@ test('quick-buy rejects an undated cached market cap after the live card value d
     assert.equal(GMGN.discoverTokenCards((order) => orders.push(order)), 1);
     harness.card.innerText = `${PUMP_ADDRESS}\nTEST Test Token`;
     await harness.slot.__tangoQuickBuyHandler();
-    assert.equal(orders.length, 0);
+    assert.equal(orders.length, 1);
+    assert.equal(orders[0].quote.marketCapUsd, 0);
+    assert.equal(orders[0].quote.observedAt, 0);
   } finally {
     global.document = original.document;
     global.location = original.location;
@@ -538,7 +550,7 @@ test('quick-buy keeps synthetic market-cap valuation Solana-only while every EVM
     assert.equal(GMGN.discoverTokenCards((order) => pumpOrders.push(order)), 1);
     await pump.slot.__tangoQuickBuyHandler();
     assert.equal(pumpOrders.length, 1);
-    assert.equal(pumpOrders[0].quote.priceUsd, 0);
+    assert.equal(pumpOrders[0].quote.priceUsd, 0.00001);
     assert.equal(pumpOrders[0].quote.priceProvenance, 'MARKET_CAP_DERIVED');
     assert.equal(pumpOrders[0].quote.marketCapDivisor, 1_000_000_000);
     assert.ok(pumpOrders[0].quote.observedAt > 0);
@@ -554,7 +566,8 @@ test('quick-buy keeps synthetic market-cap valuation Solana-only while every EVM
       assert.equal(evmOrders.length, 1, chain);
       assert.equal(evmOrders[0].quote.source, 'GMGN_TRENCH');
       assert.equal(evmOrders[0].quote.priceUsd, 0);
-      assert.equal(evmOrders[0].quote.observedAt, 0);
+      assert.equal(evmOrders[0].quote.marketCapUsd, 10_000);
+      assert.ok(evmOrders[0].quote.observedAt > 0);
     }
   } finally {
     global.document = original.document;
@@ -691,5 +704,44 @@ test('detail quote fields are read only from the verified BaseInfoBar scope', as
   } finally {
     global.document = original.document;
     global.location = original.location;
+  }
+});
+
+test('detail quote reads price, market cap, and exact total supply from one verified scope', async () => {
+  const original = { document: global.document, location: global.location };
+  const detail = detailDocument({
+    chain: 'base', address: EVM_ADDRESS_2, priceUsd: 0.000002,
+    marketCapUsd: 2000, liquidityUsd: 500, totalSupply: '1B', launchpad: 'Zora'
+  });
+  global.document = detail.document;
+  global.location = { href: `https://gmgn.ai/base/token/${EVM_ADDRESS_2}`, origin: 'https://gmgn.ai' };
+  try {
+    const current = await GMGN.readCurrentToken();
+    assert.equal(current.quote.totalSupply, 1_000_000_000);
+    assert.equal(current.quote.supplySource, 'GMGN_EXACT');
+    assert.equal(current.token.launchpad, 'Zora');
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+  }
+});
+
+test('trench quick buy snapshots once and dispatches without polling timers', async () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame, timeout: global.setTimeout };
+  const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS, marketCap: '$2K' });
+  const orders = [];
+  let timerCalls = 0;
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  global.setTimeout = () => { timerCalls += 1; return 1; };
+  try {
+    GMGN.discoverTokenCards((order) => orders.push(order));
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(timerCalls, 0);
+    assert.equal(orders.length, 1);
+    assert.equal(orders[0].quote.marketCapUsd, 2_000);
+  } finally {
+    Object.assign(global, original);
   }
 });

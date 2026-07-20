@@ -203,7 +203,13 @@
 
   function elementChainBinding(element, chainId) {
     if (!chainId) return 'MATCH';
-    const links = Array.from(element?.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || []);
+    const links = Array.from(element?.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || [])
+      .filter((link) => {
+        try {
+          const parsed = new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai');
+          return parsed.hostname === 'gmgn.ai' || parsed.hostname === 'pump.fun';
+        } catch { return true; }
+      });
     if (!links.length) return 'UNKNOWN';
     const matches = links.every((link) => {
       let parsed;
@@ -345,6 +351,17 @@
     return images.length === 1 ? images[0].src || '' : '';
   }
 
+  function detailLaunchpad(scope) {
+    const hrefs = Array.from(scope?.querySelectorAll?.('a[href]') || []).map((link) => link.href || '');
+    const match = hrefs.find((href) => /pump\.fun|four\.meme|flap|zora|bankr|clanker|bow\.fun|dyor|stroid|trench\.today/i.test(href));
+    if (!match) return '';
+    const launchpad = match.match(/pump\.fun|four\.meme|flap|zora|bankr|clanker|bow\.fun|dyor|stroid|trench\.today/i)?.[0] || '';
+    return {
+      'pump.fun': 'Pump.fun', 'four.meme': 'Four.meme', flap: 'Flap', zora: 'Zora', bankr: 'Bankr',
+      clanker: 'Clanker', 'bow.fun': 'Bow.fun', dyor: 'DYOR', stroid: 'Stroid', 'trench.today': 'Trench.today'
+    }[launchpad.toLowerCase()] || launchpad;
+  }
+
   function detailQuote(detail, chain, address) {
     const quoteScope = detail?.quoteScope || detail?.bindingScope || detail?.scope;
     if (!quoteScope) return null;
@@ -358,9 +375,24 @@
       || (chain === 'sol' && /pump$/i.test(address) ? priceUsd * 1_000_000_000 : 0);
     const liquidityUsd = parseMoney(labeledLiquidity?.querySelector('.info-item-value')?.textContent)
       || scanLabeledValue(['liq', 'liquidity', '流动性', '池子', 'pool'], quoteScope);
+    const declaredSupply = parseMoney(baseItems.find((item) => /^(total supply|\u603b\u4f9b\u5e94\u91cf)$/i
+      .test(item.querySelector('.info-item-title')?.textContent?.trim() || ''))?.querySelector('.info-item-value')?.textContent)
+      || scanLabeledValue(['total supply', '\u603b\u4f9b\u5e94\u91cf'], quoteScope);
+    const launchpad = detailLaunchpad(quoteScope);
+    const launchMode = '';
+    const supply = Tango.Supply?.resolve?.({
+      chain, launchpad, launchMode, marketCapUsd, priceUsd, totalSupply: declaredSupply,
+      supplySource: declaredSupply > 0 ? 'GMGN_EXACT' : ''
+    }) || null;
+    const marketCapDerived = !(priceUsd > 0) && Boolean(supply) && marketCapUsd > 0;
+    const resolvedPriceUsd = marketCapDerived ? marketCapUsd / supply.totalSupply : priceUsd;
     return {
-      priceUsd, marketCapUsd, liquidityUsd, nativePriceUsd: 0, source: 'GMGN',
-      observedAt: priceUsd > 0 || marketCapUsd > 0 ? Date.now() : 0
+      priceUsd: resolvedPriceUsd, marketCapUsd, liquidityUsd, nativePriceUsd: 0,
+      totalSupply: Number(supply?.totalSupply || 0), supplySource: supply?.source || '', launchpad, launchMode,
+      valuationMode: marketCapDerived ? 'MARKET_CAP' : 'PRICE',
+      priceProvenance: marketCapDerived ? 'MARKET_CAP_DERIVED' : (resolvedPriceUsd > 0 ? 'OBSERVED_PRICE' : ''),
+      ...(marketCapDerived ? { marketCapDivisor: supply.totalSupply } : {}),
+      source: 'GMGN', observedAt: resolvedPriceUsd > 0 || marketCapUsd > 0 ? Date.now() : 0
     };
   }
 
@@ -389,6 +421,7 @@
     const result = {
       token: {
         chain, address, symbol: identity.symbol, name: identity.name, logoUrl: tokenLogo(detail.header),
+        launchpad: quote.launchpad, launchMode: quote.launchMode,
         metadataVerified: true, metadataSource: 'GMGN_DETAIL'
       },
       quote
@@ -566,13 +599,21 @@
     return candidates[0]?.href || '';
   }
 
-  async function latestCardMarketCap(card) {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const value = cardMarketCap(card?.innerText || card?.textContent || '');
-      if (value > 0) return { marketCapUsd: value, observedAt: Date.now() };
-      await new Promise((resolve) => setTimeout(resolve, 75));
-    }
-    return null;
+  function cardMarketSnapshot(card, chain, address, token = {}) {
+    const marketCapUsd = cardMarketCap(card?.innerText || card?.textContent || '');
+    const supply = Tango.Supply?.resolve?.({
+      chain, launchpad: token.launchpad, launchMode: token.launchMode, marketCapUsd, priceUsd: 0
+    }) || null;
+    const marketCapDerived = Boolean(supply) && marketCapUsd > 0;
+    return {
+      priceUsd: marketCapDerived ? marketCapUsd / supply.totalSupply : 0,
+      marketCapUsd, liquidityUsd: 0, nativePriceUsd: 0,
+      totalSupply: Number(supply?.totalSupply || 0), supplySource: supply?.source || '',
+      valuationMode: marketCapDerived ? 'MARKET_CAP' : 'PRICE',
+      priceProvenance: marketCapDerived ? 'MARKET_CAP_DERIVED' : '',
+      ...(marketCapDerived ? { marketCapDivisor: supply.totalSupply } : {}),
+      source: 'GMGN_TRENCH', observedAt: marketCapUsd > 0 ? Date.now() : 0
+    };
   }
 
   function updateQuickBuySizeClass(slot) {
@@ -730,34 +771,20 @@
           const activeHref = cardTokenHref(card, chain);
           const activeAddress = activeHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(activeHref)) : null;
           if (activeAddress !== address || !verifiedCardMetadata(card, address, chain)) return;
-          const trustedPumpCard = /pump$/i.test(address);
-          const executableQuote = trustedPumpCard ? await latestCardMarketCap(card) : null;
-          if (trustedPumpCard && !executableQuote) return;
           const latestHref = cardTokenHref(card, chain);
           const latestAddress = latestHref ? Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(latestHref)) : null;
           if (latestAddress !== address) return;
           const metadata = verifiedCardMetadata(card, address, chain);
           if (!metadata) return;
-          const symbol = metadata.symbol;
           if (chainFromUrl() !== chain) return;
+          const token = {
+            chain, address, symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
+            launchpad: metadata.launchpad || (chain === 'sol' && /pump$/i.test(address) ? 'Pump.fun' : ''),
+            launchMode: metadata.launchMode || '', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+          };
+          const quote = cardMarketSnapshot(card, chain, address, token);
           await onQuickBuy({
-            token: {
-              chain, address, symbol, name: metadata.name, logoUrl: metadata.logoUrl,
-              metadataVerified: true, metadataSource: 'GMGN_TRENCH'
-            },
-            quote: trustedPumpCard
-              ? {
-                priceUsd: 0, marketCapUsd: executableQuote.marketCapUsd, liquidityUsd: 0, nativePriceUsd: 0,
-                source: 'GMGN_TRENCH_MC',
-                valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
-                priceProvenance: 'MARKET_CAP_DERIVED',
-                observedAt: executableQuote.observedAt
-              }
-              : {
-                priceUsd: 0, marketCapUsd: 0, liquidityUsd: 0, nativePriceUsd: 0,
-                source: 'GMGN_TRENCH', observedAt: 0
-              },
-            amountSol,
+            token, quote, amountNative: amountSol, amountSol,
             sourceUrl: href
           });
         } finally {
