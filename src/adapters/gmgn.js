@@ -1,6 +1,7 @@
 (function initGmgnAdapter(global) {
   const Tango = global.Tango = global.Tango || {};
   const quickBuyActions = new Map();
+  const trackedQuickBuySlots = new Set();
   const trenchColumns = new WeakMap();
   let lastVerifiedDetail = null;
   const quickBuyResizeObserver = typeof global.ResizeObserver === 'function'
@@ -710,7 +711,14 @@
     return [...slots].slice(0, 80);
   }
 
+  function cleanupDisconnectedQuickBuySlots() {
+    for (const slot of [...trackedQuickBuySlots]) {
+      if (!slot?.isConnected || !slot.__tangoQuickBuyCard?.isConnected) restoreQuickBuySlot(slot);
+    }
+  }
+
   function discoverTokenCards(onQuickBuy, defaultAmountSol = 0.1, paperLabel = 'PAPER', roots) {
+    cleanupDisconnectedQuickBuySlots();
     const incremental = Array.isArray(roots) && roots.length > 0;
     if (!isTrenchPage()) {
       if (!incremental) clearQuickBuy();
@@ -779,6 +787,7 @@
       amount.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m13.688 8.12-6.471 7.705c-.206.245-.604.061-.55-.255l1.007-5.843-4.617-.061c-.88-.012-1.352-1.038-.79-1.714L8.723.191c.205-.247.605-.063.55.253L8.247 6.399l4.641.003c.888.001 1.371 1.038.8 1.718Z"/></svg><span>' + amountSol + ' ' + chainDefinition.nativeSymbol + '</span>';
       replacement.append(hint, amount);
       const handleClick = async () => {
+        if (!slot.isConnected || !card.isConnected || !replacement.isConnected) return;
         const now = Date.now();
         if (replacement.disabled || now - Number(replacement.dataset.tangoLastClickAt || 0) < 900) return;
         replacement.dataset.tangoLastClickAt = String(now);
@@ -816,8 +825,10 @@
       slot.dataset.tangoActionId = actionId;
       slot.__tangoOriginalQuickBuy = nativeControl;
       slot.__tangoReplacementQuickBuy = replacement;
+      slot.__tangoQuickBuyCard = card;
       slot.__tangoQuickBuyHandler = handleClick;
       quickBuyActions.set(actionId, handleClick);
+      trackedQuickBuySlots.add(slot);
       nativeControl.replaceWith(replacement);
       if (quickBuyResizeObserver) quickBuyResizeObserver.observe(slot);
       else requestAnimationFrame(() => updateQuickBuySizeClass(slot));
@@ -827,6 +838,7 @@
   }
 
   function clearQuickBuy() {
+    [...trackedQuickBuySlots].forEach((slot) => restoreQuickBuySlot(slot));
     document.querySelectorAll('.tango-native-buy-overridden').forEach((slot) => {
       restoreQuickBuySlot(slot);
     });
@@ -836,6 +848,7 @@
   function restoreQuickBuySlot(slot) {
     const replacement = slot.__tangoReplacementQuickBuy;
     const original = slot.__tangoOriginalQuickBuy;
+    trackedQuickBuySlots.delete(slot);
     quickBuyActions.delete(String(slot.dataset.tangoActionId || ''));
     quickBuyResizeObserver?.unobserve(slot);
     if (replacement?.isConnected && original?.isConnected) replacement.remove();
@@ -844,6 +857,7 @@
     else if (original && !original.isConnected && slot.isConnected && !slot.querySelector('[data-testid="quickbuy"]')) slot.appendChild(original);
     delete slot.__tangoOriginalQuickBuy;
     delete slot.__tangoReplacementQuickBuy;
+    delete slot.__tangoQuickBuyCard;
     delete slot.__tangoQuickBuyHandler;
     slot.classList.remove('tango-native-buy-overridden', 'tango-quick-expanded', 'tango-quick-narrow');
     delete slot.dataset.tangoQuickBuy;

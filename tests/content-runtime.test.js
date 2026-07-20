@@ -12,11 +12,12 @@ delete global.Tango.Supply;
 require('../src/shared/constants.js');
 const RealState = require('../src/core/state.js');
 const RealEngine = require('../src/core/engine.js');
+const StateCoordinator = require('../src/core/state-coordinator.js');
 const GMGNQuotes = require('../src/adapters/gmgn-quotes.js');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const START = "  start().catch((error) => console.error('[Tango Paper Trader]', error));";
 const EXPOSE = `  global.__contentTest = {
-    runtime, performQuoteTick, handleRouteChange, handleQuickBuy, buy, sell, sellPosition, sellBreakeven,
+    runtime, start, performQuoteTick, handleRouteChange, handleQuickBuy, buy, sell, sellPosition, sellBreakeven,
     ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
     resolvePaperTradeQuote, paperExecutableQuote,
     requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
@@ -146,7 +147,8 @@ function mergeSettingsPatch(settings, patch) {
 
 function loadContent({
   href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurrentToken, sendMessage, patchSettings,
-  requestAnimationFrame = () => 0
+  requestAnimationFrame = () => 0, timer = setTimeout,
+  MutationObserver = class { observe() {} }
 } = {}) {
   assert.notEqual(instrumentedSource, contentSource, 'content test harness must replace startup with runtime exports');
   const messages = [];
@@ -224,14 +226,14 @@ function loadContent({
     innerWidth: 1200,
     innerHeight: 800,
     requestAnimationFrame,
-    setTimeout,
+    setTimeout: timer,
     clearTimeout,
     setInterval: () => 0,
     clearInterval() {},
     postMessage(message) { pageMessages.push(message); },
     addEventListener(type, listener) { windowListeners.set(type, listener); },
     removeEventListener(type, listener) { if (windowListeners.get(type) === listener) windowListeners.delete(type); },
-    MutationObserver: class { observe() {} },
+    MutationObserver,
     chrome: {
       runtime: {
         getURL: (value) => `chrome-extension://test/${value}`,
@@ -629,17 +631,88 @@ test('quick buy with no market data commits immediately with a provisional 1 USD
 });
 
 test('local quick-buy feedback completes under 100 ms without timer advancement', async () => {
-  const loaded = loadContent({ sendMessage: () => new Promise(() => {}) });
-  loaded.api.runtime.settings.fastMode = true;
-  loaded.api.runtime.settings.confirmationEnabled = false;
+  const timerCallbacks = [];
+  let timerAdvancements = 0;
+  const loaded = loadContent({
+    sendMessage: () => new Promise(() => {}),
+    timer: (callback) => {
+      timerCallbacks.push(() => { timerAdvancements += 1; return callback(); });
+      return timerCallbacks.length;
+    }
+  });
+  const state = RealState.createInitialState({ now: loaded.clock.now });
+  state.initialized = true;
+  const settings = RealState.normalizeSettings({
+    ...defaultSettings(), fastMode: true, confirmationEnabled: false,
+    chains: Object.fromEntries(Chains.all().map(({ id }) => [id, { buyPresets: [1], networkFeeNative: 0 }]))
+  });
+  const values = {
+    [global.Tango.STORAGE_KEY]: structuredClone(state),
+    [global.Tango.SETTINGS_KEY]: structuredClone(settings)
+  };
+  const writes = [];
+  const coordinator = StateCoordinator.create({
+    async readRaw(keys) {
+      await Promise.resolve();
+      return Object.fromEntries(keys.filter((key) => key in values)
+        .map((key) => [key, structuredClone(values[key])]));
+    },
+    async writeRaw(next) {
+      await Promise.resolve();
+      writes.push(structuredClone(next));
+      Object.assign(values, structuredClone(next));
+    },
+    now: () => loaded.clock.now
+  });
+  loaded.context.Tango.Engine = RealEngine;
+  loaded.context.Tango.Store.executeBuy = (order) => coordinator.mutate({ type: 'EXECUTE_BUY', order });
+  loaded.api.runtime.state = state;
+  loaded.api.runtime.settings = settings;
   const started = performance.now();
   await loaded.api.handleQuickBuy({
     token: { chain: 'eth', address: ADDRESS_A, symbol: 'FAST', metadataVerified: true, metadataSource: 'GMGN_TRENCH' },
     quote: {}, amountNative: 1
   });
   const elapsed = performance.now() - started;
-  assert.equal(loaded.calls.buy, 1);
+  const committed = (await coordinator.getAll()).state;
+  const position = committed.positions[RealEngine.positionKey('eth', ADDRESS_A)];
+  assert.ok(position);
+  assert.equal(committed.accounts.eth.cashBalanceNative, 9);
+  assert.equal(committed.trades.length, 1);
+  assert.equal(committed.stateRevision, 1);
+  assert.equal(writes.length, 1);
+  assert.equal(loaded.api.runtime.toast?.type, 'success');
+  assert.ok(timerCallbacks.length > 0, 'fixture must observe scheduled background/toast timers');
+  assert.equal(timerAdvancements, 0);
   assert.ok(elapsed < 100, `expected <100ms, got ${elapsed}ms`);
+});
+
+test('mutation observer batches targets and added nodes into one incremental discovery', async () => {
+  let observerCallback;
+  const timers = [];
+  class CapturingMutationObserver {
+    constructor(callback) { observerCallback = callback; }
+    observe() {}
+  }
+  const loaded = loadContent({
+    MutationObserver: CapturingMutationObserver,
+    timer(callback) { timers.push(callback); return timers.length; }
+  });
+  const discoveries = [];
+  loaded.context.Tango.GMGN.discoverTokenCards = (...args) => { discoveries.push(args[3]); return 0; };
+  await loaded.api.start();
+  discoveries.length = 0;
+  const targetA = { nodeType: 1 };
+  const addedA = { nodeType: 1 };
+  const targetB = { nodeType: 1 };
+  observerCallback([{ target: targetA, addedNodes: [addedA] }]);
+  observerCallback([{ target: targetB, addedNodes: [] }]);
+  assert.equal(timers.length, 1);
+  assert.equal(discoveries.length, 0);
+  timers[0]();
+  assert.equal(discoveries.length, 1);
+  assert.deepEqual(Array.from(discoveries[0]), [targetA, addedA, targetB]);
+  assert.equal(loaded.api.runtime.pendingMutationRoots.size, 0);
 });
 
 test('market-cap-only quick buy derives price locally and never requests before commit', async () => {

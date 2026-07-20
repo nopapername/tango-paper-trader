@@ -106,12 +106,16 @@ test('paper execution paths contain no quote wait, pending intent, or network aw
   const execution = between('async function buy(', 'function showToast(');
   const quickBuy = between('async function handleQuickBuy(', 'async function buy(');
   const buy = between('async function buy(', 'function previewBuy(');
+  const commitBuy = between('async function commitBuy(', 'async function sell(');
   const sell = between('async function sell(', 'async function sellPosition(');
   const sellPosition = between('async function sellPosition(', 'async function commitSell(');
   const closeAll = between('async function commitCloseAll(', 'async function sellBreakeven()');
   const breakeven = between('async function sellBreakeven(', 'function showToast(');
   assert.doesNotMatch(resolver, /await|setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote/);
-  assert.doesNotMatch(quickBuy, /setTimeout|waitForGmgnQuote|latestCardMarketCap/);
+  const blockingQuoteWork = /setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote|latestCardMarketCap/;
+  assert.doesNotMatch(quickBuy, blockingQuoteWork);
+  assert.doesNotMatch(buy, blockingQuoteWork);
+  assert.doesNotMatch(commitBuy, blockingQuoteWork);
   assert.doesNotMatch(execution, /queuePendingPaperIntent|pendingTradeIntents|quoteQueued/);
   for (const [name, entryPoint] of Object.entries({ buy, sell, sellPosition, closeAll, breakeven })) {
     assert.match(entryPoint, /resolvePaperTradeQuote\(/, name);
