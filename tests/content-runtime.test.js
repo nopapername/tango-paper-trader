@@ -9,18 +9,22 @@ const Chains = require('../src/core/chains.js');
 require('../src/shared/constants.js');
 require('../src/core/state.js');
 const RealEngine = require('../src/core/engine.js');
+const GMGNQuotes = require('../src/adapters/gmgn-quotes.js');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const START = "  start().catch((error) => console.error('[Tango Paper Trader]', error));";
 const EXPOSE = `  global.__contentTest = {
-    runtime, performQuoteTick, handleRouteChange, handleQuickBuy, buy,
+    runtime, performQuoteTick, handleRouteChange, handleQuickBuy, buy, sell, sellPosition, sellBreakeven,
     ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
     requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
-    commitCloseAll, savePresetEdits, bindEvents, bindDraggable, render, renderHeaderAccountSummary
+    commitCloseAll, savePresetEdits, bindEvents, bindDraggable, render, renderHeaderAccountSummary,
+    detailRouteToken, acceptedTokenObservation, renderPnlCalendar,
+    dispatchPageMessage: (data) => handlePageMessage({ source: window, data })
   };`;
 const instrumentedSource = contentSource.replace(START, EXPOSE);
 
 const ADDRESS_A = '0x1111111111111111111111111111111111111111';
 const ADDRESS_B = '0x2222222222222222222222222222222222222222';
+const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
 function deferred() {
   let resolve;
@@ -49,7 +53,7 @@ function defaultSettings() {
     enabled: true, showListQuickBuy: true, language: 'en', displayCurrency: 'NATIVE', fastMode: false,
     confirmationEnabled: true, platformFeeBps: 0, slippageBps: 0, soundEnabled: false,
     barCollapsed: false, panelCollapsed: false, panelPosition: null,
-    chains: { eth: { ...chain }, base: { ...chain }, sol: { ...chain } }, sellPresets: [100]
+    chains: Object.fromEntries(Chains.all().map(({ id }) => [id, { ...chain }])), sellPresets: [100]
   };
 }
 
@@ -61,10 +65,17 @@ function mergeSettingsPatch(settings, patch) {
   return { ...settings, ...patch, chains };
 }
 
-function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurrentToken, sendMessage, patchSettings } = {}) {
+function loadContent({
+  href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurrentToken, sendMessage, patchSettings,
+  requestAnimationFrame = () => 0
+} = {}) {
   assert.notEqual(instrumentedSource, contentSource, 'content test harness must replace startup with runtime exports');
   const messages = [];
-  const calls = { buy: 0, buyOrders: [], patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: [] };
+  const pageMessages = [];
+  const calls = {
+    buy: 0, buyOrders: [], sell: 0, sellOrders: [], metadataBatches: [],
+    patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: []
+  };
   const clock = { now: 1_000_000 };
   class FakeDate extends Date {
     constructor(...args) { super(args.length ? args[0] : clock.now); }
@@ -133,12 +144,12 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
     location: { href, origin: 'https://gmgn.ai' },
     innerWidth: 1200,
     innerHeight: 800,
-    requestAnimationFrame: () => 0,
+    requestAnimationFrame,
     setTimeout,
     clearTimeout,
     setInterval: () => 0,
     clearInterval() {},
-    postMessage() {},
+    postMessage(message) { pageMessages.push(message); },
     addEventListener(type, listener) { windowListeners.set(type, listener); },
     removeEventListener(type, listener) { if (windowListeners.get(type) === listener) windowListeners.delete(type); },
     MutationObserver: class { observe() {} },
@@ -156,6 +167,7 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
   context.Tango = {
     QUOTE_STALE_MS: 15_000,
     Chains,
+    GMGNQuotes,
     I18n: {
       resolveLanguage: () => 'en',
       t: (key, _language, vars) => key === 'closeAllFailedCount'
@@ -188,7 +200,10 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
       async executeCloseAll(chain, orders) { return context.Tango.Engine.executeCloseAll(defaultState(), chain, orders); },
       async updatePositionQuote() { return defaultState(); },
       async updatePositionMetadata() { return defaultState(); },
-      async updatePositionMetadataBatch() { return defaultState(); },
+      async updatePositionMetadataBatch(tokens) {
+        calls.metadataBatches.push(tokens);
+        return context.__contentTest.runtime.state;
+      },
       subscribe() {}
     },
     Engine: {
@@ -197,7 +212,8 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
       updatePositionMetadata: (state) => state,
       updatePositionQuote: (state) => state,
       executeBuy(state, order) { calls.buy += 1; calls.buyOrders.push(order); return { state, trade: {} }; },
-      executeSell: (state) => ({ state, trade: {} }), executeCloseAll: (state) => ({ state, trades: [], failures: [] }),
+      executeSell(state, order) { calls.sell += 1; calls.sellOrders.push(order); return { state, trade: {} }; },
+      executeCloseAll: (state) => ({ state, trades: [], failures: [] }),
       markPosition: RealEngine.markPosition,
       portfolioSummary: RealEngine.portfolioSummary,
       chainUsdSummary(state, chain, nativePriceUsd) {
@@ -214,7 +230,8 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
         const parsed = new URL(url);
         const parts = parsed.pathname.split('/').filter(Boolean);
         const routeAddress = parts[1] === 'token' ? parts[2]?.toLowerCase() : '';
-        return previous?.token?.chain === parts[0] && previous.token.address.toLowerCase() === routeAddress ? previous : null;
+        return previous?.token && previous.token.chain === parts[0]
+          && previous.token.address.toLowerCase() === routeAddress ? previous : null;
       },
       needsCurrentTokenRead: () => false
     }
@@ -225,7 +242,7 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
   api.runtime.settings = defaultSettings();
   api.runtime.activeChainId = Chains.fromUrl(href)?.id || null;
   return {
-    api, calls, clock, context, createDomNode: genericElement, documentSingles, messages,
+    api, calls, clock, context, createDomNode: genericElement, documentSingles, messages, pageMessages,
     shadowLists, shadowSingles, shell, shellLists, windowListeners
   };
 }
@@ -507,7 +524,7 @@ test('panel trade totals keep Solana address identity case-sensitive', () => {
   assert.match(loaded.api.renderPanel(), /<span>totalBuy<\/span><strong>2 SOL<\/strong>/);
 });
 
-test('close all reports each failed token with its own reason', async () => {
+test('close all queues instead of reporting a market-data failure when some positions have no price history', async () => {
   const loaded = loadContent();
   const staleAddress = ADDRESS_B;
   const rejectedAddress = '0x3333333333333333333333333333333333333333';
@@ -524,24 +541,28 @@ test('close all reports each failed token with its own reason', async () => {
     { token: { chain: 'eth', address: ADDRESS_A, symbol: 'CLOSED' }, quote: {} },
     { token: { chain: 'eth', address: rejectedAddress, symbol: 'REJECTED' }, quote: {} }
   ];
-  loaded.context.Tango.Store.executeCloseAll = async () => ({
+  let executions = 0;
+  loaded.context.Tango.Store.executeCloseAll = async () => {
+    executions += 1;
+    return ({
     state: loaded.api.runtime.state,
     trades: [{}],
     failures: [{
       order: { token: { chain: 'eth', address: rejectedAddress, symbol: 'REJECTED' } },
       reason: 'invalidQuote'
     }]
-  });
+    });
+  };
 
   await loaded.api.commitCloseAll();
 
-  assert.match(loaded.api.runtime.toast.message, /STALE: staleQuote/);
-  assert.match(loaded.api.runtime.toast.message, /REJECTED: invalidQuote/);
-  assert.match(loaded.api.runtime.toast.message, /1\/3/);
-  assert.match(loaded.api.runtime.toast.message, /2 failed tokens/);
+  assert.equal(executions, 0);
+  assert.equal(loaded.api.runtime.toast.message, 'quoteQueued');
+  assert.equal(loaded.api.runtime.toast.type, 'info');
+  assert.equal(loaded.api.runtime.pendingTradeIntents.size, 1);
 });
 
-test('close all reports an explicit failed-token count when every position fails', async () => {
+test('close all queues one route-bound retry when every position lacks a first quote', async () => {
   const loaded = loadContent();
   const positions = [
     { chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'FIRST' },
@@ -558,9 +579,9 @@ test('close all reports an explicit failed-token count when every position fails
 
   await loaded.api.commitCloseAll();
 
-  assert.match(loaded.api.runtime.toast.message, /2 failed tokens/);
-  assert.match(loaded.api.runtime.toast.message, /FIRST: staleQuote/);
-  assert.match(loaded.api.runtime.toast.message, /SECOND: staleQuote/);
+  assert.equal(loaded.api.runtime.toast.message, 'quoteQueued');
+  assert.equal(loaded.api.runtime.toast.type, 'info');
+  assert.equal(loaded.api.runtime.pendingTradeIntents.size, 1);
 });
 
 test('header native balance attaches to connected wallet or stable header-actions fallback', () => {
@@ -583,6 +604,144 @@ test('header native balance attaches to connected wallet or stable header-action
     assert.match(summary.innerHTML, /7 ETH/);
     assert.doesNotMatch(summary.innerHTML, /99/);
   }
+});
+
+test('SPA chain change immediately renders the new chain native balance on a trench page', async () => {
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=eth',
+    requestAnimationFrame: (callback) => { callback(); return 1; }
+  });
+  loaded.api.runtime.state.accounts.eth.cashBalanceNative = 7;
+  loaded.api.runtime.state.accounts.bsc.cashBalanceNative = 99;
+  const anchor = loaded.createDomNode();
+  loaded.documentSingles.set('[data-testid="header-actions"]', anchor);
+  loaded.api.renderHeaderAccountSummary({});
+  assert.match(loaded.documentSingles.get('#tango-header-account-summary').innerHTML, /7 ETH/);
+
+  loaded.context.location.href = 'https://gmgn.ai/?chain=bsc';
+  loaded.api.handleRouteChange();
+
+  const summary = loaded.documentSingles.get('#tango-header-account-summary');
+  assert.ok(summary, 'the route handler must replace the cleared header summary');
+  assert.match(summary.innerHTML, /99 BNB/);
+  assert.doesNotMatch(summary.innerHTML, /7 ETH/);
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('an exact-chain GMGN network quote bootstraps every supported detail panel when DOM metadata is unavailable', () => {
+  for (const { id: chain } of Chains.all()) {
+    const address = chain === 'sol' ? SOL_ADDRESS : ADDRESS_A;
+    const loaded = loadContent({
+      href: `https://gmgn.ai/${chain}/token/${address}`,
+      readCurrentToken: async () => null,
+      requestAnimationFrame: (callback) => { callback(); return 1; }
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(loaded.api.detailRouteToken())), { chain, address });
+    assert.equal(loaded.api.acceptedTokenObservation({
+      priceUsd: 2, observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }, { chain, address }), true);
+    loaded.api.dispatchPageMessage({
+      source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+        chain, address, symbol: 'TEST', name: 'Test Token', logoUrl: '',
+        priceUsd: 2, marketCapUsd: 2_000, liquidityUsd: 500,
+        observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+      }]
+    });
+
+    assert.equal(loaded.api.runtime.gmgnQuotes.size, 1, chain);
+    assert.equal(loaded.api.runtime.current?.token.chain, chain);
+    assert.equal(loaded.api.runtime.current?.token.address, address);
+    assert.equal(loaded.api.runtime.current?.token.metadataSource, 'GMGN_NETWORK');
+    assert.match(loaded.api.renderPanel(), /TEST/);
+  }
+});
+
+test('a GMGN network quote cannot bootstrap a detail context for another chain or a trench route', () => {
+  for (const href of [`https://gmgn.ai/base/token/${ADDRESS_A}`, 'https://gmgn.ai/?chain=bsc']) {
+    const loaded = loadContent({ href, requestAnimationFrame: (callback) => { callback(); return 1; } });
+    loaded.api.dispatchPageMessage({
+      source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+        chain: 'bsc', address: ADDRESS_A, symbol: 'WRONG', name: 'Wrong Chain',
+        priceUsd: 2, marketCapUsd: 2_000, observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+      }]
+    });
+    assert.equal(loaded.api.runtime.current, null);
+    assert.equal(loaded.api.renderPanel(), '');
+  }
+});
+
+test('market-cap-only GMGN detail metadata can show the panel but remains non-executable', () => {
+  const loaded = loadContent({
+    href: `https://gmgn.ai/bsc/token/${ADDRESS_A}`,
+    readCurrentToken: async () => null,
+    requestAnimationFrame: (callback) => { callback(); return 1; }
+  });
+  loaded.api.rememberNativePrice('bsc', 600, loaded.clock.now);
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'bsc', address: ADDRESS_A, symbol: 'TEST', name: 'Test Token',
+      priceUsd: 0, marketCapUsd: 2_000, observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }]
+  });
+
+  assert.equal(loaded.api.runtime.current?.token.chain, 'bsc');
+  assert.match(loaded.api.renderPanel(), /TEST/);
+  assert.throws(() => loaded.api.requireExecutableQuote(
+    loaded.api.runtime.current.token, loaded.api.runtime.current.quote
+  ), /invalidQuote/);
+});
+
+test('SPA detail navigation requests a GMGN quote replay after clearing a pre-route network observation', async () => {
+  const loaded = loadContent({
+    href: `https://gmgn.ai/eth/token/${ADDRESS_A}`,
+    readCurrentToken: async () => null,
+    requestAnimationFrame: (callback) => { callback(); return 1; }
+  });
+  loaded.api.runtime.current = quoteContext(ADDRESS_A);
+  loaded.context.location.href = `https://gmgn.ai/eth/token/${ADDRESS_B}`;
+  const nextQuote = {
+    chain: 'eth', address: ADDRESS_B, symbol: 'NEXT', name: 'Next Token',
+    priceUsd: 3, marketCapUsd: 3_000, observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+  };
+  loaded.api.dispatchPageMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [nextQuote] });
+  assert.equal(loaded.api.runtime.gmgnQuotes.size, 1);
+  assert.equal(loaded.api.runtime.current.token.address, ADDRESS_A);
+  loaded.pageMessages.length = 0;
+
+  loaded.api.handleRouteChange();
+
+  assert.equal(loaded.api.runtime.current, null);
+  assert.equal(loaded.api.runtime.gmgnQuotes.size, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.pageMessages)), [{
+    source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES'
+  }]);
+  loaded.api.dispatchPageMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [nextQuote] });
+  assert.equal(loaded.api.runtime.current?.token.address, ADDRESS_B);
+  assert.match(loaded.api.renderPanel(), /NEXT/);
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('a delayed empty DOM detail read cannot erase a same-route GMGN network fallback', async () => {
+  const domRead = deferred();
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_B}`,
+    readCurrentToken: () => domRead.promise,
+    requestAnimationFrame: (callback) => { callback(); return 1; }
+  });
+  const tick = loaded.api.performQuoteTick();
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'base', address: ADDRESS_B, symbol: 'FALLBACK', name: 'Fallback Token',
+      priceUsd: 4, marketCapUsd: 4_000, observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }]
+  });
+  assert.equal(loaded.api.runtime.current?.token.address, ADDRESS_B);
+
+  domRead.resolve(null);
+  await tick;
+
+  assert.equal(loaded.api.runtime.current?.token.address, ADDRESS_B);
+  assert.match(loaded.api.renderPanel(), /FALLBACK/);
 });
 
 test('content Engine mark fixture derives trusted Pump market-cap prices like production', () => {
@@ -675,6 +834,88 @@ test('execution refreshes a native observation aged one millisecond beyond quote
   assert.equal(loaded.calls.buy, 1);
   assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 3_100);
   assert.equal(loaded.calls.buyOrders[0].quote.nativePriceObservedAt, loaded.clock.now);
+});
+
+test('quick buy uses exact-address last-known token and native prices when refresh is unavailable', async () => {
+  const loaded = loadContent({ sendMessage: async () => ({ ok: false }) });
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  const context = quoteContext();
+  context.amountNative = 1;
+  context.quote.observedAt = loaded.clock.now - 60_000;
+  loaded.api.rememberNativePrice('eth', 3_000, loaded.clock.now - 60_000);
+
+  const action = loaded.api.handleQuickBuy(context);
+  loaded.clock.now += 1_000;
+  await action;
+
+  assert.equal(loaded.calls.buy, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 2);
+  assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 3_000);
+  assert.equal(loaded.calls.buyOrders[0].quote.paperFallback, true);
+  assert.equal(loaded.api.runtime.toast?.type, 'success');
+});
+
+test('position drawer sell uses the position last-known quote instead of failing as stale', async () => {
+  const loaded = loadContent({ sendMessage: async () => ({ ok: false }) });
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  const position = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', name: 'Test Token',
+    quantity: 2, costBasisNative: 1, lastPriceUsd: 2, lastMarketCapUsd: 2_000,
+    lastNativePriceUsd: 3_000, quoteObservedAt: loaded.clock.now - 60_000
+  };
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = position;
+
+  const action = loaded.api.sellPosition(position, 50);
+  loaded.clock.now += 1_000;
+  await action;
+
+  assert.equal(loaded.calls.sell, 1);
+  assert.equal(loaded.calls.sellOrders[0].quote.priceUsd, 2);
+  assert.equal(loaded.calls.sellOrders[0].quote.nativePriceUsd, 3_000);
+  assert.equal(loaded.calls.sellOrders[0].quote.paperFallback, true);
+});
+
+test('exact-chain GMGN network metadata corrects only the matching position', async () => {
+  const loaded = loadContent();
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'WRONG', name: 'Wrong', logoUrl: 'wrong.png'
+  };
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_B}`] = {
+    chain: 'eth', tokenAddress: ADDRESS_B, symbol: 'OTHER', name: 'Other', logoUrl: 'other.png'
+  };
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'eth', address: ADDRESS_A, priceUsd: 2, marketCapUsd: 2_000,
+      symbol: 'RIGHT', name: 'Right Token', logoUrl: 'right.png',
+      observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }]
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.calls.metadataBatches.length, 1);
+  assert.equal(loaded.calls.metadataBatches[0].length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.metadataBatches[0][0])), {
+    chain: 'eth', address: ADDRESS_A, symbol: 'RIGHT', name: 'Right Token', logoUrl: 'right.png',
+    metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+  });
+});
+
+test('PnL calendar exposes current-chain trade history and sends the active chain', async () => {
+  const loaded = loadContent();
+  loaded.api.runtime.calendarOpen = true;
+  assert.match(loaded.api.renderPnlCalendar(), /data-action="dashboard-history"/);
+  const history = eventElement({ dataset: { action: 'dashboard-history' } });
+  loaded.shellLists.set('[data-action]', [history]);
+  loaded.api.bindEvents();
+
+  await history.emit('click', { stopPropagation() {} });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.messages.at(-1))), {
+    type: 'TANGO_OPEN_DASHBOARD', tab: 'history', chain: 'eth'
+  });
 });
 
 test('an old failed quote request cannot suppress or remove a newer away-and-back request', async () => {

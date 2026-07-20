@@ -49,11 +49,18 @@
 
   function publish(quotes) {
     if (!quotes.length) return;
-    quotes.forEach((quote) => quoteCache.set(`${quote.chain}:${quote.address}`, quote));
+    const merged = quotes.map((quote) => {
+      const key = `${quote.chain}:${quote.address}`;
+      const previous = quoteCache.get(key);
+      const observation = previous === quote ? quote : Tango.GMGNQuotes.mergeObservation(previous, quote);
+      if (observation) quoteCache.set(key, observation);
+      return observation;
+    }).filter(Boolean);
+    if (!merged.length) return;
     if (quoteCache.size > 2000) {
       [...quoteCache.keys()].slice(0, quoteCache.size - 2000).forEach((key) => quoteCache.delete(key));
     }
-    window.postMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes }, '*');
+    window.postMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: merged }, '*');
   }
 
   function inspectPayload(payload, chain) {

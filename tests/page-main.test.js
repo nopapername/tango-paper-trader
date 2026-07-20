@@ -39,16 +39,31 @@ function loadPageMain(fetchImpl) {
     Tango: {
       GMGNQuotes: {
         extract(payload, chain, observedAt) {
-          return [{ chain, address: payload.address, priceUsd: payload.priceUsd, observedAt }];
+          return [{
+            chain, address: payload.address, priceUsd: payload.priceUsd,
+            symbol: payload.symbol || '', name: payload.name || '', logoUrl: payload.logoUrl || '',
+            observedAt, source: 'GMGN_NETWORK'
+          }];
+        },
+        mergeObservation(previous, next) {
+          if (previous && (previous.chain !== next.chain || previous.address !== next.address)) return null;
+          return {
+            ...(previous || {}), ...next,
+            priceUsd: next.priceUsd || previous?.priceUsd || 0,
+            symbol: next.symbol || previous?.symbol || '',
+            name: next.name || previous?.name || '',
+            logoUrl: next.logoUrl || previous?.logoUrl || ''
+          };
         }
       }
     }
   };
+  context.__listeners = listeners;
   context.window = context;
   context.top = context;
   vm.runInNewContext(chainsSource, context, { filename: 'src/core/chains.js' });
   vm.runInNewContext(source, context, { filename: 'src/content/page-main.js' });
-  return { context, published };
+  return { context, published, listeners };
 }
 
 function jsonResponse(payload, url = 'https://gmgn.ai/api/token/quote') {
@@ -101,4 +116,25 @@ test('a GMGN subdomain redirect with a conflicting explicit chain is rejected', 
   await loaded.context.fetch('https://api.gmgn.ai/eth/token/quote');
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(loaded.published, []);
+});
+
+test('quote replay preserves metadata when a later response contains only price', async () => {
+  const responses = [
+    { address: EVM_ADDRESS, priceUsd: 2, symbol: 'RIGHT', name: 'Right Token', logoUrl: 'right.png' },
+    { address: EVM_ADDRESS, priceUsd: 3, symbol: '', name: '', logoUrl: '' }
+  ];
+  const loaded = loadPageMain(async () => jsonResponse(responses.shift()));
+  await loaded.context.fetch('/api/token/quote');
+  await loaded.context.fetch('/api/token/quote');
+  await new Promise((resolve) => setImmediate(resolve));
+  loaded.published.length = 0;
+
+  loaded.context.__messageData = { source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' };
+  vm.runInNewContext("__listeners.get('message')({ source: window, data: __messageData })", loaded.context);
+
+  assert.equal(loaded.published.length, 1);
+  assert.equal(loaded.published[0].priceUsd, 3);
+  assert.equal(loaded.published[0].symbol, 'RIGHT');
+  assert.equal(loaded.published[0].name, 'Right Token');
+  assert.equal(loaded.published[0].logoUrl, 'right.png');
 });

@@ -50,10 +50,11 @@
       accountSettings: 'Language & paper principal', resetWithBalance: 'Reset with this balance',
       resetBalanceConfirm: 'Reset the paper principal and clear all trades, positions, and PnL calendar records?', openDashboardFailed: 'Could not open the dashboard', openTokenFailed: 'Could not open the GMGN token tab',
       dragToMove: 'Drag to move', openToken: 'Open token on GMGN', clickForPositions: 'Click to view positions', hideChartLine: 'Hide paper trade line',
-      quoteLoading: 'Quote is updating. Please try again.',
-      lastKnownPrice: 'The displayed value uses the last known price. Selling requires a fresh GMGN or verified DEX quote.',
+      quoteLoading: 'Getting a paper quote…', quoteQueued: 'Paper order queued until a quote is available.',
+      currentChainTrades: 'Current-chain trades',
+      lastKnownPrice: 'The displayed value uses the latest exact-token paper quote available.',
       pnlCalendar: 'PnL Calendar', positionTotal: 'Position Total', closeAll: 'Close All',
-      closeAllConfirm: 'Close all paper positions?', closeAllHint: 'Only positions with a fresh GMGN or verified DEX quote will be closed.',
+      closeAllConfirm: 'Close all paper positions?', closeAllHint: 'Paper quotes are refreshed first; exact-token last-known prices are used if needed.',
       closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
@@ -104,10 +105,11 @@
       accountSettings: '语言与虚拟本金', resetWithBalance: '按此本金重置账户',
       resetBalanceConfirm: '确定重置虚拟本金并清空全部交易、持仓和盈亏日历记录吗？', openDashboardFailed: '无法打开数据面板', openTokenFailed: '无法打开 GMGN 代币新标签页',
       dragToMove: '拖拽移动', openToken: '在 GMGN 打开此代币', clickForPositions: '点击查看持仓', hideChartLine: '隐藏虚拟交易横线',
-      quoteLoading: '行情正在更新，请稍后重试。',
-      lastKnownPrice: '当前显示值使用最近记录价格；卖出需要最新 GMGN 或已验证 DEX 报价。',
+      quoteLoading: '正在获取模拟行情…', quoteQueued: '模拟订单已等待行情，将自动继续。',
+      currentChainTrades: '当前链交易记录',
+      lastKnownPrice: '当前显示值使用该链该代币最近可用的模拟行情。',
       pnlCalendar: '盈亏日历', positionTotal: '持仓总额', closeAll: '一键清仓',
-      closeAllConfirm: '确认清仓全部虚拟持仓？', closeAllHint: '仅会平仓具有最新 GMGN 或已验证 DEX 报价的持仓。',
+      closeAllConfirm: '确认清仓全部虚拟持仓？', closeAllHint: '会先刷新模拟行情，必要时使用同链同代币的最近价格。',
       closeAllSuccess: '全部虚拟持仓已清仓', calendarClearedOnReset: '重置本金会同时清空盈亏日历'
     }
   };

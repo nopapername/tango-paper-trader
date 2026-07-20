@@ -252,7 +252,8 @@
 .tango-calendar-day.win { background: rgba(62,230,160,.08); border-color: rgba(62,230,160,.25); }
 .tango-calendar-day.loss { background: rgba(255,100,124,.08); border-color: rgba(255,100,124,.25); }
 .tango-calendar-day.today { box-shadow: inset 0 0 0 1px var(--brand); }
-.tango-calendar-dashboard { border-color: rgba(155,124,255,.38); color: #cbbfff; font-weight: 800; margin-top: 11px; width: 100%; }
+.tango-calendar-actions { display: grid; gap: 7px; margin-top: 11px; }
+.tango-calendar-dashboard { border-color: rgba(155,124,255,.38); color: #cbbfff; font-weight: 800; width: 100%; }
 @media (max-width: 760px) {
   .tango-panel { right: 8px; width: min(396px,calc(100vw - 16px)); }
   .tango-bar .tango-stat.optional { display: none; }

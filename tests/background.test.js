@@ -149,6 +149,17 @@ test('token tab messages accept every registered GMGN chain and reject non-token
   assert.equal(rejected.error, 'Invalid GMGN token URL');
 });
 
+test('Dashboard deep links validate and carry the requested tab and current chain', async () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const opened = await send(loaded, { type: 'TANGO_OPEN_DASHBOARD', tab: 'history', chain: 'base' });
+  assert.equal(opened.ok, true);
+  assert.equal(loaded.openedTabs.at(-1), 'chrome-extension://test/dashboard.html?chain=base#history');
+
+  const invalid = await send(loaded, { type: 'TANGO_OPEN_DASHBOARD', tab: 'javascript:bad', chain: 'unknown' });
+  assert.equal(invalid.ok, false);
+  assert.equal(loaded.openedTabs.length, 1);
+});
+
 test('wrong-byte Solana identities cannot open routes or start quote requests', async () => {
   const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
   const opened = await send(loaded, {

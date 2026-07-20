@@ -36,9 +36,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === 'TANGO_OPEN_DASHBOARD') {
-    const openDashboard = message.tab
-      ? chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard.html#${encodeURIComponent(message.tab)}`) })
-      : chrome.runtime.openOptionsPage();
+    const allowedTabs = new Set(['overview', 'positions', 'history', 'calendar', 'settings']);
+    const requestedTab = message.tab == null ? '' : String(message.tab);
+    const requestedChain = message.chain == null ? '' : String(message.chain);
+    if ((requestedTab && !allowedTabs.has(requestedTab)) || (requestedChain && !Chains.get(requestedChain))) {
+      sendResponse({ ok: false, error: 'Invalid Dashboard route' });
+      return false;
+    }
+    const hasDeepLink = Boolean(requestedTab || requestedChain);
+    const baseUrl = chrome.runtime.getURL('dashboard.html');
+    const dashboardUrl = `${baseUrl}${requestedChain ? `?chain=${encodeURIComponent(requestedChain)}` : ''}${requestedTab ? `#${encodeURIComponent(requestedTab)}` : ''}`;
+    const openDashboard = hasDeepLink ? chrome.tabs.create({ url: dashboardUrl }) : chrome.runtime.openOptionsPage();
     openDashboard
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));

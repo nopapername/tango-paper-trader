@@ -36,6 +36,43 @@
     return String(value).trim().slice(0, maxLength);
   }
 
+  function mergeObservation(previous, next) {
+    if (!next || !Tango.Chains?.get?.(next.chain)
+      || !Tango.Chains.validateAddress(next.chain, next.address)) return null;
+    const address = Tango.Chains.normalizeAddress(next.chain, next.address);
+    if (previous) {
+      if (previous.chain !== next.chain || !Tango.Chains.validateAddress(previous.chain, previous.address)
+        || Tango.Chains.normalizeAddress(previous.chain, previous.address) !== address) return null;
+    }
+    const positive = (field) => Number(next[field]) > 0 ? Number(next[field]) : Number(previous?.[field] || 0);
+    const text = (field, maxLength) => metadataText(next[field], maxLength)
+      || metadataText(previous?.[field], maxLength);
+    const nextObservedAt = Number(next.observedAt || 0);
+    const priceObservedAt = Number(next.priceUsd) > 0
+      ? Number(next.priceObservedAt || nextObservedAt)
+      : Number(previous?.priceObservedAt || (Number(previous?.priceUsd) > 0 ? previous?.observedAt : 0) || 0);
+    const marketCapObservedAt = Number(next.marketCapUsd) > 0
+      ? Number(next.marketCapObservedAt || nextObservedAt)
+      : Number(previous?.marketCapObservedAt || (Number(previous?.marketCapUsd) > 0 ? previous?.observedAt : 0) || 0);
+    const mergedPrice = positive('priceUsd');
+    const mergedMarketCap = positive('marketCapUsd');
+    return {
+      ...(previous || {}), ...next,
+      chain: next.chain,
+      address,
+      priceUsd: mergedPrice,
+      marketCapUsd: mergedMarketCap,
+      liquidityUsd: positive('liquidityUsd'),
+      symbol: text('symbol', 32).replace(/^\$/, ''),
+      name: text('name', 100),
+      logoUrl: text('logoUrl', 1000),
+      priceObservedAt,
+      marketCapObservedAt,
+      observedAt: mergedPrice > 0 ? priceObservedAt : marketCapObservedAt,
+      source: String(next.source || previous?.source || '')
+    };
+  }
+
   function extract(payload, chainId, observedAt) {
     const chain = Tango.Chains?.get?.(chainId);
     if (!chain) return [];
@@ -64,19 +101,19 @@
         const name = metadataText(firstValue(value, NAME_KEYS), 100);
         const logoUrl = metadataText(firstValue(value, LOGO_KEYS), 1000);
         if (priceUsd > 0 || marketCapUsd > 0) {
-          const previous = found.get(address) || {};
-          found.set(address, {
+          const previous = found.get(address) || null;
+          found.set(address, mergeObservation(previous, {
             chain: chain.id,
             address,
-            priceUsd: priceUsd || previous.priceUsd || 0,
-            marketCapUsd: marketCapUsd || previous.marketCapUsd || 0,
-            liquidityUsd: liquidityUsd || previous.liquidityUsd || 0,
-            symbol: symbol || previous.symbol || '',
-            name: name || previous.name || '',
-            logoUrl: logoUrl || previous.logoUrl || '',
+            priceUsd,
+            marketCapUsd,
+            liquidityUsd,
+            symbol,
+            name,
+            logoUrl,
             observedAt,
             source: 'GMGN_NETWORK'
-          });
+          }));
         }
       }
       Object.values(value).slice(0, 300).forEach((item) => {
@@ -86,6 +123,6 @@
     return [...found.values()];
   }
 
-  Tango.GMGNQuotes = { extract };
+  Tango.GMGNQuotes = { extract, mergeObservation };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.GMGNQuotes;
 })(globalThis);

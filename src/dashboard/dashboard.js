@@ -4,10 +4,13 @@
   const fileInput = document.querySelector('#import-file');
   const tabs = ['overview', 'positions', 'history', 'calendar', 'settings'];
   const initialTab = tabs.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+  const requestedChain = Tango.Chains.get(new URLSearchParams(location.search || '').get('chain'))?.id || '';
   const runtime = {
     state: null,
     settings: null,
-    selectedChain: 'sol',
+    selectedChain: requestedChain || 'sol',
+    startupChain: requestedChain,
+    startupChainApplied: false,
     selectedChainRevision: 0,
     settingsWrite: Promise.resolve(),
     selectionPending: null,
@@ -37,10 +40,13 @@
     try {
       const data = await Tango.Store.getAll();
       runtime.state = data.state;
-      runtime.settings = data.settings;
+      const startupChain = !runtime.startupChainApplied ? runtime.startupChain : '';
+      runtime.settings = startupChain ? { ...data.settings, selectedChain: startupChain } : data.settings;
       runtime.loadError = '';
       const hasSelectionIntent = runtime.selectionPending?.revision === runtime.selectedChainRevision;
-      if (!hasSelectionIntent) runtime.selectedChain = Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
+      if (!hasSelectionIntent) runtime.selectedChain = startupChain
+        || Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
+      runtime.startupChainApplied = true;
       render();
       if (!runtime.nativePricesRequested && runtime.state.initialized) {
         runtime.nativePricesRequested = true;

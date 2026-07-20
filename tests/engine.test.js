@@ -54,6 +54,24 @@ test('buy reduces the requested chain cash and creates a weighted native positio
   assert.ok(second.position.averageEntryPriceUsd > 2 && second.position.averageEntryPriceUsd < 4.1);
 });
 
+test('paper fallback fills record their original quote source and observation times', () => {
+  const paperQuote = {
+    ...quote,
+    source: 'GMGN_LAST_KNOWN',
+    observedAt: 2_000,
+    nativePriceObservedAt: 2_000,
+    originalObservedAt: 1_000,
+    nativeOriginalObservedAt: 900,
+    paperFallback: true
+  };
+  const result = Engine.executeBuy(state(), { token, quote: paperQuote, amountNative: 1 }, settings, 2_000);
+  assert.equal(result.trade.paperFallback, true);
+  assert.equal(result.trade.quoteSource, 'GMGN_LAST_KNOWN');
+  assert.equal(result.trade.quoteObservedAtOriginal, 1_000);
+  assert.equal(result.trade.nativePriceObservedAtOriginal, 900);
+  assert.doesNotThrow(() => State.normalizeState(result.state, settings, { strict: true }));
+});
+
 test('partial sell preserves native cost basis and realizes native and USD pnl', () => {
   const bought = Engine.executeBuy(state(), { token, quote, amountNative: 10 }, settings, 1_000);
   const sellQuote = { ...quote, priceUsd: 4, marketCapUsd: 4_000_000, observedAt: 2_000 };
@@ -543,7 +561,7 @@ test('trading one of several positions cannot replace any existing token identit
   assert.deepEqual(identitiesAfter, identitiesBefore);
 });
 
-test('only verified address-bound metadata can repair a position and detail outranks trench', () => {
+test('only verified address-bound metadata can repair a position and GMGN network outranks DOM metadata', () => {
   const trenchToken = { ...token, symbol: 'TOKEN', name: 'Token', logoUrl: '', metadataVerified: true, metadataSource: 'GMGN_TRENCH' };
   const bought = Engine.executeBuy(state(), { token: trenchToken, quote, amountNative: 1 }, settings, 1_000);
   const key = Engine.positionKey(token.chain, token.address);
@@ -560,6 +578,17 @@ test('only verified address-bound metadata can repair a position and detail outr
     ...token, symbol: 'STALE', name: 'Stale', logoUrl: 'https://example.com/stale.png', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
   });
   assert.equal(staleTrench, detail);
+  const network = Engine.updatePositionMetadata(detail, {
+    ...token, symbol: 'API', name: 'API Token', logoUrl: 'https://example.com/api.png',
+    metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+  });
+  assert.equal(network.positions[key].symbol, 'API');
+  assert.equal(network.positions[key].logoUrl, 'https://example.com/api.png');
+  const staleDetail = Engine.updatePositionMetadata(network, {
+    ...token, symbol: 'OLD', name: 'Old Detail', logoUrl: 'https://example.com/old.png',
+    metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+  });
+  assert.equal(staleDetail, network);
 });
 
 test('an unverified new order cannot seed a borrowed name or logo', () => {

@@ -11,6 +11,7 @@ const REQUIRED_ISOLATED_ORDER = [
   'src/core/engine.js',
   'src/core/state-coordinator.js',
   'src/core/storage.js',
+  'src/adapters/gmgn-quotes.js',
   'src/adapters/gmgn.js',
   'src/content/chain-view.js',
   'src/content/markers.js',

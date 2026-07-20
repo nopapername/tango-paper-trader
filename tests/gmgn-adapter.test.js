@@ -527,7 +527,7 @@ test('quick-buy rejects an undated cached market cap after the live card value d
   }
 });
 
-test('quick-buy keeps a fresh Solana Pump market-cap valuation synthetic and scoped away from EVM', async () => {
+test('quick-buy keeps synthetic market-cap valuation Solana-only while every EVM trench gets a safe button', async () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
   global.requestAnimationFrame = (callback) => callback();
   try {
@@ -543,12 +543,19 @@ test('quick-buy keeps a fresh Solana Pump market-cap valuation synthetic and sco
     assert.equal(pumpOrders[0].quote.marketCapDivisor, 1_000_000_000);
     assert.ok(pumpOrders[0].quote.observedAt > 0);
 
-    const evm = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
-    const evmOrders = [];
-    global.document = evm.document;
-    global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
-    assert.equal(GMGN.discoverTokenCards((order) => evmOrders.push(order)), 0);
-    assert.equal(evmOrders.length, 0);
+    for (const chain of ['eth', 'bsc', 'base', 'robinhood', 'xlayer']) {
+      const evm = quickBuyHarness({ chain, address: EVM_ADDRESS });
+      const evmOrders = [];
+      global.document = evm.document;
+      global.location = { href: `https://gmgn.ai/?chain=${chain}`, origin: 'https://gmgn.ai' };
+      assert.equal(GMGN.discoverTokenCards((order) => evmOrders.push(order)), 1, chain);
+      assert.ok(evm.replacement, chain);
+      await evm.slot.__tangoQuickBuyHandler();
+      assert.equal(evmOrders.length, 1, chain);
+      assert.equal(evmOrders[0].quote.source, 'GMGN_TRENCH');
+      assert.equal(evmOrders[0].quote.priceUsd, 0);
+      assert.equal(evmOrders[0].quote.observedAt, 0);
+    }
   } finally {
     global.document = original.document;
     global.location = original.location;

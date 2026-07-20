@@ -100,18 +100,21 @@ test('header balance is read from the active account', () => {
   assert.doesNotMatch(header, /state\.account|cashBalanceSol/);
 });
 
-test('trading uses native fields without manufacturing fresh quote timestamps', () => {
+test('all trading entry points use the unified paper quote resolver', () => {
   const buy = between('async function buy(', 'function previewBuy(');
   const sell = between('async function sell(', 'async function sellPosition(');
   const sellPosition = between('async function sellPosition(', 'async function commitSell(');
   const closeAll = between('async function commitCloseAll(', 'async function sellBreakeven()');
   assert.match(buy, /amountNative:/);
   assert.doesNotMatch(buy, /amountSol:/);
-  assert.match(buy, /requireExecutableQuote\(context\?\.token, context\?\.quote\)/);
-  assert.match(sell, /requireExecutableQuote\(context\?\.token, context\?\.quote\)/);
-  assert.match(sellPosition, /freshExecutableQuote\(position\)/);
-  assert.doesNotMatch(sellPosition, /lastPriceUsd|observedAt:\s*Date\.now/);
-  assert.doesNotMatch(closeAll, /lastPriceUsd|observedAt:\s*Date\.now/);
+  assert.match(buy, /resolvePaperTradeQuote\(/);
+  assert.match(sell, /resolvePaperTradeQuote\(/);
+  assert.match(sellPosition, /resolvePaperTradeQuote\(/);
+  assert.match(closeAll, /resolvePaperTradeQuote\(/);
+});
+
+test('content integration remains paper-only and contains no wallet or transaction submission path', () => {
+  assert.doesNotMatch(source, /connectWallet|requestSignature|signTransaction|sendTransaction|eth_sendTransaction|wallet_requestPermissions/);
 });
 
 test('native prices and GMGN quotes are explicitly keyed by chain', () => {
@@ -130,10 +133,11 @@ test('native prices and GMGN quotes are explicitly keyed by chain', () => {
   assert.match(quoteTick, /updatePositionQuote\(runtime\.current\.token, executable\)/);
 });
 
-test('panel marks positions only from a coherent executable quote', () => {
+test('panel prefers a fresh quote and falls back only through the paper snapshot validator', () => {
   const panel = between('function renderPanel()', 'function floatingStyle(');
   assert.ok(panel.indexOf('const liveQuote = executableQuote(current.token, current.quote)')
-    < panel.indexOf('const mark = position ? Tango.Engine.markPosition(position, liveQuote, currentNativePriceUsd()) : null'));
+    < panel.indexOf('const paperQuote = liveQuote || paperExecutableQuote(current.token, current.quote, position || current.token)'));
+  assert.match(panel, /markPosition\(position, paperQuote, currentNativePriceUsd\(\)\)/);
   assert.doesNotMatch(panel, /markPosition\(position, current\?\.quote\)/);
 });
 

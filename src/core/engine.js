@@ -1,6 +1,6 @@
 (function initEngine(global) {
   const Tango = global.Tango = global.Tango || {};
-  const METADATA_SOURCE_RANK = Object.freeze({ GMGN_TRENCH: 20, GMGN_DETAIL: 30 });
+  const METADATA_SOURCE_RANK = Object.freeze({ GMGN_TRENCH: 20, GMGN_DETAIL: 30, GMGN_NETWORK: 40 });
   const MARKET_CAP_PROVENANCE = 'SOLANA_PUMP_TRENCH_V1';
   const MAX_QUOTE_AGE_MS = 5 * 60_000;
   const MAX_FUTURE_SKEW_MS = 5_000;
@@ -211,6 +211,9 @@
       nativeSymbol: nativeSymbol(chain), slippageBps: executionSettings.slippageBps,
       platformFeeNative: round(platformFeeNative), networkFeeNative: round(networkFeeNative),
       realizedPnlNative: 0, realizedPnlUsd: 0, valuationMode, priceProvenance,
+      quoteSource: String(order.quote.source || ''), paperFallback: order.quote.paperFallback === true,
+      quoteObservedAtOriginal: Number(order.quote.originalObservedAt || order.quote.observedAt),
+      nativePriceObservedAtOriginal: Number(order.quote.nativeOriginalObservedAt || order.quote.nativePriceObservedAt),
       ...(trustedMarketCap ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {}),
       sourceUrl: order.sourceUrl || '', executedAt: now
     };
@@ -282,6 +285,9 @@
       realizedPnlNative: round(realizedPnlNative), realizedPnlUsd: round(realizedPnlUsd), sourceUrl: order.sourceUrl || '',
       heldMs: now - Number(existing.openedAt || now), executedAt: now,
       valuationMode, priceProvenance,
+      quoteSource: String(order.quote.source || ''), paperFallback: order.quote.paperFallback === true,
+      quoteObservedAtOriginal: Number(order.quote.originalObservedAt || order.quote.observedAt),
+      nativePriceObservedAtOriginal: Number(order.quote.nativeOriginalObservedAt || order.quote.nativePriceObservedAt),
       ...(existing.marketCapProvenance ? { marketCapProvenance: existing.marketCapProvenance } : {})
     };
 

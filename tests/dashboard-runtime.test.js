@@ -50,7 +50,10 @@ function mergeSettingsPatch(settings, patch) {
   return { ...settings, ...patch, chains };
 }
 
-async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false, failAction = '' } = {}) {
+async function loadDashboard({
+  deferThirdGetAll = false, failFirstGetAll = false, failAction = '',
+  dashboardLocation = { hash: '', search: '' }
+} = {}) {
   const appElements = new Map();
   let document;
   let appMarkup = '';
@@ -195,9 +198,9 @@ async function loadDashboard({ deferThirdGetAll = false, failFirstGetAll = false
     }
   };
   const context = {
-    Promise, Object, Number, String, Array, Map, Set, Math, Date, JSON, Intl, console, Tango, Blob,
+    Promise, Object, Number, String, Array, Map, Set, Math, Date, JSON, Intl, URLSearchParams, console, Tango, Blob,
     document,
-    location: { hash: '' },
+    location: dashboardLocation,
     URL: {
       createObjectURL(blob) { const key = `blob:${++urlId}`; urls.set(key, blob); return key; },
       revokeObjectURL() {}
@@ -257,6 +260,29 @@ test('rapid Dashboard chain selections persist only the latest chain without clo
   assert.equal(dashboard.api.runtime.selectedChain, 'bsc');
   assert.equal(dashboard.persistedSettings.displayCurrency, 'USD');
   assert.deepEqual(dashboard.calls.fullSaves, []);
+});
+
+test('Dashboard history deep link starts on the explicit current chain without a date filter', async () => {
+  const dashboard = await loadDashboard({
+    dashboardLocation: { hash: '#history', search: '?chain=bsc' }
+  });
+  assert.equal(dashboard.api.runtime.tab, 'history');
+  assert.equal(dashboard.api.runtime.selectedChain, 'bsc');
+  assert.equal(dashboard.api.runtime.filters.date, '');
+  assert.match(dashboard.app.innerHTML, /BSCY/);
+  assert.doesNotMatch(dashboard.app.innerHTML, /ETHY/);
+});
+
+test('Dashboard deep-link chain is startup-only and does not override a later user selection', async () => {
+  const dashboard = await loadDashboard({
+    dashboardLocation: { hash: '#history', search: '?chain=bsc' }
+  });
+  const selection = dashboard.api.saveSelectedChain('eth');
+  await new Promise((resolve) => setImmediate(resolve));
+  dashboard.calls.saves[0].gate.resolve();
+  await selection;
+  await dashboard.api.load();
+  assert.equal(dashboard.api.runtime.selectedChain, 'eth');
 });
 
 test('Dashboard startup storage failure renders a retry that recovers', async () => {

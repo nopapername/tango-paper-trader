@@ -123,6 +123,10 @@
     if (!optional(trade, 'entryMarketCapUsd', (value) => finiteBetween(value, 0, Number.MAX_VALUE))) throw new Error('invalidTrade');
     if (!optional(trade, 'heldMs', (value) => finiteBetween(value, 0, Number.MAX_SAFE_INTEGER))) throw new Error('invalidTrade');
     if (!validTimestamp(trade.executedAt)) throw new Error('invalidTrade');
+    if (!optional(trade, 'paperFallback', (value) => typeof value === 'boolean')
+      || !optional(trade, 'quoteSource', (value) => typeof value === 'string' && value.length <= 100)
+      || !optional(trade, 'quoteObservedAtOriginal', validTimestamp)
+      || !optional(trade, 'nativePriceObservedAtOriginal', validTimestamp)) throw new Error('invalidTrade');
     if (!legacy && trade.nativeSymbol && trade.nativeSymbol !== chain.nativeSymbol) throw new Error('invalidTrade');
     if (trade.valuationMode != null && !VALUATION_MODES.includes(trade.valuationMode)) throw new Error('invalidTrade');
     if (trade.priceProvenance != null && !PRICE_PROVENANCES.includes(trade.priceProvenance)) throw new Error('invalidTrade');

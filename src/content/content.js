@@ -13,7 +13,7 @@
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null,
-    routeEpoch: 0, routeIdentity: null
+    routeEpoch: 0, routeIdentity: null, pendingTradeIntents: new Map()
   };
 
   const host = document.createElement('div');
@@ -43,6 +43,18 @@
       }
     }
     return `${chain.id}:page:${parsed.pathname}${parsed.search}`;
+  }
+  function detailRouteToken(url = location.href) {
+    const chain = Tango.Chains.fromUrl(url);
+    if (!chain) return null;
+    let parsed;
+    try { parsed = new URL(url); } catch { return null; }
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length !== 3 || parts[0] !== chain.gmgnSlug || parts[1].toLowerCase() !== 'token') return null;
+    let rawAddress;
+    try { rawAddress = decodeURIComponent(parts[2]); } catch { return null; }
+    if (!Tango.Chains.validateAddress(chain.id, rawAddress)) return null;
+    return { chain: chain.id, address: Tango.Chains.normalizeAddress(chain.id, rawAddress) };
   }
   function captureRoute() {
     const identity = currentRouteIdentity();
@@ -95,6 +107,7 @@
     runtime.gmgnQuotes.clear();
     runtime.quoteRequests.clear();
     runtime.quoteRetryAt.clear();
+    runtime.pendingTradeIntents.clear();
     runtime.markerPayloads = new WeakMap();
     syncChartMarkers(true);
     Tango.GMGN.clearQuickBuy();
@@ -102,7 +115,7 @@
     clearShellMarkup();
   }
 
-  window.addEventListener('message', (event) => {
+  function handlePageMessage(event) {
     if (event.data?.source === 'TANGO_PAPER_CHART' && event.data?.type === 'READY') {
       syncChartMarkers(true);
       return;
@@ -115,25 +128,51 @@
     }
     const positionsByAddress = new Map(Tango.ChainView.positions(runtime.state, chain.id)
       .map((position) => [Tango.Chains.normalizeAddress(chain.id, position.tokenAddress), position]));
+    const routeToken = detailRouteToken();
     const metadataUpdates = [];
     let currentQuoteChanged = false;
     (event.data.quotes || []).forEach((quote) => {
       if (quote?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, quote?.address)) return;
       const address = Tango.Chains.normalizeAddress(chain.id, quote.address);
-      runtime.gmgnQuotes.set(gmgnQuoteKey(chain.id, address), quote);
+      const cacheKey = gmgnQuoteKey(chain.id, address);
+      const cachedQuote = Tango.GMGNQuotes.mergeObservation(runtime.gmgnQuotes.get(cacheKey), quote);
+      if (!cachedQuote) return;
+      runtime.gmgnQuotes.set(cacheKey, cachedQuote);
+      if (!runtime.current && routeToken?.chain === chain.id && routeToken.address === address
+        && detailBootstrapObservation(cachedQuote)) {
+        const symbol = String(cachedQuote.symbol || '').replace(/^\$/, '').replace(/\s+/g, ' ').trim().slice(0, 32);
+        const name = String(cachedQuote.name || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+        const hasVerifiedMetadata = !isPlaceholderTokenLabel(symbol) || !isPlaceholderTokenLabel(name);
+        const fallbackSymbol = `${address.slice(0, 6)}…${address.slice(-4)}`;
+        runtime.current = {
+          token: {
+            chain: chain.id, address,
+            symbol: symbol || fallbackSymbol, name: name || symbol || fallbackSymbol,
+            logoUrl: String(cachedQuote.logoUrl || '').trim().slice(0, 1000),
+            metadataVerified: hasVerifiedMetadata,
+            metadataSource: hasVerifiedMetadata ? 'GMGN_NETWORK' : ''
+          },
+          quote: {}
+        };
+        mergeQuote(runtime.current, cachedQuote);
+        currentQuoteChanged = true;
+      }
       const isCurrentToken = runtime.current?.token?.chain === chain.id
         && Tango.Chains.normalizeAddress(chain.id, runtime.current.token.address) === address;
       if (isCurrentToken) {
-        mergeQuote(runtime.current, quote);
+        applyGmgnNetworkMetadata(runtime.current.token, cachedQuote);
+        mergeQuote(runtime.current, cachedQuote);
         currentQuoteChanged = true;
       }
       const position = positionsByAddress.get(address);
-      if (position && isCurrentToken && runtime.current?.token?.metadataVerified) {
-        const metadata = runtime.current.token;
+      const symbol = String(cachedQuote.symbol || '').replace(/^\$/, '').replace(/\s+/g, ' ').trim().slice(0, 32);
+      const name = String(cachedQuote.name || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+      const logoUrl = String(cachedQuote.logoUrl || '').trim().slice(0, 1000);
+      if (position && (!isPlaceholderTokenLabel(symbol) || !isPlaceholderTokenLabel(name) || logoUrl)) {
         metadataUpdates.push({
           chain: position.chain, address: position.tokenAddress,
-          symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
-          metadataVerified: true, metadataSource: metadata.metadataSource
+          symbol, name, logoUrl,
+          metadataVerified: true, metadataSource: 'GMGN_NETWORK'
         });
       }
     });
@@ -145,7 +184,8 @@
     if (metadataUpdates.length) Tango.Store.updatePositionMetadataBatch(metadataUpdates)
       .then((state) => { runtime.state = state; queueRender(); })
       .catch(() => null);
-  });
+  }
+  window.addEventListener('message', handlePageMessage);
   window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
 
   function language() { return Tango.I18n.resolveLanguage(runtime.settings?.language); }
@@ -303,7 +343,7 @@
       ? Tango.Engine.positionKey(previousCurrent.token.chain, previousCurrent.token.address) : '';
     const observedCurrent = await Tango.GMGN.readCurrentToken();
     if (!routeCaptureIsCurrent(routeCapture)) return;
-    runtime.current = Tango.GMGN.resolveCurrentTokenRead(previousCurrent, observedCurrent);
+    runtime.current = Tango.GMGN.resolveCurrentTokenRead(runtime.current, observedCurrent);
     if (runtime.current?.token?.chain !== chain.id) runtime.current = null;
     if (runtime.current) {
       runtime.current.quote.nativePriceUsd = freshNativePrice(chain.id);
@@ -324,6 +364,8 @@
     if (!routeCaptureIsCurrent(routeCapture)) return;
     syncQuickBuyButtons();
     await syncVisiblePositionMetadata(routeCapture);
+    if (!routeCaptureIsCurrent(routeCapture)) return;
+    await retryPendingPaperIntents(routeCapture);
     if (!routeCaptureIsCurrent(routeCapture)) return;
     const currentKey = runtime.current?.token
       ? Tango.Engine.positionKey(runtime.current.token.chain, runtime.current.token.address) : '';
@@ -349,10 +391,11 @@
         const price = Number(response?.price || 0);
         if (!(price > 0)) return;
         rememberNativePrice(chain.id, price, Number(response?.observedAt || 0));
-        if (routeCaptureIsCurrent(routeCapture) && activeChain()?.id === chain.id
-          && runtime.current?.token?.chain === chain.id) {
-          runtime.current.quote.nativePriceUsd = price;
-          runtime.current.quote.nativePriceObservedAt = runtime.nativePriceObservedAt.get(chain.id);
+        if (routeCaptureIsCurrent(routeCapture) && activeChain()?.id === chain.id) {
+          if (runtime.current?.token?.chain === chain.id) {
+            runtime.current.quote.nativePriceUsd = price;
+            runtime.current.quote.nativePriceObservedAt = runtime.nativePriceObservedAt.get(chain.id);
+          }
           queueRender();
         }
       })
@@ -386,6 +429,14 @@
     const hasValue = Number(candidate?.priceUsd || 0) > 0 || trustedMarketCapObservation(candidate, token);
     const observedAt = Number(candidate?.observedAt || 0);
     return acceptedSource && hasValue && observedAt > 0 && Date.now() - observedAt <= maxAgeMs;
+  }
+
+  function detailBootstrapObservation(candidate, maxAgeMs = 30_000) {
+    const observedAt = Number(candidate?.observedAt || 0);
+    const age = Date.now() - observedAt;
+    return String(candidate?.source || '').toUpperCase() === 'GMGN_NETWORK'
+      && (Number(candidate?.priceUsd || 0) > 0 || Number(candidate?.marketCapUsd || 0) > 0)
+      && observedAt > 0 && age >= -5_000 && age <= maxAgeMs;
   }
 
   function ensureTokenQuote(context, routeCapture = captureRoute()) {
@@ -437,15 +488,38 @@
     return quote && Date.now() - Number(quote.observedAt || 0) <= maxAgeMs ? quote : null;
   }
 
+  function cachedGmgnQuote(chain, address) {
+    return runtime.gmgnQuotes.get(gmgnQuoteKey(chain, address)) || null;
+  }
+
   function isPlaceholderTokenLabel(value) {
     return !String(value || '').trim() || /^(TOKEN|UNKNOWN|N\/A)$/i.test(String(value).trim());
+  }
+
+  function applyGmgnNetworkMetadata(token, observation) {
+    if (!token || observation?.chain !== token.chain
+      || !Tango.Chains.validateAddress(token.chain, token.address || token.tokenAddress)
+      || !Tango.Chains.validateAddress(token.chain, observation.address)
+      || Tango.Chains.normalizeAddress(token.chain, token.address || token.tokenAddress)
+        !== Tango.Chains.normalizeAddress(token.chain, observation.address)) return token;
+    const symbol = String(observation.symbol || '').replace(/^\$/, '').replace(/\s+/g, ' ').trim().slice(0, 32);
+    const name = String(observation.name || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+    const logoUrl = String(observation.logoUrl || '').trim().slice(0, 1000);
+    if (!isPlaceholderTokenLabel(symbol)) token.symbol = symbol;
+    if (!isPlaceholderTokenLabel(name)) token.name = name;
+    if (logoUrl) token.logoUrl = logoUrl;
+    if (!isPlaceholderTokenLabel(symbol) || !isPlaceholderTokenLabel(name) || logoUrl) {
+      token.metadataVerified = true;
+      token.metadataSource = 'GMGN_NETWORK';
+    }
+    return token;
   }
 
   async function waitForGmgnQuote(chain, address, timeoutMs = 900, requireMetadata = false,
     routeCapture = captureRoute()) {
     window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
+    const attempts = Math.max(1, Math.ceil(timeoutMs / 100));
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain) return null;
       const quote = freshGmgnQuote(chain, address);
       const hasMetadata = !isPlaceholderTokenLabel(quote?.symbol) || !isPlaceholderTokenLabel(quote?.name);
@@ -520,6 +594,149 @@
     return context.quote;
   }
 
+  function trustedTokenObservation(candidate, token) {
+    const source = String(candidate?.source || '').toUpperCase();
+    const trustedSource = source === 'DEXSCREENER' || source.startsWith('GMGN');
+    const hasValue = Number(candidate?.priceUsd || 0) > 0
+      || trustedMarketCapObservation(candidate, persistedQuoteContext(token));
+    return trustedSource && hasValue && Number(candidate?.observedAt || 0) > 0;
+  }
+
+  function positionQuote(position) {
+    if (!position) return null;
+    const marketCapMode = Tango.Engine.usesMarketCapValuation?.(position) === true;
+    const observedAt = Number(position.quoteObservedAt || position.updatedAt || position.openedAt || 0);
+    if (marketCapMode) {
+      return {
+        priceUsd: 0,
+        marketCapUsd: Number(position.lastMarketCapUsd || position.averageEntryMarketCap || 0),
+        liquidityUsd: 0,
+        source: 'GMGN_TRENCH_MC',
+        observedAt,
+        valuationMode: 'MARKET_CAP',
+        marketCapDivisor: Number(position.marketCapDivisor || 0),
+        priceProvenance: position.lastPriceProvenance || 'MARKET_CAP_DERIVED',
+        nativePriceUsd: Number(position.lastNativePriceUsd || 0),
+        nativePriceObservedAt: observedAt
+      };
+    }
+    return {
+      priceUsd: Number(position.lastPriceUsd || position.averageEntryPriceUsd || 0),
+      marketCapUsd: Number(position.lastMarketCapUsd || 0),
+      liquidityUsd: 0,
+      source: 'GMGN_LAST_KNOWN',
+      observedAt,
+      valuationMode: 'PRICE',
+      nativePriceUsd: Number(position.lastNativePriceUsd || 0),
+      nativePriceObservedAt: observedAt
+    };
+  }
+
+  function lastKnownNativeObservation(chainId, candidate, position) {
+    const chainPosition = Tango.ChainView.positions(runtime.state, chainId)
+      .find((item) => Number(item.lastNativePriceUsd || 0) > 0);
+    const observations = [
+      {
+        price: Number(runtime.nativePrices.get(chainId) || 0),
+        observedAt: Number(runtime.nativePriceObservedAt.get(chainId) || 0)
+      },
+      {
+        price: Number(candidate?.nativePriceUsd || 0),
+        observedAt: Number(candidate?.nativePriceObservedAt || candidate?.observedAt || 0)
+      },
+      {
+        price: Number(position?.lastNativePriceUsd || 0),
+        observedAt: Number(position?.quoteObservedAt || position?.updatedAt || position?.openedAt || 0)
+      },
+      {
+        price: Number(chainPosition?.lastNativePriceUsd || 0),
+        observedAt: Number(chainPosition?.quoteObservedAt || chainPosition?.updatedAt || chainPosition?.openedAt || 0)
+      }
+    ].filter(({ price }) => Number.isFinite(price) && price > 0)
+      .sort((left, right) => right.observedAt - left.observedAt);
+    return observations[0] || { price: 0, observedAt: 0 };
+  }
+
+  function paperExecutableQuote(token, candidate, position = persistedQuoteContext(token)) {
+    const chain = activeChain();
+    if (!chain || token?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, token?.address || token?.tokenAddress)) {
+      return null;
+    }
+    if (!trustedTokenObservation(candidate, token)) return null;
+    const native = lastKnownNativeObservation(chain.id, candidate, position);
+    if (!(native.price > 0)) return null;
+    const now = Date.now();
+    const originalObservedAt = Number(candidate.originalObservedAt || candidate.observedAt || 0);
+    const nativeOriginalObservedAt = Number(candidate.nativeOriginalObservedAt || native.observedAt || 0);
+    const staleMs = Number(Tango.QUOTE_STALE_MS || 15_000);
+    const paperFallback = candidate.paperFallback === true
+      || now - originalObservedAt > staleMs
+      || now - nativeOriginalObservedAt > staleMs;
+    const quote = {
+      ...candidate,
+      nativePriceUsd: native.price,
+      observedAt: paperFallback ? now : originalObservedAt,
+      nativePriceObservedAt: paperFallback ? now : nativeOriginalObservedAt,
+      originalObservedAt,
+      nativeOriginalObservedAt,
+      paperFallback
+    };
+    const validation = Tango.Engine.validateQuote(quote, now, undefined, position || token);
+    return validation.ok ? quote : null;
+  }
+
+  async function resolvePaperTradeQuote(token, candidate, {
+    position = persistedQuoteContext(token), routeCapture = captureRoute()
+  } = {}) {
+    const chain = activeChain();
+    if (!routeCaptureIsCurrent(routeCapture) || !chain || token?.chain !== chain.id
+      || !Tango.Chains.validateAddress(chain.id, token?.address || token?.tokenAddress)) return null;
+    const normalizedAddress = Tango.Chains.normalizeAddress(chain.id, token.address || token.tokenAddress);
+    const normalizedToken = { ...token, address: normalizedAddress };
+    const cachedNetwork = cachedGmgnQuote(chain.id, normalizedAddress);
+    applyGmgnNetworkMetadata(token, cachedNetwork);
+    applyGmgnNetworkMetadata(normalizedToken, cachedNetwork);
+    const context = { token: normalizedToken, quote: { ...(candidate || {}) } };
+    const immediate = executableQuote(normalizedToken, context.quote);
+    if (immediate) return immediate;
+
+    await resolveQuickBuyQuote(context, routeCapture);
+    if (!routeCaptureIsCurrent(routeCapture)) return null;
+    const refreshedNetwork = cachedGmgnQuote(chain.id, normalizedAddress);
+    applyGmgnNetworkMetadata(token, refreshedNetwork);
+    applyGmgnNetworkMetadata(context.token, refreshedNetwork);
+    const refreshed = executableQuote(normalizedToken, context.quote);
+    if (refreshed) return refreshed;
+
+    const candidates = [
+      context.quote,
+      cachedGmgnQuote(chain.id, normalizedAddress),
+      candidate,
+      positionQuote(position)
+    ].filter((observation) => trustedTokenObservation(observation, normalizedToken))
+      .sort((left, right) => Number(right.observedAt || 0) - Number(left.observedAt || 0));
+    for (const observation of candidates) {
+      const fallback = paperExecutableQuote(normalizedToken, observation, position);
+      if (fallback) return fallback;
+    }
+    return null;
+  }
+
+  function queuePendingPaperIntent(key, routeCapture, retry) {
+    if (!routeCaptureIsCurrent(routeCapture) || runtime.pendingTradeIntents.has(key)) return;
+    showToast(t('quoteQueued'), 'info');
+    runtime.pendingTradeIntents.set(key, { routeCapture, retry });
+  }
+
+  async function retryPendingPaperIntents(routeCapture = captureRoute()) {
+    const pending = [...runtime.pendingTradeIntents.entries()];
+    for (const [key, intent] of pending) {
+      if (!routeCaptureIsCurrent(routeCapture) || !routeCaptureIsCurrent(intent.routeCapture)) return;
+      runtime.pendingTradeIntents.delete(key);
+      await intent.retry();
+    }
+  }
+
   function requireExecutableQuote(token, candidate) {
     const chain = activeChain();
     if (!chain || token?.chain !== chain.id) throw new Error('unsupportedChain');
@@ -587,11 +804,6 @@
     if (runtime.quickBuyLocks.size > 100) {
       [...runtime.quickBuyLocks.entries()].filter(([, at]) => Date.now() - at > 5000).forEach(([key]) => runtime.quickBuyLocks.delete(key));
     }
-    await resolveQuickBuyQuote(context, routeCapture);
-    if (!routeCaptureIsCurrent(routeCapture)) return;
-    if (!executableQuote(context.token, context.quote)) {
-      return showToast(t('quoteLoading'), 'error');
-    }
     await buy(amountNative, context, routeCapture);
   }
 
@@ -608,7 +820,15 @@
     };
     try {
       if (!chain || order.token?.chain !== chain.id) throw new Error('unsupportedChain');
-      order.quote = requireExecutableQuote(context?.token, context?.quote);
+      if (!(order.amountNative > 0)) throw new Error('invalidAmount');
+      if (order.amountNative > Number(activeAccount()?.cashBalanceNative || 0)) throw new Error('insufficientBalance');
+      order.quote = await resolvePaperTradeQuote(context?.token, context?.quote, { routeCapture });
+      if (!routeCaptureIsCurrent(routeCapture)) return;
+      if (!order.quote) {
+        const pendingKey = `BUY:${gmgnQuoteKey(order.token.chain, order.token.address)}:${order.amountNative}`;
+        queuePendingPaperIntent(pendingKey, routeCapture, () => buy(amountNative, context, routeCapture));
+        return;
+      }
       const orderKey = `${order.token.chain}:${order.token.address || ''}:${order.amountNative}`;
       if (runtime.modal?.type === 'confirm' && runtime.modal.orderKey === orderKey) return;
       if (!routeCaptureIsCurrent(routeCapture)) return;
@@ -661,7 +881,9 @@
     runtime.tradePending = true;
     try {
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
-      const executableOrder = { ...order, quote: requireExecutableQuote(order.token, order.quote) };
+      const quote = paperExecutableQuote(order.token, order.quote);
+      if (!quote) throw new Error('invalidQuote');
+      const executableOrder = { ...order, quote };
       const result = await Tango.Store.executeBuy(executableOrder);
       runtime.state = result.state;
       runtime.modal = null;
@@ -678,9 +900,17 @@
     const order = { token: context?.token, quote: null, percent: Number(percent), sourceUrl: location.href };
     try {
       if (activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
-      order.quote = requireExecutableQuote(context?.token, context?.quote);
       const key = Tango.Engine.positionKey(order.token?.chain, order.token?.address);
-      if (!runtime.state.positions[key]) throw new Error('noPosition');
+      const position = runtime.state.positions[key];
+      if (!position) throw new Error('noPosition');
+      if (!(order.percent > 0 && order.percent <= 100)) throw new Error('invalidAmount');
+      order.quote = await resolvePaperTradeQuote(context?.token, context?.quote, { position, routeCapture });
+      if (!routeCaptureIsCurrent(routeCapture)) return;
+      if (!order.quote) {
+        const pendingKey = `SELL:${key}:${order.percent}`;
+        queuePendingPaperIntent(pendingKey, routeCapture, () => sell(percent, context, routeCapture));
+        return;
+      }
       const validation = Tango.Engine.validateQuote(order.quote, Date.now(), undefined, persistedQuoteContext(order.token));
       if (!validation.ok) throw new Error(validation.reason);
       if (requiresConfirmation()) {
@@ -701,9 +931,16 @@
 
   async function sellPosition(position, percent) {
     if (activeChain()?.id !== position.chain) return showToast(t('unsupportedChain'), 'error');
-    const quote = freshExecutableQuote(position);
-    if (!quote) return showToast(t('staleQuote'), 'error');
-    await sell(percent, { token: { chain: position.chain, address: position.tokenAddress, symbol: position.symbol }, quote });
+    const routeCapture = captureRoute();
+    const token = { chain: position.chain, address: position.tokenAddress, symbol: position.symbol };
+    const quote = await resolvePaperTradeQuote(token, positionQuote(position), { position, routeCapture });
+    if (!routeCaptureIsCurrent(routeCapture)) return;
+    if (!quote) {
+      const pendingKey = `SELL:${Tango.Engine.positionKey(position.chain, position.tokenAddress)}:${percent}`;
+      queuePendingPaperIntent(pendingKey, routeCapture, () => sellPosition(position, percent));
+      return;
+    }
+    await sell(percent, { token, quote }, routeCapture);
   }
 
   async function commitSell(order, routeCapture = captureRoute()) {
@@ -712,7 +949,10 @@
     runtime.tradePending = true;
     try {
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
-      const executableOrder = { ...order, quote: requireExecutableQuote(order.token, order.quote) };
+      const position = persistedQuoteContext(order.token);
+      const quote = paperExecutableQuote(order.token, order.quote, position);
+      if (!quote) throw new Error('invalidQuote');
+      const executableOrder = { ...order, quote };
       const result = await Tango.Store.executeSell(executableOrder);
       runtime.state = result.state;
       runtime.modal = null;
@@ -751,12 +991,25 @@
       const chain = activeChain().id;
       const positions = Tango.ChainView.positions(runtime.state, chain);
       const quoteFailures = new Map();
+      const resolvedQuotes = new Map();
+      await Promise.all(positions.map(async (position) => {
+        const key = Tango.Engine.positionKey(position.chain, position.tokenAddress);
+        const token = { chain: position.chain, address: position.tokenAddress, symbol: position.symbol };
+        const quote = await resolvePaperTradeQuote(token, positionQuote(position), { position, routeCapture });
+        if (quote) resolvedQuotes.set(key, quote);
+        else quoteFailures.set(key, 'quoteLoading');
+      }));
+      if (!routeCaptureIsCurrent(routeCapture)) return;
+      if (resolvedQuotes.size !== positions.length) {
+        queuePendingPaperIntent(`CLOSE_ALL:${chain}`, routeCapture, () => commitCloseAll(routeCapture));
+        runtime.modal = null;
+        return;
+      }
       const orders = Tango.ChainView.closeOrders(runtime.state, chain, (position) => {
-        const quoteResult = freshExecutableQuoteResult(position);
-        if (!quoteResult.quote) {
-          quoteFailures.set(Tango.Engine.positionKey(position.chain, position.tokenAddress), quoteResult.reason);
-        }
-        return quoteResult.quote;
+        const key = Tango.Engine.positionKey(position.chain, position.tokenAddress);
+        const quote = resolvedQuotes.get(key) || null;
+        if (!quote && !quoteFailures.has(key)) quoteFailures.set(key, 'quoteLoading');
+        return quote;
       });
       const result = await Tango.Store.executeCloseAll(chain, orders);
       runtime.state = result.state;
@@ -767,7 +1020,7 @@
         .filter((position) => !orderKeys.has(Tango.Engine.positionKey(position.chain, position.tokenAddress)))
         .map((position) => ({
           order: { token: { chain: position.chain, address: position.tokenAddress, symbol: position.symbol } },
-          reason: quoteFailures.get(Tango.Engine.positionKey(position.chain, position.tokenAddress)) || 'staleQuote'
+          reason: quoteFailures.get(Tango.Engine.positionKey(position.chain, position.tokenAddress)) || 'quoteLoading'
         }));
       const failures = [...skippedFailures, ...(result.failures || [])];
       const failedCount = t('closeAllFailedCount', { count: failures.length });
@@ -791,9 +1044,17 @@
   }
 
   async function sellBreakeven() {
-    const quote = executableQuote(runtime.current?.token, runtime.current?.quote);
-    if (!quote) return showToast(t('staleQuote'), 'error');
-    const percent = Tango.Engine.breakevenSellPercent(currentPosition(), quote, runtime.settings);
+    const routeCapture = captureRoute();
+    const position = currentPosition();
+    if (!position) return showToast(t('noPosition'), 'error');
+    const quote = await resolvePaperTradeQuote(runtime.current?.token, runtime.current?.quote, { position, routeCapture });
+    if (!routeCaptureIsCurrent(routeCapture)) return;
+    if (!quote) {
+      const key = `BREAKEVEN:${Tango.Engine.positionKey(position.chain, position.tokenAddress)}`;
+      queuePendingPaperIntent(key, routeCapture, sellBreakeven);
+      return;
+    }
+    const percent = Tango.Engine.breakevenSellPercent(position, quote, runtime.settings);
     if (!(percent > 0 && percent <= 100)) return showToast(t('breakevenUnavailable'), 'error');
     await sell(percent);
   }
@@ -927,7 +1188,10 @@
       <div class="tango-calendar-summary"><div><span>${t('totalPnl')}</span><strong class="${pnlClass(monthPnl)}">${accountMoney(monthPnl, true)}</strong></div><div><span>${t('date')}</span><strong>${activeDays}</strong></div></div>
       <div class="tango-calendar-nav"><button class="tango-icon-button" data-action="calendar-prev">‹</button><strong>${date.toLocaleDateString(language(), { year: 'numeric', month: 'long' })}</strong><button class="tango-icon-button" data-action="calendar-next">›</button></div>
       <div class="tango-calendar-grid">${labels.map((label) => `<span class="tango-calendar-label">${esc(label)}</span>`).join('')}${cells.join('')}</div>
-      <button class="tango-button tango-calendar-dashboard" data-action="dashboard-calendar">${t('openDashboard')} · ${t('pnlCalendar')} ↗</button>
+      <div class="tango-calendar-actions">
+        <button class="tango-button tango-calendar-dashboard" data-action="dashboard-history">${t('currentChainTrades')} ↗</button>
+        <button class="tango-button tango-calendar-dashboard" data-action="dashboard-calendar">${t('openDashboard')} · ${t('pnlCalendar')} ↗</button>
+      </div>
     </div>`;
   }
 
@@ -1031,8 +1295,9 @@
     if (!current?.token || current.token.chain !== chain.id) return '';
     const position = currentPosition();
     const liveQuote = executableQuote(current.token, current.quote);
-    const mark = position ? Tango.Engine.markPosition(position, liveQuote, currentNativePriceUsd()) : null;
-    const quoteValid = Boolean(liveQuote);
+    const paperQuote = liveQuote || paperExecutableQuote(current.token, current.quote, position || current.token);
+    const mark = position ? Tango.Engine.markPosition(position, paperQuote, currentNativePriceUsd()) : null;
+    const quoteValid = Boolean(paperQuote);
     const symbol = current?.token?.symbol || 'GMGN';
     const tokenTrades = current ? Tango.ChainView.trades(runtime.state, chain.id).filter((trade) =>
       trade.chain === current.token.chain
@@ -1043,7 +1308,7 @@
     const totalSell = tokenTrades.filter((trade) => trade.side === 'SELL').reduce((sum, trade) => sum + Number(trade.amountNative || 0), 0);
     const totalProfit = tokenTrades.filter((trade) => trade.side === 'SELL').reduce((sum, trade) => sum + Number(trade.realizedPnlNative || 0), 0) + Number(mark?.unrealizedPnlNative || 0);
     const feePercent = Number(runtime.settings.platformFeeBps || 0) / 100;
-    const breakevenPercent = Tango.Engine.breakevenSellPercent(position, liveQuote, runtime.settings);
+    const breakevenPercent = Tango.Engine.breakevenSellPercent(position, paperQuote, runtime.settings);
     const breakevenLabel = breakevenPercent ? `${t('breakeven')} ${Tango.Format.number(breakevenPercent, language(), 1)}%` : t('breakeven');
     return `<div class="tango-panel tango-card ${runtime.settings.panelCollapsed ? 'collapsed' : ''}" style="${panelStyle()}">
       <div class="tango-header" data-drag-handle>
@@ -1073,7 +1338,7 @@
           <span>${t('pnl')} <strong class="${pnlClass(mark?.unrealizedPnlNative)}">${position ? Tango.Format.percent(mark.roi, language(), true) : '--'}</strong></span>
           <span>${t('pnlAmount')} <strong class="${pnlClass(totalProfit)}">${accountMoney(totalProfit, true)}</strong></span>
         </div>
-        ${quoteValid ? '' : `<div class="tango-warning">${t(current?.quote?.priceUsd ? 'staleQuote' : 'invalidQuote')}</div>`}
+        ${quoteValid ? '' : `<div class="tango-warning">${t('quoteLoading')}</div>`}
       </div>`}
     </div>`;
   }
@@ -1201,7 +1466,12 @@
           .catch(() => showToast(t('openDashboardFailed'), 'error'));
       }
       if (action === 'dashboard-calendar') {
-        chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD', tab: 'calendar' })
+        chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD', tab: 'calendar', chain: activeChain()?.id })
+          .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
+          .catch(() => showToast(t('openDashboardFailed'), 'error'));
+      }
+      if (action === 'dashboard-history') {
+        chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD', tab: 'history', chain: activeChain()?.id })
           .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
           .catch(() => showToast(t('openDashboardFailed'), 'error'));
       }
@@ -1291,6 +1561,8 @@
       clearChainContext();
       return;
     }
+    queueRender();
+    window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
     tickQuote();
   }
 
