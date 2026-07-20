@@ -282,6 +282,51 @@ test('quote calibration uses the coordinator clock and commits one revision', as
   assert.equal(persistence.writes.length, 1);
 });
 
+test('quote refresh rejects stale observations against the coordinator clock without a write', async () => {
+  const token = {
+    chain: 'eth', address: '0x5555555555555555555555555555555555555555',
+    symbol: 'SYN', metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+  };
+  const settings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 } }
+  });
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const bought = Engine.executeBuy(initial, {
+    token,
+    quote: {
+      priceUsd: 1, nativePriceUsd: 1,
+      observedAt: 1_000, nativePriceObservedAt: 1_000,
+      source: 'TANGO_SYNTHETIC', provisional: true,
+      syntheticTokenPrice: true, syntheticNativePrice: true,
+      valuationMode: 'PRICE', priceProvenance: 'SYNTHETIC_PRICE'
+    },
+    amountNative: 1
+  }, settings, 1_000).state;
+  const persistence = memoryPersistence(bought, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 1_000 + Tango.QUOTE_STALE_MS + 1
+  });
+
+  const result = await coordinator.mutate({
+    type: 'UPDATE_POSITION_QUOTE',
+    token,
+    quote: {
+      priceUsd: 2, nativePriceUsd: 3_000,
+      observedAt: 1_000, nativePriceObservedAt: 1_000,
+      source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+    }
+  });
+  const key = Engine.positionKey('eth', token.address);
+
+  assert.equal(result.state.positions[key].lastPriceUsd, 1);
+  assert.equal(result.state.stateRevision, bought.stateRevision);
+  assert.equal(persistence.writes.length, 0);
+});
+
 test('rejects a stale whole-state replacement by revision instead of erasing a newer mutation', async () => {
   const initial = State.createInitialState({ now: 1 });
   initial.initialized = true;
