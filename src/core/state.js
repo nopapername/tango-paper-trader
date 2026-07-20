@@ -4,7 +4,12 @@
   const MARKET_CAP_DIVISOR = 1_000_000_000;
   const VALUATION_MODES = ['PRICE', 'MARKET_CAP'];
   const PRICE_PROVENANCES = [
-    'OBSERVED_PRICE', 'MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED'
+    'OBSERVED_PRICE', 'MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED',
+    'SYNTHETIC_PRICE'
+  ];
+  const CALIBRATION_REASONS = [
+    'PRICE', 'NATIVE', 'SUPPLY', 'PRICE_AND_NATIVE', 'PRICE_AND_SUPPLY',
+    'NATIVE_AND_SUPPLY', 'PRICE_NATIVE_AND_SUPPLY'
   ];
   const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   const finite = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -42,6 +47,36 @@
     initialBalanceNative: Number(existing.initialBalanceNative || 10)
   });
   const native = (object, modern, legacy, fallback = 0) => Number(object?.[modern] ?? object?.[legacy] ?? fallback);
+
+  const isTrustedSupplySource = (value) => !value || Boolean(Tango.Supply?.isTrustedSource?.(value));
+  const optionalText = (value, maximum = 100) => typeof value === 'string' && value.length <= maximum;
+  const PROVENANCE_FIELDS = [
+    ['quoteSource', (value) => optionalText(value)],
+    ['paperFallback', (value) => typeof value === 'boolean'],
+    ['provisional', (value) => typeof value === 'boolean'],
+    ['syntheticTokenPrice', (value) => typeof value === 'boolean'],
+    ['syntheticNativePrice', (value) => typeof value === 'boolean'],
+    ['needsCalibration', (value) => typeof value === 'boolean'],
+    ['provisionalTokenPrice', (value) => typeof value === 'boolean'],
+    ['provisionalNativePrice', (value) => typeof value === 'boolean'],
+    ['totalSupply', (value) => finiteBetween(value, 0, Number.MAX_VALUE)],
+    ['supplySource', (value) => optionalText(value) && isTrustedSupplySource(value)],
+    ['launchpad', (value) => optionalText(value)],
+    ['launchMode', (value) => optionalText(value)]
+  ];
+
+  function validProvenance(value) {
+    return PROVENANCE_FIELDS.every(([field, validate]) => optional(value, field, validate));
+  }
+
+  function normalizeProvenance(value) {
+    const normalized = { ...value };
+    PROVENANCE_FIELDS.forEach(([field, validate]) => {
+      delete normalized[field];
+      if (validate(value?.[field])) normalized[field] = value[field];
+    });
+    return normalized;
+  }
 
   function validatePresetList(value, { maximum = Infinity } = {}) {
     return Array.isArray(value) && value.length > 0 && value.length <= 12
@@ -123,8 +158,7 @@
     if (!optional(trade, 'entryMarketCapUsd', (value) => finiteBetween(value, 0, Number.MAX_VALUE))) throw new Error('invalidTrade');
     if (!optional(trade, 'heldMs', (value) => finiteBetween(value, 0, Number.MAX_SAFE_INTEGER))) throw new Error('invalidTrade');
     if (!validTimestamp(trade.executedAt)) throw new Error('invalidTrade');
-    if (!optional(trade, 'paperFallback', (value) => typeof value === 'boolean')
-      || !optional(trade, 'quoteSource', (value) => typeof value === 'string' && value.length <= 100)
+    if (!validProvenance(trade)
       || !optional(trade, 'quoteObservedAtOriginal', validTimestamp)
       || !optional(trade, 'nativePriceObservedAtOriginal', validTimestamp)) throw new Error('invalidTrade');
     if (!legacy && trade.nativeSymbol && trade.nativeSymbol !== chain.nativeSymbol) throw new Error('invalidTrade');
@@ -150,6 +184,41 @@
     }
   }
 
+  function validateCalibration(event) {
+    if (!isRecord(event) || !String(event.id || '').trim()) throw new Error('invalidCalibration');
+    const chain = Tango.Chains.get(event.chain);
+    if (!chain || !Tango.Chains.validateAddress(chain.id, event.tokenAddress)) throw new Error('invalidCalibration');
+    const nonnegative = [
+      'fromPriceUsd', 'toPriceUsd', 'fromNativePriceUsd', 'toNativePriceUsd',
+      'fromSupply', 'toSupply', 'quantityBefore', 'quantityAfter', 'costBasisNative'
+    ];
+    if (nonnegative.some((field) => !finiteBetween(event[field], 0, Number.MAX_VALUE))
+      || !validTimestamp(event.createdAt)
+      || !CALIBRATION_REASONS.includes(event.reason)) {
+      throw new Error('invalidCalibration');
+    }
+  }
+
+  function normalizeCalibration(event, strict) {
+    try {
+      validateCalibration(event);
+    } catch (error) {
+      if (strict) throw error;
+      return null;
+    }
+    const chain = Tango.Chains.get(event.chain);
+    return {
+      id: String(event.id).trim(), chain: chain.id,
+      tokenAddress: Tango.Chains.normalizeAddress(chain.id, event.tokenAddress),
+      reason: event.reason,
+      fromPriceUsd: event.fromPriceUsd, toPriceUsd: event.toPriceUsd,
+      fromNativePriceUsd: event.fromNativePriceUsd, toNativePriceUsd: event.toNativePriceUsd,
+      fromSupply: event.fromSupply, toSupply: event.toSupply,
+      quantityBefore: event.quantityBefore, quantityAfter: event.quantityAfter,
+      costBasisNative: event.costBasisNative, createdAt: event.createdAt
+    };
+  }
+
   function inferredTradeProvenance(trade, chain) {
     if (trade?.priceProvenance) return {
       valuationMode: inferredTradeValuationMode(trade),
@@ -171,7 +240,7 @@
     if (strict) validateTrade(trade, true);
     const chain = Tango.Chains.get(trade?.chain);
     const provenance = inferredTradeProvenance(trade, chain);
-    return {
+    return normalizeProvenance({
       ...trade,
       chain: chain?.id || trade?.chain,
       tokenAddress: chain && Tango.Chains.validateAddress(chain.id, trade?.tokenAddress)
@@ -184,7 +253,7 @@
       nativePriceUsd: native(trade, 'nativePriceUsd', 'solPriceUsd'),
       nativeSymbol: trade.nativeSymbol || 'SOL',
       ...provenance
-    };
+    });
   };
   const normalizeV2Trade = (trade, strict) => {
     const chain = Tango.Chains.get(trade?.chain);
@@ -194,7 +263,7 @@
     }
     if (strict) validateTrade(trade);
     const provenance = inferredTradeProvenance(trade, chain);
-    return {
+    return normalizeProvenance({
       ...trade,
       chain: chain.id,
       tokenAddress: Tango.Chains.validateAddress(chain.id, trade?.tokenAddress)
@@ -207,7 +276,7 @@
       nativePriceUsd: native(trade, 'nativePriceUsd', 'solPriceUsd'),
       nativeSymbol: chain.nativeSymbol,
       ...provenance
-    };
+    });
   };
 
   function createInitialState({ now = Date.now(), initialBalances = {} } = {}) {
@@ -222,6 +291,7 @@
       accounts,
       positions: {},
       trades: [],
+      calibrations: [],
       dailyRealizedByChain,
       initialized: false
     };
@@ -313,6 +383,7 @@
         || !finite(position?.realizedPnlNative ?? position?.realizedPnlSol ?? 0)
         || !validTimestamp(position?.openedAt)
         || !validTimestamp(position?.updatedAt)
+        || !validProvenance(position)
         || !optional(position, 'quoteObservedAt', validTimestamp)
         || !optional(position, 'metadataUpdatedAt', validTimestamp)) {
         throw new Error('invalidPosition');
@@ -342,7 +413,7 @@
     const marketCapProvenance = coherentLegacyPumpMarketCap(position, chainId, address, quantity)
       ? MARKET_CAP_PROVENANCE
       : position?.marketCapProvenance;
-    return [canonicalKey, {
+    const normalizedPosition = normalizeProvenance({
       ...position,
       chain: chainId,
       tokenAddress: normalizedAddress,
@@ -351,7 +422,12 @@
       realizedPnlNative: native(position, 'realizedPnlNative', 'realizedPnlSol'),
       lastNativePriceUsd: native(position, 'lastNativePriceUsd', 'lastSolPriceUsd'),
       ...(marketCapProvenance ? { marketCapProvenance } : {})
-    }, key === expectedKey];
+    });
+    if (marketCapProvenance === MARKET_CAP_PROVENANCE && !hasOwn(position, 'totalSupply')) {
+      normalizedPosition.totalSupply = MARKET_CAP_DIVISOR;
+      normalizedPosition.supplySource = 'LEGACY_PUMP_RULE';
+    }
+    return [canonicalKey, normalizedPosition, key === expectedKey];
   }
 
   function validDateKey(value) {
@@ -394,6 +470,7 @@
       if (!isRecord(raw.account)) throw new Error('invalidAccount');
       if (!isRecord(raw.positions)) throw new Error('invalidPositions');
       if (!Array.isArray(raw.trades)) throw new Error('invalidTrades');
+      if (!optional(raw, 'calibrations', Array.isArray)) throw new Error('invalidCalibration');
       if (!isRecord(raw.dailyRealized)) throw new Error('invalidDaily');
       if (typeof raw.initialized !== 'boolean') throw new Error('invalidState');
     }
@@ -469,6 +546,9 @@
       chain.id,
       normalizeDaily(raw.dailyRealizedByChain?.[chain.id], strict)
     ]));
+    const calibrations = Array.isArray(raw.calibrations)
+      ? raw.calibrations.slice(0, Tango.MAX_TRADES).map((event) => normalizeCalibration(event, strict)).filter(Boolean)
+      : [];
     return {
       ...base,
       ...raw,
@@ -479,6 +559,7 @@
       accounts,
       positions,
       trades: Array.isArray(raw.trades) ? raw.trades.slice(0, Tango.MAX_TRADES).map((trade) => normalizeV2Trade(trade, strict)) : [],
+      calibrations,
       dailyRealizedByChain,
       initialized: Boolean(raw.initialized)
     };
@@ -490,6 +571,7 @@
     next.accounts[chain.id] = accountFor(balance, now);
     next.positions = Object.fromEntries(Object.entries(next.positions).filter(([, position]) => position.chain !== chain.id));
     next.trades = next.trades.filter((trade) => trade.chain !== chain.id);
+    next.calibrations = next.calibrations.filter((event) => event.chain !== chain.id);
     next.dailyRealizedByChain[chain.id] = {};
     return next;
   }

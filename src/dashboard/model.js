@@ -59,7 +59,9 @@
       'executedAt', 'chain', 'nativeSymbol', 'tokenAddress', 'symbol', 'side', 'amountNative',
       'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'nativePriceUsd',
       'slippageBps', 'platformFeeNative', 'networkFeeNative', 'realizedPnlNative',
-      'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'sourceUrl'
+      'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'quoteSource', 'paperFallback',
+      'provisional', 'syntheticTokenPrice', 'syntheticNativePrice', 'totalSupply', 'supplySource',
+      'launchpad', 'launchMode', 'sourceUrl'
     ];
     return Tango.ChainView.trades(state, selected.id).map((trade) => {
       const derived = hasDerivedMarketCapPrice(trade);

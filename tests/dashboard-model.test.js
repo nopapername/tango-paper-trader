@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 global.Tango = {};
 require('../src/core/chains.js');
+require('../src/core/supply.js');
 require('../src/shared/constants.js');
 require('../src/core/state.js');
 require('../src/core/engine.js');
@@ -136,8 +137,24 @@ test('CSV rows contain only the selected chain and native fields', () => {
     'executedAt', 'chain', 'nativeSymbol', 'tokenAddress', 'symbol', 'side', 'amountNative',
     'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'nativePriceUsd',
     'slippageBps', 'platformFeeNative', 'networkFeeNative', 'realizedPnlNative',
-    'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'sourceUrl'
+    'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'quoteSource', 'paperFallback',
+    'provisional', 'syntheticTokenPrice', 'syntheticNativePrice', 'totalSupply', 'supplySource',
+    'launchpad', 'launchMode', 'sourceUrl'
   ]);
+});
+
+test('CSV exports paper quote and supply provenance for the selected chain', () => {
+  const state = fixture();
+  Object.assign(state.trades[0], {
+    quoteSource: 'TANGO_SYNTHETIC', paperFallback: true, provisional: true,
+    syntheticTokenPrice: true, syntheticNativePrice: false,
+    totalSupply: 100_000_000_000, supplySource: 'GMGN_EXACT', launchpad: 'Clanker'
+  });
+  const row = DashboardModel.tradesCsvRows(state, 'eth')[0];
+  assert.equal(row.quoteSource, 'TANGO_SYNTHETIC');
+  assert.equal(row.provisional, true);
+  assert.equal(row.totalSupply, 100_000_000_000);
+  assert.equal(row.supplySource, 'GMGN_EXACT');
 });
 
 test('CSV labels market-cap-derived valuation without exporting its synthetic price', () => {

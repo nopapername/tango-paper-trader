@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 require('../src/core/chains.js');
+require('../src/core/supply.js');
 require('../src/shared/constants.js');
 const State = require('../src/core/state.js');
 const Engine = require('../src/core/engine.js');
@@ -79,6 +80,38 @@ test('new state creates six independent ten-native accounts', () => {
   });
 });
 
+test('schema v2 preserves provisional supply provenance and calibration audit events', () => {
+  const state = State.createInitialState({ now: 1 });
+  state.initialized = true;
+  state.positions[`base:${EVM_ADDRESS}`] = {
+    chain: 'base', tokenAddress: EVM_ADDRESS, quantity: 1, costBasisNative: 1,
+    realizedPnlNative: 0, averageEntryPriceUsd: 1, averageEntryMarketCap: 0,
+    lastPriceUsd: 1, lastMarketCapUsd: 0, lastNativePriceUsd: 1,
+    totalSupply: 0, supplySource: '', needsCalibration: true,
+    provisionalTokenPrice: true, provisionalNativePrice: true,
+    valuationMode: 'PRICE', lastPriceProvenance: 'SYNTHETIC_PRICE',
+    averageEntryPriceProvenance: 'SYNTHETIC_PRICE', openedAt: 1, updatedAt: 1
+  };
+  state.calibrations.push({
+    id: 'c1', chain: 'base', tokenAddress: EVM_ADDRESS, reason: 'PRICE_AND_NATIVE',
+    fromPriceUsd: 1, toPriceUsd: 2, fromNativePriceUsd: 1, toNativePriceUsd: 3000,
+    fromSupply: 0, toSupply: 1_000_000_000, quantityBefore: 1,
+    quantityAfter: 1500, costBasisNative: 1, createdAt: 2
+  });
+  const normalized = State.normalizeState(state, State.normalizeSettings({}), { strict: true });
+  assert.equal(normalized.positions[`base:${EVM_ADDRESS}`].needsCalibration, true);
+  assert.equal(normalized.calibrations[0].reason, 'PRICE_AND_NATIVE');
+});
+
+test('selected-chain reset removes only that chain calibration events', () => {
+  const state = State.createInitialState({ now: 1 });
+  state.calibrations = [
+    { id: 'eth', chain: 'eth', tokenAddress: EVM_ADDRESS, reason: 'PRICE', fromPriceUsd: 1, toPriceUsd: 2, fromNativePriceUsd: 1, toNativePriceUsd: 2, fromSupply: 0, toSupply: 0, quantityBefore: 1, quantityAfter: 1, costBasisNative: 1, createdAt: 2 },
+    { id: 'base', chain: 'base', tokenAddress: EVM_ADDRESS, reason: 'PRICE', fromPriceUsd: 1, toPriceUsd: 2, fromNativePriceUsd: 1, toNativePriceUsd: 2, fromSupply: 0, toSupply: 0, quantityBefore: 1, quantityAfter: 1, costBasisNative: 1, createdAt: 2 }
+  ];
+  assert.deepEqual(State.resetChain(state, 'eth', 10, 3).calibrations.map((item) => item.chain), ['base']);
+});
+
 test('v1 migration preserves Solana economics and initializes only new chains', () => {
   const address = 'So11111111111111111111111111111111111111112';
   const canonicalKey = `sol:${address}`;
@@ -109,6 +142,8 @@ test('v1 migration backfills trusted provenance for a coherent legacy Pump posit
   };
   const migrated = State.normalizeState(legacy, State.normalizeSettings({}));
   assert.equal(migrated.positions[key].marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.equal(migrated.positions[key].totalSupply, 1_000_000_000);
+  assert.equal(migrated.positions[key].supplySource, 'LEGACY_PUMP_RULE');
 
   const freshQuote = {
     priceUsd: 0, marketCapUsd: 6_000, nativePriceUsd: 100,
@@ -120,6 +155,41 @@ test('v1 migration backfills trusted provenance for a coherent legacy Pump posit
   }, State.normalizeSettings({ slippageBps: 0, platformFeeBps: 0, networkFeeSol: 0 }), 2_000);
   assert.equal(sold.trade.observedPriceUsd, 0.000006);
   assert.ok(sold.trade.amountNative > 0);
+});
+
+test('strict imports reject unsafe provenance while non-strict normalization strips it', () => {
+  const state = State.createInitialState({ now: 1 });
+  state.trades = [validTrade({
+    provisional: 'yes', syntheticTokenPrice: true, totalSupply: 1_000_000_000,
+    supplySource: 'FORGED', launchpad: 'x'.repeat(101)
+  })];
+  assert.throws(
+    () => State.normalizeState(state, State.normalizeSettings({}), { strict: true }),
+    /invalidTrade/
+  );
+  const normalized = State.normalizeState(state, State.normalizeSettings({}));
+  assert.equal(normalized.trades[0].provisional, undefined);
+  assert.equal(normalized.trades[0].syntheticTokenPrice, true);
+  assert.equal(normalized.trades[0].supplySource, undefined);
+  assert.equal(normalized.trades[0].launchpad, undefined);
+});
+
+test('calibrations normalize addresses, reject malformed events, and remain bounded', () => {
+  const state = State.createInitialState({ now: 1 });
+  const valid = {
+    id: 'c1', chain: 'eth', tokenAddress: `0x${EVM_ADDRESS.slice(2).toUpperCase()}`, reason: 'PRICE',
+    fromPriceUsd: 1, toPriceUsd: 2, fromNativePriceUsd: 1, toNativePriceUsd: 2,
+    fromSupply: 0, toSupply: 0, quantityBefore: 1, quantityAfter: 1, costBasisNative: 1, createdAt: 2
+  };
+  state.calibrations = Array.from({ length: Tango.MAX_TRADES + 1 }, (_, index) => ({ ...valid, id: `c${index}` }));
+  const normalized = State.normalizeState(state, State.normalizeSettings({}), { strict: true });
+  assert.equal(normalized.calibrations.length, Tango.MAX_TRADES);
+  assert.equal(normalized.calibrations[0].tokenAddress, EVM_ADDRESS);
+  state.calibrations = [{ ...valid, reason: 'FORGED' }];
+  assert.throws(
+    () => State.normalizeState(state, State.normalizeSettings({}), { strict: true }),
+    /invalidCalibration/
+  );
 });
 
 test('v2 normalization backfills only coherent legacy Solana Pump market-cap positions', () => {

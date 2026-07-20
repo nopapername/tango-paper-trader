@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 global.Tango = {};
 require('../src/core/chains.js');
+require('../src/core/supply.js');
 require('../src/shared/constants.js');
 const State = require('../src/core/state.js');
 const Engine = require('../src/core/engine.js');
