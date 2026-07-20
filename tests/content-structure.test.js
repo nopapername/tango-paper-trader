@@ -28,8 +28,8 @@ test('render computes one portfolio summary and passes it to the drawer', () => 
   const render = between('function render()', 'function bindEvents()');
   assert.match(drawer, /^function renderDrawer\(summary\)/);
   assert.doesNotMatch(drawer, /portfolioSummary/);
-  assert.match(render, /const summary = Tango\.Engine\.portfolioSummary\(runtime\.state, activeChain\(\)\.id\)/);
-  assert.equal([...render.matchAll(/Tango\.Engine\.portfolioSummary\(runtime\.state, activeChain\(\)\.id\)/g)].length, 1);
+  assert.match(render, /const summary = Tango\.Engine\.portfolioSummary\(runtime\.state, activeChain\(\)\.id, currentNativePriceUsd\(\)\)/);
+  assert.equal([...render.matchAll(/Tango\.Engine\.portfolioSummary\(runtime\.state, activeChain\(\)\.id, currentNativePriceUsd\(\)\)/g)].length, 1);
   assert.match(render, /renderDrawer\(summary\)/);
 });
 
@@ -133,7 +133,7 @@ test('native prices and GMGN quotes are explicitly keyed by chain', () => {
 test('panel marks positions only from a coherent executable quote', () => {
   const panel = between('function renderPanel()', 'function floatingStyle(');
   assert.ok(panel.indexOf('const liveQuote = executableQuote(current.token, current.quote)')
-    < panel.indexOf('const mark = position ? Tango.Engine.markPosition(position, liveQuote) : null'));
+    < panel.indexOf('const mark = position ? Tango.Engine.markPosition(position, liveQuote, currentNativePriceUsd()) : null'));
   assert.doesNotMatch(panel, /markPosition\(position, current\?\.quote\)/);
 });
 
@@ -169,7 +169,7 @@ test('every operational surface is registry and selected-chain driven', () => {
   const content = fs.readFileSync(path.join(root, 'src/content/content.js'), 'utf8');
   const popup = fs.readFileSync(path.join(root, 'src/popup/popup.js'), 'utf8');
   const dashboard = fs.readFileSync(path.join(root, 'src/dashboard/dashboard.js'), 'utf8');
-  assert.match(content, /portfolioSummary\(runtime\.state, activeChain\(\)\.id\)/);
+  assert.match(content, /portfolioSummary\(runtime\.state, activeChain\(\)\.id, currentNativePriceUsd\(\)\)/);
   assert.match(content, /ChainView\.positions\(runtime\.state, activeChain\(\)\.id\)/);
   assert.match(popup, /PopupModel\.build/);
   assert.match(dashboard, /DashboardModel\.build/);

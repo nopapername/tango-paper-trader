@@ -2,11 +2,27 @@
   const Tango = global.Tango = global.Tango || {};
   const MARKET_CAP_PROVENANCE = 'SOLANA_PUMP_TRENCH_V1';
   const MARKET_CAP_DIVISOR = 1_000_000_000;
+  const VALUATION_MODES = ['PRICE', 'MARKET_CAP'];
+  const PRICE_PROVENANCES = [
+    'OBSERVED_PRICE', 'MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED'
+  ];
   const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   const finite = (value) => typeof value === 'number' && Number.isFinite(value);
   const finiteBetween = (value, minimum, maximum) => finite(value)
     && value >= minimum && value <= maximum;
   const validTimestamp = (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  const coherentPumpIdentity = (chainId, address) => chainId === 'sol'
+    && Tango.Chains.validateAddress(chainId, address)
+    && /pump$/i.test(String(address || ''));
+  const marketCapRatioMatches = (marketCap, price) => {
+    const cap = Number(marketCap); const value = Number(price);
+    return cap > 0 && value > 0
+      && Math.abs(cap / value - MARKET_CAP_DIVISOR) <= MARKET_CAP_DIVISOR * 0.001;
+  };
+  const inferredTradeValuationMode = (trade) => {
+    if (VALUATION_MODES.includes(trade?.valuationMode)) return trade.valuationMode;
+    return trade?.priceProvenance === 'MARKET_CAP_DERIVED' ? 'MARKET_CAP' : 'PRICE';
+  };
   const migrationTimestamp = (value) => Number.isSafeInteger(Number(value)) && Number(value) >= 0;
   const hasOwn = (value, field) => isRecord(value) && Object.hasOwn(value, field);
   const optional = (object, field, validate) => !hasOwn(object, field) || validate(object[field]);
@@ -108,27 +124,43 @@
     if (!optional(trade, 'heldMs', (value) => finiteBetween(value, 0, Number.MAX_SAFE_INTEGER))) throw new Error('invalidTrade');
     if (!validTimestamp(trade.executedAt)) throw new Error('invalidTrade');
     if (!legacy && trade.nativeSymbol && trade.nativeSymbol !== chain.nativeSymbol) throw new Error('invalidTrade');
-    if (trade.valuationMode != null && !['PRICE', 'MARKET_CAP'].includes(trade.valuationMode)) throw new Error('invalidTrade');
-    if (trade.priceProvenance != null && ![
-      'OBSERVED_PRICE', 'MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED'
-    ].includes(trade.priceProvenance)) throw new Error('invalidTrade');
+    if (trade.valuationMode != null && !VALUATION_MODES.includes(trade.valuationMode)) throw new Error('invalidTrade');
+    if (trade.priceProvenance != null && !PRICE_PROVENANCES.includes(trade.priceProvenance)) throw new Error('invalidTrade');
+    if (trade.marketCapProvenance != null && trade.marketCapProvenance !== MARKET_CAP_PROVENANCE) {
+      throw new Error('invalidTrade');
+    }
+    const coherentPump = coherentPumpIdentity(chain.id, trade.tokenAddress);
+    const valuationMode = inferredTradeValuationMode(trade);
+    const derivedPrice = ['MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED']
+      .includes(trade.priceProvenance);
+    if ((valuationMode === 'MARKET_CAP' || derivedPrice || trade.marketCapProvenance != null) && !coherentPump) {
+      throw new Error('invalidTrade');
+    }
+    if ((trade.valuationMode === 'PRICE' && trade.priceProvenance === 'MARKET_CAP_DERIVED')
+      || (trade.valuationMode === 'MARKET_CAP' && trade.priceProvenance === 'MARKET_CAP_RATIO_DERIVED')
+      || (trade.marketCapProvenance != null && valuationMode === 'PRICE'
+        && trade.priceProvenance !== 'MARKET_CAP_RATIO_DERIVED')
+      || (trade.valuationMode === 'MARKET_CAP' && trade.priceProvenance == null
+        && !marketCapRatioMatches(trade.marketCapUsd, trade.observedPriceUsd))) {
+      throw new Error('invalidTrade');
+    }
   }
 
   function inferredTradeProvenance(trade, chain) {
     if (trade?.priceProvenance) return {
-      valuationMode: trade.valuationMode || (String(trade.priceProvenance).startsWith('MARKET_CAP') ? 'MARKET_CAP' : 'PRICE'),
+      valuationMode: inferredTradeValuationMode(trade),
       priceProvenance: trade.priceProvenance,
       ...(trade.marketCapProvenance ? { marketCapProvenance: trade.marketCapProvenance } : {})
     };
-    const price = Number(trade?.observedPriceUsd);
-    const marketCap = Number(trade?.marketCapUsd);
+    if (trade?.valuationMode === 'PRICE') {
+      return { valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE' };
+    }
     const coherentLegacyMarketCap = chain?.id === 'sol'
-      && /pump$/i.test(String(trade?.tokenAddress || ''))
-      && price > 0 && marketCap > 0
-      && Math.abs(marketCap / price - MARKET_CAP_DIVISOR) <= MARKET_CAP_DIVISOR * 0.001;
+      && coherentPumpIdentity(chain.id, trade?.tokenAddress)
+      && marketCapRatioMatches(trade?.marketCapUsd, trade?.observedPriceUsd);
     return coherentLegacyMarketCap
       ? { valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED', marketCapProvenance: MARKET_CAP_PROVENANCE }
-      : { valuationMode: trade?.valuationMode || 'PRICE', priceProvenance: 'OBSERVED_PRICE' };
+      : { valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE' };
   }
 
   const migrateTrade = (trade, strict) => {
@@ -239,14 +271,8 @@
     const nativePrice = native(position, 'lastNativePriceUsd', 'lastSolPriceUsd');
     const averageMarketCap = Number(position?.averageEntryMarketCap);
     const averagePrice = Number(position?.averageEntryPriceUsd);
-    const ratioMatches = (marketCap, price) => {
-      const cap = Number(marketCap); const value = Number(price);
-      if (!(cap > 0) || !(value > 0)) return false;
-      return Math.abs(cap / value - MARKET_CAP_DIVISOR) <= MARKET_CAP_DIVISOR * 0.001;
-    };
     return !position?.marketCapProvenance
-      && chainId === 'sol'
-      && /pump$/i.test(String(address || ''))
+      && coherentPumpIdentity(chainId, address)
       && position?.valuationMode === 'MARKET_CAP'
       && Number(position?.marketCapDivisor) === MARKET_CAP_DIVISOR
       && quantity > 0
@@ -254,7 +280,7 @@
       && Number.isFinite(nativePrice) && nativePrice > 0
       && Number.isFinite(averageMarketCap) && averageMarketCap > 0
       && Number.isFinite(averagePrice) && averagePrice > 0
-      && ratioMatches(position?.lastMarketCapUsd, position?.lastPriceUsd);
+      && marketCapRatioMatches(position?.lastMarketCapUsd, position?.lastPriceUsd);
   }
 
   function normalizePosition(position, key, accounts, strict, legacyKey = false) {
@@ -285,6 +311,24 @@
         || !validTimestamp(position?.updatedAt)
         || !optional(position, 'quoteObservedAt', validTimestamp)
         || !optional(position, 'metadataUpdatedAt', validTimestamp)) {
+        throw new Error('invalidPosition');
+      }
+      if (position.valuationMode != null && !VALUATION_MODES.includes(position.valuationMode)) {
+        throw new Error('invalidPosition');
+      }
+      if (position.marketCapProvenance != null && position.marketCapProvenance !== MARKET_CAP_PROVENANCE) {
+        throw new Error('invalidPosition');
+      }
+      if (['lastPriceProvenance', 'averageEntryPriceProvenance'].some((field) =>
+        position[field] != null && !PRICE_PROVENANCES.includes(position[field]))) {
+        throw new Error('invalidPosition');
+      }
+      const coherentMarketCapContext = chainId === 'sol'
+        && /pump$/i.test(String(address || ''))
+        && position.valuationMode === 'MARKET_CAP'
+        && position.marketCapDivisor === MARKET_CAP_DIVISOR;
+      if ((position.valuationMode === 'MARKET_CAP' || position.marketCapProvenance != null)
+        && !coherentMarketCapContext) {
         throw new Error('invalidPosition');
       }
     }

@@ -24,6 +24,13 @@ const REQUIRED_MAIN_ORDER = [
 const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 8);
 const REQUIRED_POPUP_ORDER = [...REQUIRED_PAGE_ORDER, 'src/content/chain-view.js', 'src/popup/model.js', 'src/popup/popup.js'];
 const REQUIRED_DASHBOARD_ORDER = [...REQUIRED_PAGE_ORDER, 'src/content/chain-view.js', 'src/dashboard/model.js', 'src/dashboard/dashboard.js'];
+const REQUIRED_WORKER_IMPORT_ORDER = [
+  'core/chains.js',
+  'shared/constants.js',
+  'core/state.js',
+  'core/engine.js',
+  'core/state-coordinator.js'
+];
 
 function versionConsistencyErrors({ packageVersion, manifestVersion, constantsSource }) {
   const constantsVersion = String(constantsSource || '').match(/Tango\.VERSION\s*=\s*['\"]([^'\"]+)['\"]/)?.[1] || '';
@@ -78,6 +85,18 @@ function dashboardScriptOrderErrors(html) {
   const indexes = REQUIRED_DASHBOARD_ORDER.map((script) => scripts.indexOf(script));
   const ordered = indexes.every((index, position) => position === 0 || indexes[position - 1] < index);
   return ordered ? [] : [`Invalid dashboard script dependency order: ${REQUIRED_DASHBOARD_ORDER.join(' -> ')}`];
+}
+
+function workerImportErrors(workerFile, source) {
+  const match = String(source || '').match(/importScripts\s*\(([\s\S]*?)\)\s*;/);
+  const imports = match
+    ? [...match[1].matchAll(/['"]([^'"]+)['"]/g)].map((entry) => entry[1])
+    : [];
+  const exact = imports.length === REQUIRED_WORKER_IMPORT_ORDER.length
+    && REQUIRED_WORKER_IMPORT_ORDER.every((file, index) => imports[index] === file);
+  return exact ? [] : [
+    `Invalid ${workerFile || 'service worker'} worker-relative import sequence: ${REQUIRED_WORKER_IMPORT_ORDER.join(' -> ')}`
+  ];
 }
 
 function javascriptSyntaxErrors(sources) {
@@ -147,6 +166,10 @@ function validateExtension(root = path.resolve(__dirname, '..')) {
   }));
   errors.push(...contentScriptOrderErrors(manifest.content_scripts));
   errors.push(...mainWorldScriptOrderErrors(manifest.content_scripts));
+  const workerFile = manifest.background?.service_worker;
+  if (workerFile && fs.existsSync(path.join(root, workerFile))) {
+    errors.push(...workerImportErrors(workerFile, fs.readFileSync(path.join(root, workerFile), 'utf8')));
+  }
   errors.push(...javascriptSyntaxErrors(collectJavaScriptSources(root)));
   return { errors, manifest, referenced };
 }
@@ -165,6 +188,7 @@ module.exports = {
   REQUIRED_ISOLATED_ORDER,
   REQUIRED_MAIN_ORDER,
   REQUIRED_DASHBOARD_ORDER,
+  REQUIRED_WORKER_IMPORT_ORDER,
   validateExtension,
   versionConsistencyErrors,
   contentScriptOrderErrors,
@@ -172,5 +196,6 @@ module.exports = {
   htmlScriptOrderErrors,
   popupScriptOrderErrors,
   dashboardScriptOrderErrors,
+  workerImportErrors,
   javascriptSyntaxErrors
 };

@@ -22,25 +22,29 @@
   }
 
   function hasDerivedMarketCapPrice(trade) {
-    return String(trade?.priceProvenance || '').startsWith('MARKET_CAP')
-      || trade?.priceProvenance === 'MIXED_DERIVED'
-      || trade?.valuationMode === 'MARKET_CAP';
+    const provenance = String(trade?.priceProvenance || '');
+    if (provenance) {
+      return provenance.startsWith('MARKET_CAP') || provenance === 'MIXED_DERIVED';
+    }
+    return trade?.valuationMode === 'MARKET_CAP';
   }
 
   function build(state, settings, selectedChain, nativePrices = {}, filters = {}) {
     const chain = Tango.Chains.get(selectedChain) || Tango.Chains.get('sol');
+    const nativePriceUsd = Number(nativePrices?.[chain.id] || 0);
     const positions = Tango.ChainView.positions(state, chain.id);
     const trades = Tango.ChainView.trades(state, chain.id).filter((trade) => matchesFilters(trade, filters));
     return {
       chain,
       positions,
       trades,
-      summary: Tango.Engine.portfolioSummary(state, chain.id),
+      summary: Tango.Engine.portfolioSummary(state, chain.id, nativePriceUsd),
       globalUsd: Tango.Engine.globalUsdSummary(state, nativePrices),
+      nativePriceUsd,
       chainSettings: settingsFor(settings, chain.id),
       accounts: Tango.Chains.all().map((entry) => ({
         chain: entry,
-        summary: Tango.Engine.portfolioSummary(state, entry.id),
+        summary: Tango.Engine.portfolioSummary(state, entry.id, Number(nativePrices?.[entry.id] || 0)),
         nativePriceUsd: Number(nativePrices?.[entry.id] || 0),
         usdSummary: Number(nativePrices?.[entry.id] || 0) > 0
           ? Tango.Engine.chainUsdSummary(state, entry.id, nativePrices[entry.id])

@@ -15,11 +15,27 @@ const {
   REQUIRED_MAIN_ORDER,
   REQUIRED_DASHBOARD_ORDER
 } = require('../scripts/validate-extension.js');
+const validation = require('../scripts/validate-extension.js');
 
 test('the current extension satisfies all static contracts', () => {
   const result = validateExtension(path.resolve(__dirname, '..'));
   assert.deepEqual(result.errors, []);
   assert.equal(result.manifest.version, '0.3.0');
+});
+
+test('static validation enforces worker-relative bootstrap imports', () => {
+  assert.equal(typeof validation.workerImportErrors, 'function');
+  assert.deepEqual(validation.workerImportErrors(
+    'src/background.js',
+    "importScripts('core/chains.js','shared/constants.js','core/state.js','core/engine.js','core/state-coordinator.js');"
+  ), []);
+  assert.match(
+    validation.workerImportErrors(
+      'src/background.js',
+      "importScripts('src/core/chains.js','src/shared/constants.js','src/core/state.js','src/core/engine.js','src/core/state-coordinator.js');"
+    )[0],
+    /worker-relative import sequence/
+  );
 });
 
 test('version consistency reports a mismatch', () => {

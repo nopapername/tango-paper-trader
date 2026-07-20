@@ -81,7 +81,9 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
   persistedState.initialized = initialized;
   let persistedSettings = settingsFixture();
   let getAllCalls = 0;
-  const calls = { saves: [], fullSaves: [], initialize: 0, resetChain: 0, resetAll: 0 };
+  const confirmations = [];
+  const openedTabs = [];
+  const calls = { saves: [], fullSaves: [], initialize: 0, resetChain: 0, resetChainArgs: [], resetAll: 0 };
   const Tango = {
     Chains,
     I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key },
@@ -123,8 +125,9 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
         if (failAction === 'initialize' && calls.initialize === 1) throw new Error('write failed');
         return { state: persistedState, settings: persistedSettings };
       },
-      async resetChain() {
+      async resetChain(...args) {
         calls.resetChain += 1;
+        calls.resetChainArgs.push(args);
         if (failAction === 'reset-chain' && calls.resetChain === 1) throw new Error('write failed');
         return persistedState;
       },
@@ -142,13 +145,13 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
   const context = {
     Promise, Object, Number, String, Array, Map, Set, Math, Date, JSON, console, Tango, document,
     setTimeout: () => 0,
-    confirm: () => true,
+    confirm: (message) => { confirmations.push(message); return true; },
     chrome: {
       runtime: {
         async sendMessage() { return { ok: true, price: 100, observedAt: 1 }; },
         openOptionsPage() {}
       },
-      tabs: { create() {} }
+      tabs: { create({ url }) { openedTabs.push(url); } }
     }
   };
   const startup = vm.runInNewContext(popupSource, context, { filename: 'src/popup/popup.js' });
@@ -156,7 +159,7 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
   try { await startup; } catch (error) { startupError = error; }
   await new Promise((resolve) => setImmediate(resolve));
   return {
-    app, calls, element, startupError,
+    app, calls, confirmations, element, openedTabs, startupError,
     get persistedSettings() { return persistedSettings; }
   };
 }
@@ -295,4 +298,67 @@ test('Popup rolls back a failed latest chain selection to the last successful qu
   assert.equal(popup.persistedSettings.selectedChain, 'bsc');
   assert.equal(popup.element('#popup-chain').value, 'bsc');
   assert.match(popup.app.innerHTML, /settingsSaveFailed/);
+});
+
+test('Popup waits for a pending BSC selection before resetting the selected chain', async () => {
+  const popup = await loadPopup();
+  const selector = popup.element('#popup-chain');
+  const reset = popup.element('#reset-chain-button');
+  selector.value = 'bsc';
+
+  const changing = selector.emit('change');
+  const resetting = reset.click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(popup.calls.resetChain, 0);
+  popup.calls.saves[0].gate.resolve();
+  await Promise.all([changing, resetting]);
+  assert.equal(popup.calls.resetChain, 1);
+  assert.equal(popup.calls.resetChainArgs[0][0], 'bsc');
+  assert.notEqual(popup.calls.resetChainArgs[0][0], 'eth');
+});
+
+test('Popup waits for a pending BSC selection before opening GMGN', async () => {
+  const popup = await loadPopup();
+  const selector = popup.element('#popup-chain');
+  const gmgn = popup.element('#gmgn');
+  selector.value = 'bsc';
+
+  const changing = selector.emit('change');
+  const opening = gmgn.click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(popup.openedTabs, []);
+  popup.calls.saves[0].gate.resolve();
+  await Promise.all([changing, opening]);
+  assert.deepEqual(popup.openedTabs, [Chains.trenchUrl('bsc')]);
+});
+
+test('Popup rejected selection cancels its scoped action, rolls back, and remains usable', async () => {
+  const popup = await loadPopup();
+  const selector = popup.element('#popup-chain');
+  const staleReset = popup.element('#reset-chain-button');
+  selector.value = 'bsc';
+
+  const changing = selector.emit('change');
+  const pendingReset = staleReset.click();
+  await new Promise((resolve) => setImmediate(resolve));
+  popup.calls.saves[0].gate.reject(new Error('write failed'));
+  await Promise.all([changing, pendingReset]);
+
+  assert.equal(popup.calls.resetChain, 0);
+  assert.equal(popup.element('#popup-chain').value, 'eth');
+  await popup.element('#reset-chain-button').click();
+  assert.equal(popup.calls.resetChain, 1);
+  assert.equal(popup.calls.resetChainArgs[0][0], 'eth');
+});
+
+test('Popup confirmations keep selected-chain and permanent all-six-chain resets separate', async () => {
+  const popup = await loadPopup();
+  await popup.element('#reset-chain-button').click();
+  await popup.element('#reset-all-button').click();
+
+  assert.deepEqual(popup.confirmations, ['resetSelectedChainConfirm', 'resetAllChainsConfirm']);
+  assert.equal(popup.calls.resetChain, 1);
+  assert.equal(popup.calls.resetAll, 1);
 });

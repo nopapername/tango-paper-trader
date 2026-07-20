@@ -51,6 +51,21 @@ test('Popup model shows one chain and a separate global USD summary', () => {
   assert.deepEqual(Array.from(model.chainOptions, (chain) => chain.id), ['sol', 'eth', 'bsc', 'base', 'robinhood', 'xlayer']);
 });
 
+test('Popup selected-chain native summary uses the current native price', () => {
+  const Tango = loadPopupModel();
+  const state = stateWithEthAndBsc(Tango);
+  const model = Tango.PopupModel.build(
+    state,
+    Tango.State.normalizeSettings({ language: 'en' }),
+    'eth',
+    { eth: 1_000 }
+  );
+
+  assert.equal(model.summary.positionsValueNative, 2);
+  assert.equal(model.summary.equityNative, 12);
+  assert.equal(model.summary.totalPnlNative, 2);
+});
+
 test('unknown selected chain falls back to Solana without changing state', () => {
   const Tango = loadPopupModel();
   const state = stateWithEthAndBsc(Tango);

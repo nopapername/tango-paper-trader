@@ -19,18 +19,39 @@
     capabilities: Object.freeze({ detail: true, trench: true, chart: true })
   })));
   const byId = new Map(chains.map((chain) => [chain.id, chain]));
+  const base58Alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   const get = (id) => byId.get(String(id || '').toLowerCase()) || null;
   const requireChain = (id) => { const chain = get(id); if (!chain) throw new Error('unsupportedChain'); return chain; };
   const normalizeAddress = (chainId, address) => {
     const chain = requireChain(chainId); const value = String(address || '').trim();
     return chain.addressFamily === 'EVM' ? value.toLowerCase() : value;
   };
+  const decodedBase58Length = (value) => {
+    const bytes = [0];
+    for (const character of value) {
+      let carry = base58Alphabet.indexOf(character);
+      if (carry < 0) return -1;
+      for (let index = 0; index < bytes.length; index += 1) {
+        carry += bytes[index] * 58;
+        bytes[index] = carry & 0xff;
+        carry >>= 8;
+      }
+      while (carry > 0) {
+        bytes.push(carry & 0xff);
+        carry >>= 8;
+      }
+    }
+    let leadingZeroBytes = 0;
+    while (value[leadingZeroBytes] === '1') leadingZeroBytes += 1;
+    const significantBytes = bytes.length === 1 && bytes[0] === 0 ? 0 : bytes.length;
+    return leadingZeroBytes + significantBytes;
+  };
   const validateAddress = (chainId, address) => {
     const chain = get(chainId); const value = String(address || '').trim();
     if (!chain) return false;
     return chain.addressFamily === 'EVM'
       ? /^0x[a-fA-F0-9]{40}$/.test(value)
-      : /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+      : /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value) && decodedBase58Length(value) === 32;
   };
   const fromUrl = (value) => {
     let url; try { url = new URL(String(value || '')); } catch { return null; }

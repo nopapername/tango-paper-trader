@@ -20,7 +20,10 @@
       const state = Tango.State.normalizeState(storedState, settings, { migrationNow: now() });
       if (persistMigration && Number(storedState?.schemaVersion) === 1) {
         state.stateRevision = Number(storedState.stateRevision || 0) + 1;
-        await writeRaw({ [Tango.STORAGE_KEY]: state });
+        await writeRaw({
+          [Tango.STORAGE_KEY]: state,
+          [Tango.SETTINGS_KEY]: settings
+        });
       }
       return { state, settings };
     }

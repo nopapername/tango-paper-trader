@@ -20,6 +20,11 @@ test('address validation is family-specific and normalization is deterministic',
   assert.equal(Chains.normalizeAddress('base', evm), evm.toLowerCase());
   assert.equal(Chains.validateAddress('sol', evm), false);
   assert.equal(Chains.validateAddress('sol', 'So11111111111111111111111111111111111111112'), true);
+  assert.equal(
+    Chains.validateAddress('sol', '11111111111111111111111111111111pump'),
+    false,
+    'Base58 text must decode to exactly 32 bytes'
+  );
 });
 
 test('token URLs validate the address before construction', () => {

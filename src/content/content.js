@@ -149,7 +149,7 @@
   window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
 
   function language() { return Tango.I18n.resolveLanguage(runtime.settings?.language); }
-  function t(key) { return Tango.I18n.t(key, runtime.settings?.language); }
+  function t(key, vars) { return Tango.I18n.t(key, runtime.settings?.language, vars); }
   function accountMoney(value, signed = false) {
     const chain = activeChain();
     if (!chain) return '--';
@@ -180,7 +180,9 @@
     const numeric = Number(value || 0); const sign = signed && numeric > 0 ? '+' : numeric < 0 ? '-' : '';
     return `${sign}${Tango.Format.usd(Math.abs(numeric), language())}`;
   }
-  function positionUsdValue(position, mark = Tango.Engine.markPosition(position, freshExecutableQuote(position))) {
+  function positionUsdValue(position, mark = Tango.Engine.markPosition(
+    position, freshExecutableQuote(position), currentNativePriceUsd()
+  )) {
     return Number(position.quantity || 0) * Number(mark.priceUsd || 0);
   }
   function positionUsdTotal(positions) {
@@ -467,13 +469,14 @@
       liquidityUsd: Number(quote.liquidityUsd || 0),
       observedAt: Number(quote.observedAt || 0),
       source: String(quote.source || ''),
-      marketCapDivisor: trustedMarketCap ? Number(quote.marketCapDivisor) : 0,
       nativePriceUsd,
       nativePriceObservedAt: nativePriceUsd ? runtime.nativePriceObservedAt.get(chain) : 0,
       valuationMode: trustedMarketCap
         ? 'MARKET_CAP'
         : Number(quote.priceUsd) > 0 ? 'PRICE' : ''
     };
+    if (trustedMarketCap) context.quote.marketCapDivisor = Number(quote.marketCapDivisor);
+    else delete context.quote.marketCapDivisor;
     return context.quote;
   }
 
@@ -725,7 +728,7 @@
     if (!chain) return showToast(t('unsupportedChain'), 'error');
     const positions = Tango.ChainView.positions(runtime.state, chain.id);
     if (!positions.length) return showToast(t('noPositions'), 'error');
-    const summary = Tango.Engine.portfolioSummary(runtime.state, chain.id);
+    const summary = Tango.Engine.portfolioSummary(runtime.state, chain.id, currentNativePriceUsd());
     const usdMode = runtime.settings?.displayCurrency === 'USD';
     runtime.modal = {
       type: 'confirm', title: t('closeAllConfirm'),
@@ -767,6 +770,7 @@
           reason: quoteFailures.get(Tango.Engine.positionKey(position.chain, position.tokenAddress)) || 'staleQuote'
         }));
       const failures = [...skippedFailures, ...(result.failures || [])];
+      const failedCount = t('closeAllFailedCount', { count: failures.length });
       const failureDetails = failures.map((failure) => {
         const token = failure?.order?.token || {};
         const identity = token.symbol || String(token.address || '').slice(0, 10) || t('token');
@@ -776,10 +780,12 @@
       if (closed) {
         playTradeSound('SELL');
         const message = failures.length
-          ? `${t('closeAllPartial')} · ${closed}/${positions.length} · ${failureDetails}`
+          ? `${t('closeAllPartial')} · ${closed}/${positions.length} · ${failedCount} · ${failureDetails}`
           : `${t('closeAllSuccess')} · ${closed}`;
         showToast(message, failures.length ? 'error' : 'success');
-      } else showToast(failures.length ? `${t('closeAllPartial')} · ${failureDetails}` : t('invalidQuote'), 'error');
+      } else showToast(failures.length
+        ? `${t('closeAllPartial')} · ${failedCount} · ${failureDetails}`
+        : t('invalidQuote'), 'error');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
     finally { runtime.tradePending = false; }
   }
@@ -927,7 +933,7 @@
 
   function clearHeaderAccountSummary() {
     const node = document.querySelector('#tango-header-account-summary');
-    node?.parentElement?.classList.remove('tango-wallet-summary-anchor');
+    node?.parentElement?.classList.remove('tango-header-summary-anchor', 'tango-wallet-summary-anchor');
     node?.remove();
   }
 
@@ -936,7 +942,7 @@
     const style = document.createElement('style');
     style.id = 'tango-header-account-summary-style';
     style.textContent = `
-      [data-testid="wallet-connected"].tango-wallet-summary-anchor { overflow: visible !important; position: relative !important; }
+      .tango-header-summary-anchor { overflow: visible !important; position: relative !important; }
       #tango-header-account-summary {
         align-items: center; background: rgba(12,13,18,.96); border: 1px solid rgba(155,124,255,.34);
         border-radius: 8px; color: #aeb1bd; cursor: pointer; display: flex; font: 650 12px/24px Inter,ui-sans-serif,system-ui,sans-serif;
@@ -953,10 +959,11 @@
   }
 
   function renderHeaderAccountSummary(summary) {
-    const wallet = document.querySelector('[data-testid="wallet-connected"]');
+    const anchor = document.querySelector('[data-testid="wallet-connected"]')
+      || document.querySelector('[data-testid="header-actions"]');
     const chain = activeChain();
     const account = activeAccount();
-    if (!wallet || !summary || !chain || !account) {
+    if (!anchor || !summary || !chain || !account) {
       clearHeaderAccountSummary();
       return;
     }
@@ -974,8 +981,11 @@
         event.preventDefault(); runtime.calendarOpen = !runtime.calendarOpen; render();
       };
     }
-    if (node.parentElement !== wallet) wallet.appendChild(node);
-    wallet.classList.add('tango-wallet-summary-anchor');
+    if (node.parentElement !== anchor) {
+      node.parentElement?.classList.remove('tango-header-summary-anchor', 'tango-wallet-summary-anchor');
+      anchor.appendChild(node);
+    }
+    anchor.classList.add('tango-header-summary-anchor');
     const cash = Tango.Format.native(account.cashBalanceNative, chain.nativeSymbol, language());
     const markup = `<span class="tango-header-paper-badge">${esc(t('paper'))}</span><span>${esc(t('paperBalance'))} <strong>${esc(cash)}</strong></span><i></i><span class="tango-header-calendar-link">▦ ${esc(t('pnlCalendar'))}</span>`;
     if (node.innerHTML !== markup) node.innerHTML = markup;
@@ -1021,7 +1031,7 @@
     if (!current?.token || current.token.chain !== chain.id) return '';
     const position = currentPosition();
     const liveQuote = executableQuote(current.token, current.quote);
-    const mark = position ? Tango.Engine.markPosition(position, liveQuote) : null;
+    const mark = position ? Tango.Engine.markPosition(position, liveQuote, currentNativePriceUsd()) : null;
     const quoteValid = Boolean(liveQuote);
     const symbol = current?.token?.symbol || 'GMGN';
     const tokenTrades = current ? Tango.ChainView.trades(runtime.state, chain.id).filter((trade) =>
@@ -1088,7 +1098,7 @@
       <div class="tango-position-total"><span>${t('positionTotal')}</span><strong>${usdMode ? usdMoney(positionUsdTotal(positions)) : accountMoney(summary.positionsValueNative)}</strong><small>${positions.length} ${t('positions')}</small></div>
       ${positions.length ? positions.map((position) => {
         const liveQuote = freshExecutableQuote(position);
-        const mark = Tango.Engine.markPosition(position, liveQuote);
+        const mark = Tango.Engine.markPosition(position, liveQuote, currentNativePriceUsd());
         const positionValue = usdMode
           ? usdMoney(positionUsdValue(position, mark))
           : accountMoney(mark.valueNative);
@@ -1151,7 +1161,7 @@
       clearHeaderAccountSummary();
       return;
     }
-    const summary = Tango.Engine.portfolioSummary(runtime.state, activeChain().id);
+    const summary = Tango.Engine.portfolioSummary(runtime.state, activeChain().id, currentNativePriceUsd());
     renderHeaderAccountSummary(summary);
     const markup = `${renderBar(summary)}${renderPanel()}${renderDrawer(summary)}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     if (runtime.renderedMarkup !== markup) {

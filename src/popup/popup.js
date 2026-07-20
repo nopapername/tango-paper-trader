@@ -6,6 +6,8 @@
   let nativePrices = {};
   let nativePriceObservedAt = {};
   let selectedChainRevision = 0;
+  let visibleSelectedChain = 'sol';
+  let selectionPending = null;
   let settingsWrite = Promise.resolve();
   let loadError = false;
   let statusMessage = '';
@@ -17,16 +19,16 @@
   const selectedChainLabel = () => language() === 'zh-CN' ? '已选链' : 'Selected chain';
   const allChainsLabel = () => language() === 'zh-CN' ? '全部链' : 'All chains';
   const globalUsdLabel = () => language() === 'zh-CN' ? '全部链 USD 汇总' : 'All-chain USD summary';
-  const selectedResetConfirm = () => language() === 'zh-CN'
-    ? '重置此链并只清空其交易、持仓和盈亏日历记录吗？'
-    : 'Reset this chain and clear only its trades, positions, and PnL calendar records?';
-
   function model() {
-    return Tango.PopupModel.build(state, settings, settings.selectedChain, nativePrices);
+    return Tango.PopupModel.build(state, settings, visibleSelectedChain, nativePrices);
   }
 
   async function reload() {
     ({ state, settings } = await Tango.Store.getAll());
+    const hasSelectionIntent = selectionPending?.revision === selectedChainRevision;
+    if (!hasSelectionIntent) {
+      visibleSelectedChain = Tango.Chains.get(settings?.selectedChain)?.id || 'sol';
+    }
   }
 
   async function runStoreWrite(write, apply) {
@@ -59,10 +61,36 @@
   }
 
   function saveSelectedChain(chainId) {
+    const selected = Tango.Chains.get(chainId);
+    if (!selected) return Promise.resolve(settings);
     const revision = ++selectedChainRevision;
-    return persistSettings({ selectedChain: chainId }, {
+    visibleSelectedChain = selected.id;
+    render();
+    let pending;
+    const promise = persistSettings({ selectedChain: selected.id }, {
       isCurrent: () => revision === selectedChainRevision
+    }).then((saved) => {
+      if (revision === selectedChainRevision) {
+        visibleSelectedChain = saved?.selectedChain === selected.id
+          ? selected.id
+          : Tango.Chains.get(settings?.selectedChain)?.id || 'sol';
+        render();
+      }
+      return saved;
+    }).finally(() => {
+      if (selectionPending === pending) selectionPending = null;
     });
+    pending = { revision, chainId: selected.id, promise };
+    selectionPending = pending;
+    return promise;
+  }
+
+  async function selectedModel(chainId = visibleSelectedChain) {
+    const pending = selectionPending;
+    if (pending) await pending.promise;
+    if (visibleSelectedChain !== chainId || settings?.selectedChain !== chainId) return null;
+    const selected = model();
+    return selected.chain.id === chainId ? selected : null;
   }
 
   function persistSettings(patch, { isCurrent = () => true } = {}) {
@@ -100,7 +128,7 @@
   function selectedPositions(chainModel) {
     if (!chainModel.chainPositions.length) return '';
     return `<section class="chain-positions"><h2>${t('openPositions')} · ${esc(chainModel.chain.name)}</h2>${chainModel.chainPositions.map((position) => {
-      const mark = Tango.Engine.markPosition(position);
+      const mark = Tango.Engine.markPosition(position, undefined, chainModel.nativePriceUsd);
       return `<div class="chain-position"><strong>${esc(position.symbol || position.tokenAddress)}</strong><span>${Tango.Format.native(mark.valueNative, chainModel.nativeSymbol, language())}</span></div>`;
     }).join('')}</section>`;
   }
@@ -184,23 +212,31 @@
       );
     });
     document.querySelector('#reset-chain-button')?.addEventListener('click', async () => {
-      const chainModel = model();
+      const chainId = visibleSelectedChain;
+      const chainModel = await selectedModel(chainId);
+      if (!chainModel) return;
       const balance = Number(document.querySelector('#reset-balance')?.value);
-      if (!(balance > 0) || !global.confirm(selectedResetConfirm())) return;
+      if (!(balance > 0) || !global.confirm(t('resetSelectedChainConfirm'))) return;
+      const executionModel = await selectedModel(chainId);
+      if (!executionModel) return;
       await runStoreWrite(
-        () => Tango.Store.resetChain(chainModel.chain.id, balance),
+        () => Tango.Store.resetChain(executionModel.chain.id, balance),
         async () => { await reload(); render(); }
       );
     });
     document.querySelector('#reset-all-button')?.addEventListener('click', async () => {
-      if (!global.confirm(t('resetConfirm'))) return;
+      if (!global.confirm(t('resetAllChainsConfirm'))) return;
       await runStoreWrite(
         () => Tango.Store.resetAll(),
         async () => { await reload(); render(); }
       );
     });
     document.querySelector('#dashboard')?.addEventListener('click', () => global.chrome.runtime.openOptionsPage());
-    document.querySelector('#gmgn')?.addEventListener('click', () => global.chrome.tabs.create({ url: Tango.Chains.trenchUrl(model().chain.id) }));
+    document.querySelector('#gmgn')?.addEventListener('click', async () => {
+      const chainId = visibleSelectedChain;
+      const chainModel = await selectedModel(chainId);
+      if (chainModel) global.chrome.tabs.create({ url: Tango.Chains.trenchUrl(chainModel.chain.id) });
+    });
   }
 
   await loadInitial();

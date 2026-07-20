@@ -12,6 +12,43 @@ const engineSource = fs.readFileSync(path.resolve(__dirname, '../src/core/engine
 const coordinatorSource = fs.readFileSync(path.resolve(__dirname, '../src/core/state-coordinator.js'), 'utf8');
 const ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 const WRAPPED_SOL = 'So11111111111111111111111111111111111111112';
+const WRONG_BYTE_SOL = '11111111111111111111111111111111pump';
+
+function loadPackagedWorker() {
+  const root = path.resolve(__dirname, '..');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+  const workerPath = manifest.background.service_worker;
+  const workerUrl = new URL(workerPath, 'chrome-extension://test/');
+  const imported = [];
+  const listeners = [];
+  const context = vm.createContext({
+    URL, console, structuredClone,
+    chrome: {
+      runtime: {
+        onMessage: { addListener(listener) { listeners.push(listener); } },
+        getURL(value) { return `chrome-extension://test/${value}`; },
+        openOptionsPage: async () => undefined
+      },
+      tabs: { create: async () => undefined },
+      storage: {
+        local: { get: async () => ({}), set: async () => undefined },
+        session: { get: async () => ({}), set: async () => undefined }
+      }
+    },
+    fetch: async () => { throw new Error('must not fetch during bootstrap'); }
+  });
+  context.importScripts = (...specifiers) => {
+    for (const specifier of specifiers) {
+      const resolved = new URL(specifier, workerUrl);
+      const relative = decodeURIComponent(resolved.pathname.replace(/^\//, ''));
+      imported.push({ specifier, relative });
+      const dependencySource = fs.readFileSync(path.join(root, relative), 'utf8');
+      vm.runInContext(dependencySource, context, { filename: relative });
+    }
+  };
+  vm.runInContext(fs.readFileSync(path.join(root, workerPath), 'utf8'), context, { filename: workerPath });
+  return { imported, listeners };
+}
 
 function deferred() {
   let resolve;
@@ -72,6 +109,26 @@ function send(loaded, message) {
   });
 }
 
+test('packaged MV3 worker executes its real worker-relative import sequence before registering', () => {
+  let loaded;
+  assert.doesNotThrow(() => { loaded = loadPackagedWorker(); });
+  assert.deepEqual(loaded.imported.map(({ specifier }) => specifier), [
+    'core/chains.js',
+    'shared/constants.js',
+    'core/state.js',
+    'core/engine.js',
+    'core/state-coordinator.js'
+  ]);
+  assert.deepEqual(loaded.imported.map(({ relative }) => relative), [
+    'src/core/chains.js',
+    'src/shared/constants.js',
+    'src/core/state.js',
+    'src/core/engine.js',
+    'src/core/state-coordinator.js'
+  ]);
+  assert.equal(loaded.listeners.length, 1);
+});
+
 test('token tab messages accept every registered GMGN chain and reject non-token routes', async () => {
   const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
   const send = (url) => new Promise((resolve) => {
@@ -90,6 +147,19 @@ test('token tab messages accept every registered GMGN chain and reject non-token
   const rejected = await send('https://gmgn.ai/base/monitor');
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'Invalid GMGN token URL');
+});
+
+test('wrong-byte Solana identities cannot open routes or start quote requests', async () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const opened = await send(loaded, {
+    type: 'TANGO_OPEN_TOKEN',
+    url: `https://gmgn.ai/sol/token/${WRONG_BYTE_SOL}`
+  });
+  assert.equal(opened.ok, false);
+  assert.equal(opened.error, 'Invalid GMGN token URL');
+  assert.deepEqual(await loaded.context.getTokenQuote('sol', WRONG_BYTE_SOL), null);
+  assert.equal(loaded.openedTabs.length, 0);
+  assert.equal(loaded.fetchCalls.length, 0);
 });
 
 test('the service worker owns one serialized mutation coordinator for every extension context', async () => {

@@ -6,7 +6,8 @@ require('../src/shared/constants.js');
 const State = require('../src/core/state.js');
 const Engine = require('../src/core/engine.js');
 
-const PUMP_ADDRESS = '11111111111111111111111111111111pump';
+const PUMP_ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
+const VALID_PUMP_ADDRESS = '9cfBkPsoQ2NPHYPi7b69bcQG8FKfNc33k2UfRxiPpump';
 const EVM_ADDRESS = '0xa111111111111111111111111111111111111111';
 const GLOBAL_BOOLEAN_FIELDS = [
   'enabled', 'fastMode', 'confirmationEnabled', 'soundEnabled', 'showListQuickBuy',
@@ -133,19 +134,19 @@ test('v2 normalization backfills only coherent legacy Solana Pump market-cap pos
     'sol:So11111111111111111111111111111111111111112': legacyMarketCapPosition({
       tokenAddress: 'So11111111111111111111111111111111111111112', costBasisNative: 1
     }),
-    'sol:22222222222222222222222222222222pump': legacyMarketCapPosition({
-      tokenAddress: '22222222222222222222222222222222pump', costBasisNative: 1,
+    'sol:BbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP': legacyMarketCapPosition({
+      tokenAddress: 'BbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP', costBasisNative: 1,
       marketCapDivisor: 1_000_000
     }),
-    'sol:33333333333333333333333333333333pump': legacyMarketCapPosition({
-      tokenAddress: '33333333333333333333333333333333pump', costBasisNative: 1,
+    'sol:CbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP': legacyMarketCapPosition({
+      tokenAddress: 'CbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP', costBasisNative: 1,
       averageEntryPriceUsd: 2, lastPriceUsd: 2
     }),
-    'sol:44444444444444444444444444444444pump': legacyMarketCapPosition({
-      tokenAddress: '44444444444444444444444444444444pump', costBasisNative: Infinity
+    'sol:DbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP': legacyMarketCapPosition({
+      tokenAddress: 'DbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP', costBasisNative: Infinity
     }),
-    'sol:55555555555555555555555555555555pump': legacyMarketCapPosition({
-      tokenAddress: '55555555555555555555555555555555pump', costBasisNative: 1,
+    'sol:EbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP': legacyMarketCapPosition({
+      tokenAddress: 'EbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP', costBasisNative: 1,
       averageEntryPriceUsd: Infinity
     })
   };
@@ -412,9 +413,101 @@ test('strict normalization rejects an invalid imported position', () => {
   assert.throws(() => State.normalizeState(state, State.normalizeSettings({}), { strict: true }), /invalidPosition/);
 });
 
+test('strict import rejects a Base58 Solana identity that does not decode to 32 bytes', () => {
+  const state = State.createInitialState({ now: 1 });
+  const address = '11111111111111111111111111111111pump';
+  state.positions[`sol:${address}`] = validPosition({ chain: 'sol', tokenAddress: address });
+  assert.throws(
+    () => State.normalizeState(state, State.normalizeSettings({}), { strict: true }),
+    /invalidPosition/
+  );
+});
+
+test('strict v2 import rejects forged market-cap provenance and incoherent valuation context', () => {
+  const settings = State.normalizeSettings({});
+  const trustedPosition = validPosition({
+    chain: 'sol', tokenAddress: VALID_PUMP_ADDRESS,
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+  });
+  const build = (position) => {
+    const state = State.createInitialState({ now: 1 });
+    state.positions = { [`${position.chain}:${position.tokenAddress}`]: position };
+    return state;
+  };
+
+  assert.doesNotThrow(() => State.normalizeState(build(trustedPosition), settings, { strict: true }));
+  for (const mutation of [
+    { marketCapProvenance: 'FORGED' },
+    { valuationMode: 'FORGED' },
+    { valuationMode: 'PRICE' },
+    { marketCapDivisor: 1 },
+    { chain: 'eth', tokenAddress: EVM_ADDRESS },
+    { tokenAddress: 'So11111111111111111111111111111111111111112' }
+  ]) {
+    const position = { ...trustedPosition, ...mutation };
+    assert.throws(
+      () => State.normalizeState(build(position), settings, { strict: true }),
+      /invalidPosition/,
+      JSON.stringify(mutation)
+    );
+  }
+});
+
+test('strict v2 import rejects unknown trade market-cap provenance', () => {
+  const state = State.createInitialState({ now: 1 });
+  state.trades = [validTrade({ marketCapProvenance: 'FORGED' })];
+  assert.throws(
+    () => State.normalizeState(state, State.normalizeSettings({}), { strict: true }),
+    /invalidTrade/
+  );
+});
+
+test('strict v2 import rejects incoherent trade market-cap relationships', () => {
+  const settings = State.normalizeSettings({});
+  const coherent = validTrade({
+    chain: 'sol', tokenAddress: VALID_PUMP_ADDRESS, nativeSymbol: 'SOL',
+    valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED',
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+  });
+  const build = (trade) => {
+    const state = State.createInitialState({ now: 1 });
+    state.trades = [trade];
+    return state;
+  };
+
+  assert.doesNotThrow(() => State.normalizeState(build(coherent), settings, { strict: true }));
+  for (const trade of [
+    { ...coherent, chain: 'eth', tokenAddress: EVM_ADDRESS, nativeSymbol: 'ETH' },
+    { ...coherent, tokenAddress: 'So11111111111111111111111111111111111111112' },
+    { ...coherent, valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE' },
+    validTrade({ valuationMode: 'MARKET_CAP' })
+  ]) {
+    assert.throws(
+      () => State.normalizeState(build(trade), settings, { strict: true }),
+      /invalidTrade/
+    );
+  }
+});
+
+test('explicit PRICE mode prevents legacy one-billion trade inference without price provenance', () => {
+  const state = State.createInitialState({ now: 1 });
+  state.trades = [validTrade({
+    chain: 'sol', tokenAddress: VALID_PUMP_ADDRESS, nativeSymbol: 'SOL',
+    observedPriceUsd: 2, executionPriceUsd: 2, marketCapUsd: 2_000_000_000,
+    valuationMode: 'PRICE'
+  })];
+
+  const normalized = State.normalizeState(state, State.normalizeSettings({}), { strict: true });
+
+  assert.equal(normalized.trades[0].valuationMode, 'PRICE');
+  assert.equal(normalized.trades[0].priceProvenance, 'OBSERVED_PRICE');
+  assert.equal(normalized.trades[0].marketCapProvenance, undefined);
+});
+
 test('normalization rebuilds position keys without collapsing case-sensitive Solana addresses', () => {
-  const upper = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
-  const lower = upper.toLowerCase();
+  const upper = 'So11111111111111111111111111111111111111112';
+  const lower = 'so11111111111111111111111111111111111111112';
   const state = State.createInitialState({ now: 1000 });
   state.positions = {
     first: { chain: 'sol', tokenAddress: upper, quantity: 1 },

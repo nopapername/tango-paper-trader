@@ -6,13 +6,16 @@ const vm = require('node:vm');
 
 global.Tango = {};
 const Chains = require('../src/core/chains.js');
+require('../src/shared/constants.js');
+require('../src/core/state.js');
+const RealEngine = require('../src/core/engine.js');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const START = "  start().catch((error) => console.error('[Tango Paper Trader]', error));";
 const EXPOSE = `  global.__contentTest = {
     runtime, performQuoteTick, handleRouteChange, handleQuickBuy, buy,
     ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
     requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
-    commitCloseAll, savePresetEdits, bindEvents, bindDraggable
+    commitCloseAll, savePresetEdits, bindEvents, bindDraggable, render, renderHeaderAccountSummary
   };`;
 const instrumentedSource = contentSource.replace(START, EXPOSE);
 
@@ -29,8 +32,12 @@ function defaultState() {
   return {
     initialized: true,
     accounts: {
-      eth: { cashBalanceNative: 10 }, base: { cashBalanceNative: 10 }, sol: { cashBalanceNative: 10 },
-      bsc: { cashBalanceNative: 10 }, robinhood: { cashBalanceNative: 10 }, xlayer: { cashBalanceNative: 10 }
+      eth: { initialBalanceNative: 10, cashBalanceNative: 10, realizedPnlNative: 0 },
+      base: { initialBalanceNative: 10, cashBalanceNative: 10, realizedPnlNative: 0 },
+      sol: { initialBalanceNative: 10, cashBalanceNative: 10, realizedPnlNative: 0 },
+      bsc: { initialBalanceNative: 10, cashBalanceNative: 10, realizedPnlNative: 0 },
+      robinhood: { initialBalanceNative: 10, cashBalanceNative: 10, realizedPnlNative: 0 },
+      xlayer: { initialBalanceNative: 10, cashBalanceNative: 10, realizedPnlNative: 0 }
     },
     positions: {}, trades: [], dailyRealizedByChain: { eth: {}, base: {} }
   };
@@ -76,17 +83,41 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
     querySelector(selector) { return shadowSingles.get(selector) || null; }
   };
   const host = { id: '', attachShadow: () => shadow };
-  const genericElement = () => ({
-    className: '', id: '', rel: '', href: '', style: {}, dataset: {}, innerHTML: '', textContent: '',
-    append() {}, appendChild() {}, addEventListener() {}, remove() {}, setAttribute() {},
-    querySelector() { return null; }, querySelectorAll() { return []; }
-  });
+  const documentSingles = new Map();
+  const genericElement = () => {
+    const classes = new Set();
+    const node = {
+      className: '', id: '', rel: '', href: '', style: {}, dataset: {}, innerHTML: '', textContent: '',
+      parentElement: null, children: [],
+      classList: {
+        add(...names) { names.forEach((name) => classes.add(name)); },
+        remove(...names) { names.forEach((name) => classes.delete(name)); },
+        contains(name) { return classes.has(name); }
+      },
+      append(...children) { children.forEach((child) => node.appendChild(child)); },
+      appendChild(child) {
+        child.parentElement = node;
+        node.children.push(child);
+        if (child.id) documentSingles.set(`#${child.id}`, child);
+        return child;
+      },
+      addEventListener() {},
+      remove() {
+        if (node.id) documentSingles.delete(`#${node.id}`);
+        node.parentElement = null;
+      },
+      setAttribute(name, value) { node[name] = value; },
+      querySelector() { return null; }, querySelectorAll() { return []; }
+    };
+    return node;
+  };
   let createCount = 0;
   const document = {
     body: genericElement(), head: genericElement(),
     documentElement: { appendChild() {} },
     createElement() { createCount += 1; return createCount === 1 ? host : createCount === 3 ? shell : genericElement(); },
-    querySelector() { return null; }, querySelectorAll() { return []; }, addEventListener() {}
+    querySelector(selector) { return documentSingles.get(selector) || null; },
+    querySelectorAll() { return []; }, addEventListener() {}
   };
   const windowListeners = new Map();
   const context = {
@@ -125,7 +156,12 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
   context.Tango = {
     QUOTE_STALE_MS: 15_000,
     Chains,
-    I18n: { resolveLanguage: () => 'en', t: (key) => key },
+    I18n: {
+      resolveLanguage: () => 'en',
+      t: (key, _language, vars) => key === 'closeAllFailedCount'
+        ? `${vars?.count} failed tokens`
+        : key
+    },
     Format: {
       native: (value, symbol) => `${value} ${symbol}`, usd: (value) => `$${value}`, percent: String,
       compact: String, number: String, duration: String
@@ -156,65 +192,17 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
       subscribe() {}
     },
     Engine: {
-      positionKey: (chain, address) => `${chain}:${String(address).toLowerCase()}`,
-      validateQuote(quote, now, staleMs, context) {
-        const hasValue = Number(quote?.priceUsd || quote?.marketCapUsd) > 0;
-        const observedAt = quote?.observedAt;
-        const nativePriceObservedAt = quote?.nativePriceObservedAt;
-        const validTimestamps = typeof observedAt === 'number' && Number.isSafeInteger(observedAt) && observedAt > 0
-          && typeof nativePriceObservedAt === 'number'
-          && Number.isSafeInteger(nativePriceObservedAt) && nativePriceObservedAt > 0
-          && observedAt - FakeDate.now() <= 5_000
-          && nativePriceObservedAt - FakeDate.now() <= 5_000;
-        const fresh = validTimestamps && FakeDate.now() - observedAt <= 15_000
-          && FakeDate.now() - nativePriceObservedAt <= 15_000;
-        const marketCapAllowed = quote?.valuationMode !== 'MARKET_CAP' || Number(quote?.priceUsd || 0) > 0
-          || context?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1';
-        if (!validTimestamps || !hasValue || !marketCapAllowed || !(Number(quote?.nativePriceUsd) > 0)) {
-          return { ok: false, reason: 'invalidQuote' };
-        }
-        return fresh ? { ok: true } : { ok: false, reason: 'staleQuote' };
-      },
+      positionKey: RealEngine.positionKey,
+      validateQuote: RealEngine.validateQuote,
       updatePositionMetadata: (state) => state,
       updatePositionQuote: (state) => state,
       executeBuy(state, order) { calls.buy += 1; calls.buyOrders.push(order); return { state, trade: {} }; },
       executeSell: (state) => ({ state, trade: {} }), executeCloseAll: (state) => ({ state, trades: [], failures: [] }),
-      markPosition(position, quote) {
-        const priceUsd = quote
-          ? Number(quote.priceUsd || 0)
-          : Number(position?.lastPriceUsd || position?.averageEntryPriceUsd || 0);
-        const nativePriceUsd = Number(quote?.nativePriceUsd || position?.lastNativePriceUsd || 0);
-        const valueNative = priceUsd > 0 && nativePriceUsd > 0
-          ? Number(position?.quantity || 0) * priceUsd / nativePriceUsd
-          : Number(position?.costBasisNative || 0);
-        const unrealizedPnlNative = valueNative - Number(position?.costBasisNative || 0);
-        const roi = Number(position?.costBasisNative || 0) > 0
-          ? unrealizedPnlNative / Number(position.costBasisNative) * 100
-          : 0;
-        return { priceUsd, nativePriceUsd, valueNative, unrealizedPnlNative, roi };
-      },
-      portfolioSummary(state, chain) {
-        const account = state.accounts[chain];
-        const positions = Object.values(state.positions || {}).filter((position) => position.chain === chain);
-        const positionsValueNative = positions.reduce((sum, position) => sum + context.Tango.Engine.markPosition(position).valueNative, 0);
-        const equityNative = Number(account.cashBalanceNative) + positionsValueNative;
-        return {
-          cashBalanceNative: Number(account.cashBalanceNative), positionsValueNative, equityNative,
-          totalPnlNative: equityNative - Number(account.initialBalanceNative || 0), positionCount: positions.length
-        };
-      },
+      markPosition: RealEngine.markPosition,
+      portfolioSummary: RealEngine.portfolioSummary,
       chainUsdSummary(state, chain, nativePriceUsd) {
-        if (!(Number(nativePriceUsd) > 0)) throw new Error('invalidNativePrice');
         calls.chainUsdSummaries.push({ state, chain, nativePriceUsd });
-        const account = state.accounts[chain];
-        const positionsUsd = Object.values(state.positions || {})
-          .filter((position) => position.chain === chain)
-          .reduce((sum, position) => sum + Number(position.quantity || 0)
-            * context.Tango.Engine.markPosition(position).priceUsd, 0);
-        const cashUsd = Number(account.cashBalanceNative) * Number(nativePriceUsd);
-        const principalUsd = Number(account.initialBalanceNative) * Number(nativePriceUsd);
-        const assetsUsd = cashUsd + positionsUsd;
-        return { cashUsd, positionsUsd, principalUsd, assetsUsd, pnlUsd: assetsUsd - principalUsd };
+        return RealEngine.chainUsdSummary(state, chain, nativePriceUsd);
       },
       breakevenSellPercent: () => null
     },
@@ -236,7 +224,10 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
   api.runtime.state = defaultState();
   api.runtime.settings = defaultSettings();
   api.runtime.activeChainId = Chains.fromUrl(href)?.id || null;
-  return { api, calls, clock, context, messages, shadowLists, shadowSingles, shellLists, windowListeners };
+  return {
+    api, calls, clock, context, createDomNode: genericElement, documentSingles, messages,
+    shadowLists, shadowSingles, shell, shellLists, windowListeners
+  };
 }
 
 function setPresetInputs(loaded, {
@@ -430,17 +421,39 @@ test('content native aggregate and position renders remain native-denominated', 
   loaded.api.runtime.settings.displayCurrency = 'NATIVE';
   loaded.api.runtime.nativePrices.set('eth', 200);
   loaded.api.runtime.drawerOpen = true;
-  const summary = loaded.context.Tango.Engine.portfolioSummary(loaded.api.runtime.state, 'eth');
+  const summary = loaded.context.Tango.Engine.portfolioSummary(loaded.api.runtime.state, 'eth', 200);
 
   const bar = loaded.api.renderBar(summary);
   const drawer = loaded.api.renderDrawer(summary);
   loaded.api.requestCloseAll();
 
-  assert.match(bar, /0 ETH/);
+  assert.match(bar, /-0\.5 ETH/);
   assert.doesNotMatch(bar, /\$/);
-  assert.match(drawer, /positionTotal[\s\S]*1 ETH/);
-  assert.match(drawer, /value[^<]*1 ETH/);
-  assert.equal(loaded.api.runtime.modal.rows[1][1], '1 ETH');
+  assert.match(drawer, /positionTotal[\s\S]*0\.5 ETH/);
+  assert.match(drawer, /value[^<]*0\.5 ETH/);
+  assert.equal(loaded.api.runtime.modal.rows[1][1], '0.5 ETH');
+});
+
+test('content render forwards the current native price to native summary and row marks', () => {
+  const loaded = loadContent();
+  loaded.api.runtime.state.accounts.eth = {
+    initialBalanceNative: 10, cashBalanceNative: 9, realizedPnlNative: 0
+  };
+  loaded.api.runtime.state.positions = {
+    [`eth:${ADDRESS_A}`]: {
+      chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', name: 'Test Token',
+      quantity: 1, costBasisNative: 1, lastPriceUsd: 100, lastNativePriceUsd: 100,
+      openedAt: loaded.clock.now - 1_000
+    }
+  };
+  loaded.api.runtime.nativePrices.set('eth', 200);
+  loaded.api.runtime.drawerOpen = true;
+
+  loaded.api.render();
+
+  assert.match(loaded.shell.innerHTML, /positionTotal[\s\S]*0\.5 ETH/);
+  assert.match(loaded.shell.innerHTML, /value[^<]*0\.5 ETH/);
+  assert.match(loaded.shell.innerHTML, /-0\.5 ETH/);
 });
 
 test('content USD position values use token marks before a native USD quote arrives', () => {
@@ -525,6 +538,73 @@ test('close all reports each failed token with its own reason', async () => {
   assert.match(loaded.api.runtime.toast.message, /STALE: staleQuote/);
   assert.match(loaded.api.runtime.toast.message, /REJECTED: invalidQuote/);
   assert.match(loaded.api.runtime.toast.message, /1\/3/);
+  assert.match(loaded.api.runtime.toast.message, /2 failed tokens/);
+});
+
+test('close all reports an explicit failed-token count when every position fails', async () => {
+  const loaded = loadContent();
+  const positions = [
+    { chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'FIRST' },
+    { chain: 'eth', tokenAddress: ADDRESS_B, symbol: 'SECOND' }
+  ];
+  loaded.api.runtime.state.positions = Object.fromEntries(positions.map((position) => [
+    loaded.context.Tango.Engine.positionKey(position.chain, position.tokenAddress), position
+  ]));
+  loaded.context.Tango.ChainView.positions = () => positions;
+  loaded.context.Tango.ChainView.closeOrders = () => [];
+  loaded.context.Tango.Store.executeCloseAll = async () => ({
+    state: loaded.api.runtime.state, trades: [], failures: []
+  });
+
+  await loaded.api.commitCloseAll();
+
+  assert.match(loaded.api.runtime.toast.message, /2 failed tokens/);
+  assert.match(loaded.api.runtime.toast.message, /FIRST: staleQuote/);
+  assert.match(loaded.api.runtime.toast.message, /SECOND: staleQuote/);
+});
+
+test('header native balance attaches to connected wallet or stable header-actions fallback', () => {
+  for (const connected of [true, false]) {
+    const loaded = loadContent();
+    loaded.api.runtime.state.accounts.eth.cashBalanceNative = 7;
+    loaded.api.runtime.state.accounts.bsc.cashBalanceNative = 99;
+    const anchor = loaded.createDomNode();
+    loaded.documentSingles.set(
+      connected ? '[data-testid="wallet-connected"]' : '[data-testid="header-actions"]',
+      anchor
+    );
+
+    loaded.api.renderHeaderAccountSummary({});
+
+    const summary = loaded.documentSingles.get('#tango-header-account-summary');
+    assert.ok(summary, connected ? 'connected wallet fixture' : 'disconnected header-actions fixture');
+    assert.equal(summary.parentElement, anchor);
+    assert.equal(anchor.classList.contains('tango-header-summary-anchor'), true);
+    assert.match(summary.innerHTML, /7 ETH/);
+    assert.doesNotMatch(summary.innerHTML, /99/);
+  }
+});
+
+test('content Engine mark fixture derives trusted Pump market-cap prices like production', () => {
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/sol/token/AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP'
+  });
+  const position = {
+    chain: 'sol', tokenAddress: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
+    quantity: 100_000, costBasisNative: 1, averageEntryPriceUsd: 0.000003,
+    lastPriceUsd: 0.000003, lastMarketCapUsd: 3_000, lastNativePriceUsd: 100,
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+  };
+  const quote = {
+    priceUsd: 0, marketCapUsd: 6_000, nativePriceUsd: 100,
+    observedAt: loaded.clock.now, nativePriceObservedAt: loaded.clock.now,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+  };
+
+  const mark = loaded.context.Tango.Engine.markPosition(position, quote);
+  assert.equal(mark.priceUsd, 0.000006);
+  assert.equal(mark.valueNative, 0.006);
 });
 
 test('a confirmation callback captured on one token cannot execute after same-chain navigation', async () => {
@@ -727,7 +807,7 @@ test('non-Pump Solana trench quick-buy fails closed on list market cap and execu
 });
 
 test('content validates a persisted Pump market-cap position after detail metadata replaces trench metadata', () => {
-  const address = '11111111111111111111111111111111pump';
+  const address = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
   const loaded = loadContent({ href: `https://gmgn.ai/sol/token/${address}` });
   const position = {
     chain: 'sol',
@@ -755,7 +835,7 @@ test('content validates a persisted Pump market-cap position after detail metada
 });
 
 test('trade confirmation displays market cap instead of a synthetic Pump token price', async () => {
-  const address = '11111111111111111111111111111111pump';
+  const address = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
   const loaded = loadContent({ href: `https://gmgn.ai/sol/token/${address}` });
   loaded.api.runtime.settings.chains.sol = { buyPresets: [1], networkFeeNative: 0 };
   loaded.api.runtime.state.positions[`sol:${address}`] = {

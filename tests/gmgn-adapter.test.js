@@ -8,7 +8,7 @@ const GMGN = require('../src/adapters/gmgn.js');
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
 const EVM_ADDRESS_2 = '0x2222222222222222222222222222222222222222';
-const PUMP_ADDRESS = '11111111111111111111111111111111pump';
+const PUMP_ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 
 function quickBuyHarness({ chain = 'sol', address = PUMP_ADDRESS, marketCap = '$10K' } = {}) {
   const href = chain === 'sol'
@@ -376,6 +376,7 @@ test('trading panel requires an exact registered token detail route and valid ad
   assert.equal(GMGN._isTokenDetailPage(`https://gmgn.ai/?chain=sol&token=${SOL_ADDRESS}`), false);
   assert.equal(GMGN._isTokenDetailPage(`https://gmgn.ai/monitor?chain=sol&token=${SOL_ADDRESS}`), false);
   assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/bsc/token/0x123'), false);
+  assert.equal(GMGN._isTokenDetailPage('https://gmgn.ai/sol/token/11111111111111111111111111111111pump'), false);
 });
 
 test('Solana cards retain Pump.fun support while EVM cards reject Base58 addresses', () => {

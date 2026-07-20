@@ -53,9 +53,28 @@ test('native formatting uses the requested symbol and keeps sol as a legacy wrap
 test('multichain runtime errors are localized in English and Chinese', () => {
   for (const key of [
     'unsupportedChain', 'invalidAddress', 'nativePriceUnavailable', 'partialUsdData', 'closeAllPartial',
+    'closeAllFailedCount', 'resetSelectedChainConfirm', 'resetAllChainsConfirm',
     'storageLoadFailed', 'storageLoadFailedHint', 'settingsSaveFailed', 'retry'
   ]) {
     assert.notEqual(global.Tango.I18n.t(key, 'en'), key);
     assert.notEqual(global.Tango.I18n.t(key, 'zh-CN'), key);
   }
+});
+
+test('reset warnings explicitly separate one chain from permanent deletion of all six chains', () => {
+  const selectedEn = global.Tango.I18n.t('resetSelectedChainConfirm', 'en');
+  const allEn = global.Tango.I18n.t('resetAllChainsConfirm', 'en');
+  const selectedZh = global.Tango.I18n.t('resetSelectedChainConfirm', 'zh-CN');
+  const allZh = global.Tango.I18n.t('resetAllChainsConfirm', 'zh-CN');
+
+  assert.match(selectedEn, /only this chain/i);
+  assert.match(selectedEn, /other chain accounts.*preserved/i);
+  assert.match(allEn, /all six chain accounts/i);
+  assert.match(allEn, /permanently deleted/i);
+  assert.match(selectedZh, /仅.*此链/);
+  assert.match(selectedZh, /其他链.*保留/);
+  assert.match(allZh, /全部六条链/);
+  assert.match(allZh, /永久删除/);
+  assert.equal(global.Tango.I18n.t('closeAllFailedCount', 'en', { count: 2 }), '2 failed tokens');
+  assert.equal(global.Tango.I18n.t('closeAllFailedCount', 'zh-CN', { count: 2 }), '失败代币 2 个');
 });

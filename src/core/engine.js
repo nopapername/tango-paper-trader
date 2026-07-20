@@ -42,11 +42,29 @@
     return text && text.length <= maxLength && !/^(TOKEN|UNKNOWN|N\/A)$/i.test(text) ? text : '';
   }
 
+  function coherentPumpIdentity(context) {
+    const address = context?.tokenAddress || context?.address || '';
+    return context?.chain === 'sol'
+      && Tango.Chains?.validateAddress?.('sol', address) === true
+      && /pump$/i.test(String(address));
+  }
+
   function usesMarketCapValuation(position) {
-    if (position?.valuationMode === 'MARKET_CAP') return true;
+    const coherentPump = coherentPumpIdentity(position);
+    if (position?.valuationMode === 'PRICE') return false;
+    if (position?.valuationMode === 'MARKET_CAP') {
+      return coherentPump && Number(position?.marketCapDivisor) === 1_000_000_000;
+    }
+    if (position?.valuationMode != null
+      || ['OBSERVED_PRICE', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED'].includes(position?.priceProvenance)
+      || ['OBSERVED_PRICE', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED'].includes(position?.lastPriceProvenance)
+      || ['OBSERVED_PRICE', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED'].includes(position?.averageEntryPriceProvenance)) {
+      return false;
+    }
     const price = Number(position?.averageEntryPriceUsd || 0);
     const marketCap = Number(position?.averageEntryMarketCap || 0);
-    if (!(price > 0 && marketCap > 0)) return false;
+    if (!coherentPump || !(price > 0 && marketCap > 0)
+      || (position?.marketCapDivisor != null && Number(position.marketCapDivisor) !== 1_000_000_000)) return false;
     const ratio = marketCap / price;
     return ratio > 900_000_000 && ratio < 1_100_000_000;
   }
@@ -60,10 +78,11 @@
 
   function trustedMarketCapQuote(quote, context) {
     const metadataSource = String(context?.metadataSource || '').toUpperCase();
-    const verifiedContext = context?.marketCapProvenance === MARKET_CAP_PROVENANCE
+    const verifiedContext = (context?.marketCapProvenance === MARKET_CAP_PROVENANCE
+      && context?.valuationMode === 'MARKET_CAP'
+      && Number(context?.marketCapDivisor) === 1_000_000_000)
       || (context?.metadataVerified === true && metadataSource === 'GMGN_TRENCH');
-    return context?.chain === 'sol'
-      && /pump$/i.test(String(context?.tokenAddress || context?.address || ''))
+    return coherentPumpIdentity(context)
       && verifiedContext
       && String(quote?.source || '').toUpperCase() === 'GMGN_TRENCH_MC'
       && quote?.valuationMode === 'MARKET_CAP'
@@ -209,7 +228,7 @@
       averageEntryPriceProvenance: existingQuantity > 0 && existingEntryProvenance !== priceProvenance
         ? 'MIXED_DERIVED'
         : existingEntryProvenance || priceProvenance,
-      ...(existing?.marketCapProvenance || trustedMarketCap
+      ...(valuationMode === 'MARKET_CAP' && (existing?.marketCapProvenance || trustedMarketCap)
         ? { marketCapProvenance: existing?.marketCapProvenance || MARKET_CAP_PROVENANCE }
         : {})
     };
@@ -310,9 +329,12 @@
     return { state: nextState, trades, failures };
   }
 
-  function markPosition(position, quote) {
+  function markPosition(position, quote, currentNativePriceUsd) {
     const priceUsd = quote ? effectiveQuotePrice(quote, position) : Number(position.lastPriceUsd || position.averageEntryPriceUsd || 0);
-    const nativePriceUsd = Number(quote?.nativePriceUsd || position.lastNativePriceUsd || 0);
+    const override = Number(currentNativePriceUsd);
+    const nativePriceUsd = Number.isFinite(override) && override > 0
+      ? override
+      : Number(quote?.nativePriceUsd || position.lastNativePriceUsd || 0);
     const valueNative = priceUsd > 0 && nativePriceUsd > 0
       ? Number(position.quantity) * priceUsd / nativePriceUsd : Number(position.costBasisNative);
     const unrealizedPnlNative = valueNative - Number(position.costBasisNative);
@@ -331,11 +353,11 @@
     return percent > 0 && percent <= 100 ? Math.min(100, round(percent, 4)) : null;
   }
 
-  function portfolioSummary(state, chain) {
+  function portfolioSummary(state, chain, currentNativePriceUsd) {
     const account = chainAccount(state, chain);
     const positions = Object.values(state.positions || {}).filter((position) => position.chain === chain);
     const trades = (state.trades || []).filter((trade) => trade.chain === chain);
-    const marks = positions.map((position) => markPosition(position));
+    const marks = positions.map((position) => markPosition(position, undefined, currentNativePriceUsd));
     const positionsValueNative = marks.reduce((sum, mark) => sum + mark.valueNative, 0);
     const unrealizedPnlNative = marks.reduce((sum, mark) => sum + mark.unrealizedPnlNative, 0);
     const equityNative = Number(account.cashBalanceNative) + positionsValueNative;

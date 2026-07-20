@@ -1,10 +1,10 @@
 if (typeof importScripts === 'function') {
   importScripts(
-    'src/core/chains.js',
-    'src/shared/constants.js',
-    'src/core/state.js',
-    'src/core/engine.js',
-    'src/core/state-coordinator.js'
+    'core/chains.js',
+    'shared/constants.js',
+    'core/state.js',
+    'core/engine.js',
+    'core/state-coordinator.js'
   );
 }
 const Chains = globalThis.Tango?.Chains || (typeof require === 'function' ? require('./core/chains.js') : null);

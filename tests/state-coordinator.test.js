@@ -764,3 +764,112 @@ test('persists one raw v1 migration while holding the coordinator queue', async 
   assert.deepEqual(second.state, first.state);
   assert.equal(first.state.stateRevision, 1);
 });
+
+test('ordinary raw v1 migration atomically freezes normalized legacy settings for every chain', async () => {
+  const legacy = {
+    schemaVersion: 1,
+    account: {
+      initialBalanceSol: 10, cashBalanceSol: 9, realizedPnlSol: -1,
+      createdAt: 10, updatedAt: 20
+    },
+    positions: {}, trades: [], dailyRealized: {}, initialized: true
+  };
+  const legacySettings = {
+    selectedChain: 'sol', language: 'zh-CN', buyPresets: [0.25, 0.75],
+    sellPresets: [25, 100], networkFeeSol: 0.0042, initialBalanceSol: 10
+  };
+  const persistence = memoryPersistence(legacy, legacySettings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000
+  });
+
+  const migrated = await coordinator.getAll();
+
+  assert.equal(persistence.writes.length, 1);
+  assert.deepEqual(Object.keys(persistence.writes[0]).sort(), [
+    global.Tango.SETTINGS_KEY,
+    global.Tango.STORAGE_KEY
+  ].sort());
+  assert.deepEqual(migrated.settings.chains.sol.buyPresets, [0.25, 0.75]);
+  assert.equal(migrated.settings.chains.sol.networkFeeNative, 0.0042);
+  assert.equal(migrated.settings.chains.sol.initialBalanceNative, 10);
+  for (const chain of global.Tango.Chains.all().filter(({ id }) => id !== 'sol')) {
+    assert.deepEqual(migrated.settings.chains[chain.id].buyPresets, chain.defaultBuyPresets);
+    assert.equal(migrated.settings.chains[chain.id].networkFeeNative, chain.defaultNetworkFeeNative);
+    assert.equal(migrated.settings.chains[chain.id].initialBalanceNative, 10);
+  }
+  assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], migrated.settings);
+  await coordinator.getAll();
+  assert.equal(persistence.writes.length, 1, 'durable migration must not repeat');
+});
+
+test('forged market-cap import writes nothing and does not poison later coordinator work', async () => {
+  const initial = State.createInitialState({ now: 1 });
+  const settings = State.normalizeSettings({ selectedChain: 'eth' });
+  const persistence = memoryPersistence(initial, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000
+  });
+  const imported = State.createInitialState({ now: 100 });
+  const address = '9cfBkPsoQ2NPHYPi7b69bcQG8FKfNc33k2UfRxiPpump';
+  imported.positions[`sol:${address}`] = {
+    chain: 'sol', tokenAddress: address, quantity: 1, costBasisNative: 1,
+    realizedPnlNative: 0, averageEntryPriceUsd: 2, averageEntryMarketCap: 2_000,
+    lastPriceUsd: 2, lastMarketCapUsd: 2_000, lastNativePriceUsd: 100,
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 1,
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1', openedAt: 1, updatedAt: 1
+  };
+  const payload = {
+    product: 'Tango Paper Trader', version: 'test', exportedAt: 1_500,
+    state: imported, settings: State.normalizeSettings({ selectedChain: 'sol' })
+  };
+
+  await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload }), /invalidPosition/);
+  assert.equal(persistence.writes.length, 0);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], initial);
+  assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], settings);
+
+  const recovered = await coordinator.mutate({ type: 'PATCH_SETTINGS', patch: { selectedChain: 'bsc' } });
+  assert.equal(recovered.settings.selectedChain, 'bsc');
+  assert.equal(persistence.writes.length, 1);
+});
+
+test('forged trade market-cap provenance writes nothing and does not poison later coordinator work', async () => {
+  const initial = State.createInitialState({ now: 1 });
+  const settings = State.normalizeSettings({ selectedChain: 'eth' });
+  const persistence = memoryPersistence(initial, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000
+  });
+  const imported = State.createInitialState({ now: 100 });
+  imported.trades = [{
+    id: 'forged-trade', chain: 'eth',
+    tokenAddress: '0xa111111111111111111111111111111111111111',
+    side: 'BUY', amountNative: 1, quantity: 100,
+    observedPriceUsd: 20, executionPriceUsd: 20, marketCapUsd: 2_000_000,
+    liquidityUsd: 500_000, nativePriceUsd: 2_000, nativeSymbol: 'ETH',
+    slippageBps: 0, platformFeeNative: 0, networkFeeNative: 0,
+    realizedPnlNative: 0, realizedPnlUsd: 0, executedAt: 1_000,
+    valuationMode: 'MARKET_CAP', priceProvenance: 'OBSERVED_PRICE',
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+  }];
+  const payload = {
+    product: 'Tango Paper Trader', version: 'test', exportedAt: 1_500,
+    state: imported, settings: State.normalizeSettings({ selectedChain: 'sol' })
+  };
+
+  await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload }), /invalidTrade/);
+  assert.equal(persistence.writes.length, 0);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], initial);
+  assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], settings);
+
+  const recovered = await coordinator.mutate({ type: 'PATCH_SETTINGS', patch: { selectedChain: 'bsc' } });
+  assert.equal(recovered.settings.selectedChain, 'bsc');
+  assert.equal(persistence.writes.length, 1);
+});

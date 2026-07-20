@@ -83,6 +83,41 @@ test('Dashboard global USD exactly sums the canonical USD totals displayed by it
   assert.deepEqual(model.globalUsd.missingChains, ['sol', 'base', 'robinhood', 'xlayer']);
 });
 
+test('Dashboard selected and account-card native summaries use each current native price', () => {
+  const model = DashboardModel.build(fixture(), settings, 'eth', { eth: 1_000, bsc: 600 }, {});
+
+  assert.equal(model.summary.positionsValueNative, 2);
+  assert.equal(model.summary.equityNative, 12);
+  const eth = model.accounts.find(({ chain }) => chain.id === 'eth');
+  const bsc = model.accounts.find(({ chain }) => chain.id === 'bsc');
+  assert.equal(eth.summary.positionsValueNative, 2);
+  assert.equal(bsc.summary.positionsValueNative, 1);
+});
+
+test('CSV preserves real prices for explicit PRICE provenance despite a one-billion supply ratio', () => {
+  const state = fixture();
+  state.trades[0] = {
+    ...state.trades[0], observedPriceUsd: 2, executionPriceUsd: 2.1,
+    marketCapUsd: 2_000_000_000, valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  };
+  const row = DashboardModel.tradesCsvRows(state, 'eth')[0];
+  assert.equal(row.observedPriceUsd, 2);
+  assert.equal(row.executionPriceUsd, 2.1);
+});
+
+test('CSV explicit observed-price provenance overrides a stale market-cap mode', () => {
+  const state = fixture();
+  state.trades[0] = {
+    ...state.trades[0], observedPriceUsd: 2, executionPriceUsd: 2.1,
+    marketCapUsd: 2_000_000_000, valuationMode: 'MARKET_CAP', priceProvenance: 'OBSERVED_PRICE'
+  };
+
+  const row = DashboardModel.tradesCsvRows(state, 'eth')[0];
+
+  assert.equal(row.observedPriceUsd, 2);
+  assert.equal(row.executionPriceUsd, 2.1);
+});
+
 test('Dashboard filters only the selected chain collection', () => {
   const state = fixture();
   const model = DashboardModel.build(state, settings, 'eth', {}, {
@@ -108,7 +143,7 @@ test('CSV rows contain only the selected chain and native fields', () => {
 test('CSV labels market-cap-derived valuation without exporting its synthetic price', () => {
   const state = fixture();
   state.trades[0] = {
-    ...state.trades[0], chain: 'sol', tokenAddress: '11111111111111111111111111111111pump',
+    ...state.trades[0], chain: 'sol', tokenAddress: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
     nativeSymbol: 'SOL', observedPriceUsd: 0.000003, executionPriceUsd: 0.0000031,
     marketCapUsd: 3_000, valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
   };

@@ -28,8 +28,9 @@ const quote = {
 };
 
 test('position keys preserve Solana case, normalize EVM case, and reject invalid identity', () => {
-  const solanaAddress = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
-  assert.notEqual(Engine.positionKey('sol', solanaAddress), Engine.positionKey('sol', solanaAddress.toLowerCase()));
+  const solanaAddress = 'So11111111111111111111111111111111111111112';
+  const lowerSolanaAddress = 'so11111111111111111111111111111111111111112';
+  assert.notEqual(Engine.positionKey('sol', solanaAddress), Engine.positionKey('sol', lowerSolanaAddress));
   assert.equal(
     Engine.positionKey('eth', '0xA111111111111111111111111111111111111111'),
     'eth:0xa111111111111111111111111111111111111111'
@@ -108,7 +109,7 @@ test('close all only closes orders for the requested chain', () => {
 test('verified Solana Pump market-cap quotes can buy and track native pnl without a token price', () => {
   const pumpToken = {
     ...token,
-    address: '11111111111111111111111111111111pump',
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
     metadataVerified: true,
     metadataSource: 'GMGN_TRENCH'
   };
@@ -152,7 +153,7 @@ test('untrusted market-cap mode never overrides a real token price', () => {
   const evmAddress = '0x1111111111111111111111111111111111111111';
   const pumpToken = {
     ...token,
-    address: '11111111111111111111111111111111pump',
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
     metadataVerified: true,
     metadataSource: 'GMGN_TRENCH'
   };
@@ -182,7 +183,7 @@ test('untrusted market-cap mode never overrides a real token price', () => {
 test('trusted Pump market-cap provenance survives detail metadata across every engine boundary', () => {
   const pumpToken = {
     ...token,
-    address: '11111111111111111111111111111111pump',
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
     metadataVerified: true,
     metadataSource: 'GMGN_TRENCH'
   };
@@ -234,6 +235,74 @@ test('portfolio summary is chain-local', () => {
   assert.equal(summary.positionCount, 1);
   assert.equal(summary.totalTrades, 1);
   assert.ok(summary.equityNative > 100);
+});
+
+test('current native price overrides stored marks and keeps native and USD summaries coherent', () => {
+  const next = State.createInitialState({ now: 1 });
+  next.accounts.eth.cashBalanceNative = 9;
+  const position = {
+    chain: 'eth', tokenAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    quantity: 1, costBasisNative: 1, lastPriceUsd: 100, lastNativePriceUsd: 100
+  };
+  next.positions[`eth:${position.tokenAddress}`] = position;
+
+  assert.equal(Engine.markPosition(position, undefined, 200).valueNative, 0.5);
+  const native = Engine.portfolioSummary(next, 'eth', 200);
+  assert.equal(native.positionsValueNative, 0.5);
+  assert.equal(native.equityNative, 9.5);
+  assert.equal(native.totalPnlNative, -0.5);
+  assert.deepEqual(Engine.chainUsdSummary(next, 'eth', 200), {
+    cashUsd: 1_800, positionsUsd: 100, assetsUsd: 1_900, principalUsd: 2_000, pnlUsd: -100
+  });
+});
+
+test('legacy one-billion ratio inference is limited to coherent Solana Pump positions', () => {
+  const ratioPosition = {
+    chain: 'eth', tokenAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    averageEntryPriceUsd: 2, averageEntryMarketCap: 2_000_000_000
+  };
+  assert.equal(Engine.usesMarketCapValuation(ratioPosition), false);
+  assert.equal(Engine.usesMarketCapValuation({
+    ...ratioPosition,
+    chain: 'sol', tokenAddress: '9cfBkPsoQ2NPHYPi7b69bcQG8FKfNc33k2UfRxiPpump',
+    valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  }), false);
+  assert.equal(Engine.usesMarketCapValuation({
+    ...ratioPosition,
+    chain: 'sol', tokenAddress: '9cfBkPsoQ2NPHYPi7b69bcQG8FKfNc33k2UfRxiPpump'
+  }), true);
+});
+
+test('forged persisted market-cap divisor cannot influence a trusted quote', () => {
+  const position = {
+    chain: 'sol', tokenAddress: '9cfBkPsoQ2NPHYPi7b69bcQG8FKfNc33k2UfRxiPpump',
+    quantity: 100, costBasisNative: 1, averageEntryPriceUsd: 2,
+    lastPriceUsd: 2, lastNativePriceUsd: 100,
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 1,
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+  };
+  const marketCapQuote = {
+    priceUsd: 2, marketCapUsd: 6_000, nativePriceUsd: 100,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+  };
+  assert.equal(Engine.markPosition(position, marketCapQuote).priceUsd, 2);
+});
+
+test('wrong-byte Pump suffix cannot activate defensive market-cap trust', () => {
+  const position = {
+    chain: 'sol', tokenAddress: '11111111111111111111111111111111pump',
+    quantity: 100, costBasisNative: 1, averageEntryPriceUsd: 2,
+    lastPriceUsd: 2, lastNativePriceUsd: 100,
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+  };
+  const marketCapQuote = {
+    priceUsd: 2, marketCapUsd: 6_000, nativePriceUsd: 100,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+  };
+
+  assert.equal(Engine.usesMarketCapValuation(position), false);
+  assert.equal(Engine.markPosition(position, marketCapQuote).priceUsd, 2);
 });
 
 test('global USD summary excludes native asset appreciation from paper PnL', () => {
@@ -366,7 +435,7 @@ test('close all settles every valid position and keeps chain daily pnl consisten
 test('adding a market-cap trench quote to a price position keeps the original valuation mode', () => {
   const pumpToken = {
     ...token,
-    address: '11111111111111111111111111111111pump',
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
     metadataVerified: true,
     metadataSource: 'GMGN_TRENCH'
   };
@@ -379,6 +448,38 @@ test('adding a market-cap trench quote to a price position keeps the original va
   const second = Engine.executeBuy(first.state, { token: pumpToken, quote: listQuote, amountNative: 1 }, settings, 2_000);
   assert.equal(second.position.valuationMode, 'PRICE');
   assert.ok(second.position.averageEntryPriceUsd > 2 && second.position.averageEntryPriceUsd < 4.1);
+});
+
+test('ratio-derived PRICE positions remain strict-importable across trusted Pump market-cap rebuys', () => {
+  const pumpToken = {
+    ...token,
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
+  const priceBuy = Engine.executeBuy(state(), { token: pumpToken, quote, amountNative: 1 }, settings, 1_000);
+  const marketCapQuote = {
+    priceUsd: 0, marketCapUsd: 4_000_000, nativePriceUsd: 100,
+    observedAt: 2_000, nativePriceObservedAt: 2_000,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+  };
+
+  const firstRatioBuy = Engine.executeBuy(priceBuy.state, {
+    token: pumpToken, quote: marketCapQuote, amountNative: 1
+  }, settings, 2_000);
+  assert.equal(firstRatioBuy.position.valuationMode, 'PRICE');
+  assert.equal(firstRatioBuy.position.lastPriceProvenance, 'MARKET_CAP_RATIO_DERIVED');
+  assert.equal(firstRatioBuy.position.marketCapProvenance, undefined);
+  assert.doesNotThrow(() => State.normalizeState(firstRatioBuy.state, settings, { strict: true }));
+
+  const secondRatioBuy = Engine.executeBuy(firstRatioBuy.state, {
+    token: pumpToken,
+    quote: { ...marketCapQuote, marketCapUsd: 6_000_000, observedAt: 3_000, nativePriceObservedAt: 3_000 },
+    amountNative: 1
+  }, settings, 3_000);
+  assert.equal(secondRatioBuy.trade.priceProvenance, 'MARKET_CAP_RATIO_DERIVED');
+  assert.equal(secondRatioBuy.position.marketCapProvenance, undefined);
+  assert.doesNotThrow(() => State.normalizeState(secondRatioBuy.state, settings, { strict: true }));
 });
 
 test('detail metadata replaces a trench placeholder without changing chain balances', () => {

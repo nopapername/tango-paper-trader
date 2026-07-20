@@ -192,7 +192,7 @@
 
   function positionsPanel(view, compact = false) {
     const rows = view.positions.map((position) => {
-      const mark = Tango.Engine.markPosition(position);
+      const mark = Tango.Engine.markPosition(position, undefined, view.nativePriceUsd);
       return `<tr><td class="token-cell">${esc(position.symbol || position.tokenAddress)}</td><td>${esc(view.chain.name)}</td><td>${native(position.costBasisNative, view)}</td>
         <td>${native(mark.valueNative, view)}</td><td class="${cls(mark.unrealizedPnlNative)}">${native(mark.unrealizedPnlNative, view, true)} (${Tango.Format.percent(mark.roi, lang(), true)})</td>
         <td>${Tango.Format.usd(position.averageEntryMarketCap, lang(), true)}</td><td>${Tango.Format.usd(position.lastMarketCapUsd, lang(), true)}</td><td>${Tango.Format.duration(Date.now() - position.openedAt, lang())}</td></tr>`;
