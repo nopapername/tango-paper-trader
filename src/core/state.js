@@ -24,6 +24,20 @@
     return cap > 0 && value > 0
       && Math.abs(cap / value - MARKET_CAP_DIVISOR) <= MARKET_CAP_DIVISOR * 0.001;
   };
+  const trustedSupplyIdentity = (value) => {
+    const totalSupply = Number(value?.totalSupply);
+    const source = String(value?.supplySource || '');
+    return Number.isFinite(totalSupply) && totalSupply > 0
+      && Boolean(source)
+      && Boolean(Tango.Supply?.isTrustedSource?.(source))
+      ? { totalSupply, source }
+      : null;
+  };
+  const supplyRatioMatches = (marketCap, price, totalSupply) => {
+    const cap = Number(marketCap); const value = Number(price); const supply = Number(totalSupply);
+    return cap > 0 && value > 0 && supply > 0
+      && Math.abs(cap / value - supply) <= supply * 0.001;
+  };
   const inferredTradeValuationMode = (trade) => {
     if (VALUATION_MODES.includes(trade?.valuationMode)) return trade.valuationMode;
     return trade?.priceProvenance === 'MARKET_CAP_DERIVED' ? 'MARKET_CAP' : 'PRICE';
@@ -171,9 +185,14 @@
     const valuationMode = inferredTradeValuationMode(trade);
     const derivedPrice = ['MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED']
       .includes(trade.priceProvenance);
-    if ((valuationMode === 'MARKET_CAP' || derivedPrice || trade.marketCapProvenance != null) && !coherentPump) {
+    const supply = trustedSupplyIdentity(trade);
+    const coherentTrustedSupply = Boolean(supply
+      && supplyRatioMatches(trade.marketCapUsd, trade.observedPriceUsd, supply.totalSupply));
+    if ((valuationMode === 'MARKET_CAP' || derivedPrice)
+      && !coherentPump && !coherentTrustedSupply) {
       throw new Error('invalidTrade');
     }
+    if (trade.marketCapProvenance != null && !coherentPump) throw new Error('invalidTrade');
     if ((trade.valuationMode === 'PRICE' && trade.priceProvenance === 'MARKET_CAP_DERIVED')
       || (trade.valuationMode === 'MARKET_CAP' && trade.priceProvenance === 'MARKET_CAP_RATIO_DERIVED')
       || (trade.marketCapProvenance != null && valuationMode === 'PRICE'
@@ -398,12 +417,22 @@
         position[field] != null && !PRICE_PROVENANCES.includes(position[field]))) {
         throw new Error('invalidPosition');
       }
-      const coherentMarketCapContext = chainId === 'sol'
+      const coherentLegacyMarketCapContext = chainId === 'sol'
         && /pump$/i.test(String(address || ''))
         && position.valuationMode === 'MARKET_CAP'
         && position.marketCapDivisor === MARKET_CAP_DIVISOR;
-      if ((position.valuationMode === 'MARKET_CAP' || position.marketCapProvenance != null)
-        && !coherentMarketCapContext) {
+      const supply = trustedSupplyIdentity(position);
+      const coherentTrustedSupply = Boolean(supply
+        && Number(position.marketCapDivisor) === supply.totalSupply
+        && supplyRatioMatches(position.lastMarketCapUsd, position.lastPriceUsd, supply.totalSupply));
+      const derivedPrice = ['MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED']
+        .some((provenance) => position.lastPriceProvenance === provenance
+          || position.averageEntryPriceProvenance === provenance);
+      if ((position.valuationMode === 'MARKET_CAP' || derivedPrice)
+        && !coherentLegacyMarketCapContext && !coherentTrustedSupply) {
+        throw new Error('invalidPosition');
+      }
+      if (position.marketCapProvenance != null && !coherentLegacyMarketCapContext) {
         throw new Error('invalidPosition');
       }
     }

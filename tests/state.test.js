@@ -103,6 +103,63 @@ test('schema v2 preserves provisional supply provenance and calibration audit ev
   assert.equal(normalized.calibrations[0].reason, 'PRICE_AND_NATIVE');
 });
 
+test('trusted Base market-cap fills survive strict state roundtrip', () => {
+  const settings = State.normalizeSettings({
+    slippageBps: 0,
+    platformFeeBps: 0,
+    chains: { base: { networkFeeNative: 0 } }
+  });
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const token = {
+    chain: 'base', address: EVM_ADDRESS, symbol: 'BANKR', launchpad: 'Clanker',
+    metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+  };
+  const filled = Engine.executeBuy(initial, {
+    token,
+    quote: {
+      priceUsd: 0, marketCapUsd: 200_000, totalSupply: 100_000_000_000,
+      supplySource: 'GMGN_EXACT', nativePriceUsd: 2_000,
+      observedAt: 1_000, nativePriceObservedAt: 1_000,
+      source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+    },
+    amountNative: 1
+  }, settings, 1_000).state;
+
+  const normalized = State.normalizeState(filled, settings, { strict: true });
+  const key = Engine.positionKey(token.chain, token.address);
+  assert.equal(normalized.positions[key].valuationMode, 'MARKET_CAP');
+  assert.equal(normalized.positions[key].totalSupply, 100_000_000_000);
+  assert.equal(normalized.positions[key].supplySource, 'GMGN_EXACT');
+  assert.equal(normalized.trades[0].priceProvenance, 'MARKET_CAP_DERIVED');
+  assert.doesNotThrow(() => State.normalizeState(normalized, settings, { strict: true }));
+});
+
+test('strict state rejects unknown supply provenance on market-cap positions and trades', () => {
+  const settings = State.normalizeSettings({});
+  const positionState = State.createInitialState({ now: 1 });
+  positionState.positions[`base:${EVM_ADDRESS}`] = validPosition({
+    chain: 'base', tokenAddress: EVM_ADDRESS,
+    valuationMode: 'MARKET_CAP', totalSupply: 100_000_000_000,
+    marketCapDivisor: 100_000_000_000, supplySource: 'FORGED'
+  });
+  assert.throws(
+    () => State.normalizeState(positionState, settings, { strict: true }),
+    /invalidPosition/
+  );
+
+  const tradeState = State.createInitialState({ now: 1 });
+  tradeState.trades = [validTrade({
+    chain: 'base', tokenAddress: EVM_ADDRESS, nativeSymbol: 'ETH',
+    valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED',
+    totalSupply: 100_000_000_000, supplySource: 'FORGED'
+  })];
+  assert.throws(
+    () => State.normalizeState(tradeState, settings, { strict: true }),
+    /invalidTrade/
+  );
+});
+
 test('selected-chain reset removes only that chain calibration events', () => {
   const state = State.createInitialState({ now: 1 });
   state.calibrations = [

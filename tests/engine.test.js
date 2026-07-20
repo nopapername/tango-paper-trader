@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 global.Tango = {};
 require('../src/core/chains.js');
+require('../src/core/supply.js');
 require('../src/shared/constants.js');
 const State = require('../src/core/state.js');
 const Engine = require('../src/core/engine.js');
@@ -26,6 +27,189 @@ const quote = {
   priceUsd: 2, marketCapUsd: 2_000_000, liquidityUsd: 500_000,
   nativePriceUsd: 100, observedAt: 1_000, nativePriceObservedAt: 1_000
 };
+const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
+const ethToken = {
+  chain: 'eth', address: EVM_ADDRESS, symbol: 'ETHY',
+  metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+};
+const baseToken = {
+  chain: 'base', address: EVM_ADDRESS, symbol: 'BANKR', launchpad: 'Clanker',
+  metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+};
+const paperSettings = State.normalizeSettings({
+  slippageBps: 0, platformFeeBps: 0,
+  chains: {
+    eth: { networkFeeNative: 0 },
+    base: { networkFeeNative: 0 }
+  }
+});
+
+test('Base market-cap quote uses its exact 100B supply instead of a fixed 1B divisor', () => {
+  const initialState = state();
+  const marketCapQuote = {
+    priceUsd: 0, marketCapUsd: 200_000, totalSupply: 100_000_000_000,
+    supplySource: 'GMGN_EXACT', nativePriceUsd: 2_000,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const result = Engine.executeBuy(initialState, {
+    token: baseToken, quote: marketCapQuote, amountNative: 1
+  }, paperSettings, 1_000);
+  assert.equal(result.trade.observedPriceUsd, 0.000002);
+  assert.equal(result.position.totalSupply, 100_000_000_000);
+  assert.equal(result.position.marketCapDivisor, 100_000_000_000);
+});
+
+test('nominal token and native prices create an auditable provisional paper fill', () => {
+  const initialState = state();
+  const syntheticQuote = {
+    priceUsd: 1, nativePriceUsd: 1, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'TANGO_SYNTHETIC', provisional: true,
+    syntheticTokenPrice: true, syntheticNativePrice: true,
+    valuationMode: 'PRICE', priceProvenance: 'SYNTHETIC_PRICE'
+  };
+  const result = Engine.executeBuy(initialState, {
+    token: ethToken, quote: syntheticQuote, amountNative: 1
+  }, paperSettings, 1_000);
+  assert.equal(result.trade.provisional, true);
+  assert.equal(result.position.needsCalibration, true);
+  assert.equal(result.position.quantity, 1);
+});
+
+test('first trusted quote calibrates a synthetic position without creating PnL', () => {
+  const bought = Engine.executeBuy(state(), {
+    token: ethToken,
+    quote: {
+      priceUsd: 1, nativePriceUsd: 1, observedAt: 1_000, nativePriceObservedAt: 1_000,
+      source: 'TANGO_SYNTHETIC', provisional: true,
+      syntheticTokenPrice: true, syntheticNativePrice: true,
+      valuationMode: 'PRICE', priceProvenance: 'SYNTHETIC_PRICE'
+    }, amountNative: 1
+  }, paperSettings, 1_000);
+  const calibrated = Engine.updatePositionQuote(bought.state, ethToken, {
+    priceUsd: 2, marketCapUsd: 2_000_000_000, totalSupply: 1_000_000_000,
+    supplySource: 'GMGN_EXACT', nativePriceUsd: 3_000,
+    observedAt: 2_000, nativePriceObservedAt: 2_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  }, 2_000);
+  const position = calibrated.positions[Engine.positionKey('eth', ethToken.address)];
+  assert.equal(position.quantity, 1_500);
+  assert.equal(position.costBasisNative, 1);
+  assert.equal(Engine.markPosition(position).unrealizedPnlNative, 0);
+  assert.equal(calibrated.trades.length, 1);
+  assert.equal(calibrated.calibrations.length, 1);
+  assert.equal(calibrated.calibrations[0].reason, 'PRICE_AND_NATIVE');
+  assert.equal(position.needsCalibration, false);
+});
+
+test('a stronger exact supply neutrally corrects a legacy market-cap position', () => {
+  const pumpToken = {
+    ...token,
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
+  const legacyQuote = {
+    priceUsd: 0, marketCapUsd: 3_000, nativePriceUsd: 100,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: pumpToken, quote: legacyQuote, amountNative: 1
+  }, paperSettings, 1_000);
+  const before = Engine.markPosition(bought.position).valueNative;
+  const corrected = Engine.updatePositionQuote(bought.state, pumpToken, {
+    ...legacyQuote,
+    totalSupply: 2_000_000_000,
+    supplySource: 'GMGN_EXACT',
+    source: 'GMGN_NETWORK',
+    observedAt: 2_000,
+    nativePriceObservedAt: 2_000
+  }, 2_000);
+  const position = corrected.positions[Engine.positionKey('sol', pumpToken.address)];
+
+  assert.ok(Math.abs(Engine.markPosition(position).valueNative - before) < 1e-9);
+  assert.ok(Math.abs(position.quantity - bought.position.quantity * 2) < 1e-6);
+  assert.equal(corrected.calibrations[0].reason, 'SUPPLY');
+});
+
+test('exact supply correction preserves equity and realized PnL after a partial sell', () => {
+  const fallbackQuote = {
+    priceUsd: 0, marketCapUsd: 200_000, totalSupply: 100_000_000_000,
+    supplySource: 'LAUNCHPAD_RULE', supplyConfidence: 'fallback',
+    nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_TRENCH', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: baseToken, quote: fallbackQuote, amountNative: 1
+  }, paperSettings, 1_000);
+  const sold = Engine.executeSell(bought.state, {
+    token: baseToken, quote: { ...fallbackQuote, observedAt: 2_000, nativePriceObservedAt: 2_000 }, percent: 50
+  }, paperSettings, 2_000);
+  const key = Engine.positionKey('base', baseToken.address);
+  const beforePosition = sold.state.positions[key];
+  const before = Engine.markPosition(beforePosition).valueNative;
+  const corrected = Engine.updatePositionQuote(sold.state, baseToken, {
+    ...fallbackQuote,
+    totalSupply: 200_000_000_000,
+    supplySource: 'GMGN_EXACT',
+    supplyConfidence: 'exact',
+    observedAt: 3_000,
+    nativePriceObservedAt: 3_000
+  }, 3_000);
+  const position = corrected.positions[key];
+  assert.ok(Math.abs(Engine.markPosition(position).valueNative - before) < 1e-9);
+  assert.equal(position.costBasisNative, beforePosition.costBasisNative);
+  assert.equal(position.realizedPnlNative, beforePosition.realizedPnlNative);
+  assert.equal(corrected.trades.length, sold.state.trades.length);
+});
+
+test('an exact supply confirmation clears fallback calibration without a neutralizing event', () => {
+  const fallbackQuote = {
+    priceUsd: 0, marketCapUsd: 200_000, totalSupply: 100_000_000_000,
+    supplySource: 'LAUNCHPAD_RULE', supplyConfidence: 'fallback',
+    nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_TRENCH', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: baseToken, quote: fallbackQuote, amountNative: 1
+  }, paperSettings, 1_000);
+  const confirmed = Engine.updatePositionQuote(bought.state, baseToken, {
+    ...fallbackQuote,
+    supplySource: 'GMGN_EXACT',
+    supplyConfidence: 'exact',
+    observedAt: 2_000,
+    nativePriceObservedAt: 2_000
+  }, 2_000);
+  const position = confirmed.positions[Engine.positionKey('base', baseToken.address)];
+
+  assert.equal(position.quantity, bought.position.quantity);
+  assert.equal(position.supplySource, 'GMGN_EXACT');
+  assert.equal(position.needsCalibration, false);
+  assert.equal(confirmed.calibrations.length, 0);
+});
+
+test('a fully closed provisional position is never reopened by a later quote', () => {
+  const synthetic = {
+    priceUsd: 1, nativePriceUsd: 1, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'TANGO_SYNTHETIC', provisional: true,
+    syntheticTokenPrice: true, syntheticNativePrice: true,
+    valuationMode: 'PRICE', priceProvenance: 'SYNTHETIC_PRICE'
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: ethToken, quote: synthetic, amountNative: 1
+  }, paperSettings, 1_000);
+  const closed = Engine.executeSell(bought.state, {
+    token: ethToken,
+    quote: { ...synthetic, observedAt: 2_000, nativePriceObservedAt: 2_000 },
+    percent: 100
+  }, paperSettings, 2_000);
+  const realQuote = {
+    priceUsd: 2, nativePriceUsd: 3_000, observedAt: 3_000, nativePriceObservedAt: 3_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  };
+  assert.equal(Engine.updatePositionQuote(closed.state, ethToken, realQuote, 3_000), closed.state);
+});
 
 test('position keys preserve Solana case, normalize EVM case, and reject invalid identity', () => {
   const solanaAddress = 'So11111111111111111111111111111111111111112';

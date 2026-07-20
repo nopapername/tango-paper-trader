@@ -120,7 +120,7 @@
         } else if (command?.type === 'EXECUTE_CLOSE_ALL') {
           result = Tango.Engine.executeCloseAll(state, command.chain, command.orders, settings, now());
         } else if (command?.type === 'UPDATE_POSITION_QUOTE') {
-          result = { state: Tango.Engine.updatePositionQuote(state, command.token, command.quote) };
+          result = { state: Tango.Engine.updatePositionQuote(state, command.token, command.quote, now()) };
         } else if (command?.type === 'UPDATE_POSITION_METADATA') {
           result = { state: Tango.Engine.updatePositionMetadata(state, command.token) };
         } else if (command?.type === 'UPDATE_POSITION_METADATA_BATCH') {
