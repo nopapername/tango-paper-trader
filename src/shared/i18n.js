@@ -3,6 +3,7 @@
 
   const messages = {
     en: {
+      provisionalQuote: 'Temporary paper valuation; it will be neutrally calibrated when verified market data arrives.',
       unsupportedChain: 'This GMGN chain is not supported', invalidAddress: 'The token address is invalid',
       nativePriceUnavailable: 'The native asset price is unavailable', partialUsdData: 'Some USD values are unavailable',
       closeAllPartial: 'Some positions could not be closed with a fresh quote',
@@ -58,6 +59,7 @@
       closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
+      provisionalQuote: '正在使用临时模拟估值；验证行情到达后会进行中性校准。',
       storageLoadFailed: '无法加载本地模拟交易数据',
       storageLoadFailedHint: '请检查扩展存储后重试。现有数据未被更改。',
       settingsSaveFailed: '无法保存设置，已恢复之前的设置。', retry: '重试',

@@ -6,6 +6,8 @@ const vm = require('node:vm');
 
 global.Tango = {};
 const Chains = require('../src/core/chains.js');
+const Supply = require('../src/core/supply.js');
+delete global.Tango.Supply;
 require('../src/shared/constants.js');
 const RealState = require('../src/core/state.js');
 const RealEngine = require('../src/core/engine.js');
@@ -15,6 +17,7 @@ const START = "  start().catch((error) => console.error('[Tango Paper Trader]', 
 const EXPOSE = `  global.__contentTest = {
     runtime, performQuoteTick, handleRouteChange, handleQuickBuy, buy, sell, sellPosition, sellBreakeven,
     ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
+    resolvePaperTradeQuote, paperExecutableQuote,
     requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
     commitCloseAll, savePresetEdits, bindEvents, bindDraggable, render, renderHeaderAccountSummary,
     detailRouteToken, acceptedTokenObservation, renderPnlCalendar,
@@ -149,7 +152,7 @@ function loadContent({
   const pageMessages = [];
   const calls = {
     buy: 0, buyOrders: [], sell: 0, sellOrders: [], metadataBatches: [],
-    patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: []
+    closeAll: 0, closeAllOrders: [], patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: []
   };
   const clock = { now: 1_000_000 };
   class FakeDate extends Date {
@@ -243,6 +246,7 @@ function loadContent({
     QUOTE_STALE_MS: 15_000,
     Chains,
     GMGNQuotes,
+    Supply,
     I18n: {
       resolveLanguage: () => 'en',
       t: (key, _language, vars) => key === 'closeAllFailedCount'
@@ -270,9 +274,13 @@ function loadContent({
         calls.fullSaves.push(settings);
         throw new Error('content must use patchSettings');
       },
-      async executeBuy(order) { return context.Tango.Engine.executeBuy(defaultState(), order); },
-      async executeSell(order) { return context.Tango.Engine.executeSell(defaultState(), order); },
-      async executeCloseAll(chain, orders) { return context.Tango.Engine.executeCloseAll(defaultState(), chain, orders); },
+      async executeBuy(order) { return context.Tango.Engine.executeBuy(context.__contentTest.runtime.state, order); },
+      async executeSell(order) { return context.Tango.Engine.executeSell(context.__contentTest.runtime.state, order); },
+      async executeCloseAll(chain, orders) {
+        calls.closeAll += 1;
+        calls.closeAllOrders.push({ chain, orders });
+        return { state: context.__contentTest.runtime.state, trades: orders.map(() => ({})), failures: [] };
+      },
       async updatePositionQuote() { return defaultState(); },
       async updatePositionMetadata() { return defaultState(); },
       async updatePositionMetadataBatch(tokens) {
@@ -599,64 +607,120 @@ test('panel trade totals keep Solana address identity case-sensitive', () => {
   assert.match(loaded.api.renderPanel(), /<span>totalBuy<\/span><strong>2 SOL<\/strong>/);
 });
 
-test('close all queues instead of reporting a market-data failure when some positions have no price history', async () => {
-  const loaded = loadContent();
-  const staleAddress = ADDRESS_B;
-  const rejectedAddress = '0x3333333333333333333333333333333333333333';
-  const positions = [
-    { chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'CLOSED' },
-    { chain: 'eth', tokenAddress: staleAddress, symbol: 'STALE' },
-    { chain: 'eth', tokenAddress: rejectedAddress, symbol: 'REJECTED' }
-  ];
-  loaded.api.runtime.state.positions = Object.fromEntries(positions.map((position) => [
-    loaded.context.Tango.Engine.positionKey(position.chain, position.tokenAddress), position
-  ]));
-  loaded.context.Tango.ChainView.positions = () => positions;
-  loaded.context.Tango.ChainView.closeOrders = () => [
-    { token: { chain: 'eth', address: ADDRESS_A, symbol: 'CLOSED' }, quote: {} },
-    { token: { chain: 'eth', address: rejectedAddress, symbol: 'REJECTED' }, quote: {} }
-  ];
-  let executions = 0;
-  loaded.context.Tango.Store.executeCloseAll = async () => {
-    executions += 1;
-    return ({
-    state: loaded.api.runtime.state,
-    trades: [{}],
-    failures: [{
-      order: { token: { chain: 'eth', address: rejectedAddress, symbol: 'REJECTED' } },
-      reason: 'invalidQuote'
-    }]
-    });
-  };
-
-  await loaded.api.commitCloseAll();
-
-  assert.equal(executions, 0);
-  assert.equal(loaded.api.runtime.toast.message, 'quoteQueued');
-  assert.equal(loaded.api.runtime.toast.type, 'info');
-  assert.equal(loaded.api.runtime.pendingTradeIntents.size, 1);
+test('quick buy with no market data commits immediately with a provisional 1 USD quote', async () => {
+  const never = deferred();
+  const loaded = loadContent({
+    sendMessage: (message) => /TANGO_GET_(TOKEN_QUOTE|NATIVE_PRICE)/.test(message.type)
+      ? never.promise
+      : Promise.resolve({ ok: true })
+  });
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  await loaded.api.handleQuickBuy({
+    token: { chain: 'eth', address: ADDRESS_A, symbol: 'NEW', metadataVerified: true, metadataSource: 'GMGN_TRENCH' },
+    quote: {}, amountNative: 1
+  });
+  assert.equal(loaded.calls.buy, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.provisional, true);
+  assert.equal(loaded.api.runtime.toast.type, 'success');
 });
 
-test('close all queues one route-bound retry when every position lacks a first quote', async () => {
+test('market-cap-only quick buy derives price locally and never requests before commit', async () => {
   const loaded = loadContent();
-  const positions = [
-    { chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'FIRST' },
-    { chain: 'eth', tokenAddress: ADDRESS_B, symbol: 'SECOND' }
-  ];
-  loaded.api.runtime.state.positions = Object.fromEntries(positions.map((position) => [
-    loaded.context.Tango.Engine.positionKey(position.chain, position.tokenAddress), position
-  ]));
-  loaded.context.Tango.ChainView.positions = () => positions;
-  loaded.context.Tango.ChainView.closeOrders = () => [];
-  loaded.context.Tango.Store.executeCloseAll = async () => ({
-    state: loaded.api.runtime.state, trades: [], failures: []
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  loaded.context.location.href = `https://gmgn.ai/base/token/${ADDRESS_A}`;
+  loaded.api.handleRouteChange();
+  await loaded.api.handleQuickBuy({
+    token: { chain: 'base', address: ADDRESS_A, symbol: 'BANKR', launchpad: 'Clanker', metadataVerified: true, metadataSource: 'GMGN_TRENCH' },
+    quote: { marketCapUsd: 200_000, observedAt: loaded.clock.now, source: 'GMGN_TRENCH' },
+    amountNative: 1
   });
+  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 0.000002);
+  assert.equal(loaded.calls.buyOrders[0].quote.totalSupply, 100_000_000_000);
+});
 
+test('position sell and close all use local position observations without quote waits', async () => {
+  const loaded = loadContent({ sendMessage: () => new Promise(() => {}) });
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  const positions = [ADDRESS_A, ADDRESS_B].map((address, index) => ({
+    chain: 'eth', tokenAddress: address, symbol: `TOKEN${index + 1}`,
+    quantity: 2, costBasisNative: 1, realizedPnlNative: 0,
+    averageEntryPriceUsd: 2, lastPriceUsd: 2, lastMarketCapUsd: 2_000,
+    lastNativePriceUsd: 3_000, quoteObservedAt: loaded.clock.now
+  }));
+  loaded.api.runtime.state.positions = Object.fromEntries(positions.map((position) => [
+    `eth:${position.tokenAddress}`, position
+  ]));
+  loaded.context.Tango.ChainView.closeOrders = (state, chain, quoteFor) =>
+    Object.values(state.positions).filter((position) => position.chain === chain).map((position) => ({
+      token: { chain, address: position.tokenAddress, symbol: position.symbol },
+      quote: quoteFor(position), percent: 100
+    }));
+  await loaded.api.sellPosition(positions[0], 50);
   await loaded.api.commitCloseAll();
+  assert.equal(loaded.calls.sell, 1);
+  assert.equal(loaded.calls.closeAll, 1);
+  assert.equal(loaded.calls.closeAllOrders[0].orders.length, 2);
+  assert.equal(loaded.api.runtime.pendingTradeIntents, undefined);
+});
 
-  assert.equal(loaded.api.runtime.toast.message, 'quoteQueued');
-  assert.equal(loaded.api.runtime.toast.type, 'info');
-  assert.equal(loaded.api.runtime.pendingTradeIntents.size, 1);
+test('passive native prices update every chain sharing the symbol without merging accounts', () => {
+  const loaded = loadContent();
+  const ethAccount = loaded.api.runtime.state.accounts.eth;
+  const baseAccount = loaded.api.runtime.state.accounts.base;
+  const robinhoodAccount = loaded.api.runtime.state.accounts.robinhood;
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES',
+    prices: [{ symbol: 'ETH', priceUsd: 2_500, observedAt: loaded.clock.now - 10 }]
+  });
+  assert.equal(loaded.api.runtime.nativePrices.get('eth'), 2_500);
+  assert.equal(loaded.api.runtime.nativePrices.get('base'), 2_500);
+  assert.equal(loaded.api.runtime.nativePrices.get('robinhood'), 2_500);
+  assert.equal(loaded.api.runtime.nativePrices.has('bsc'), false);
+  assert.notEqual(ethAccount, baseAccount);
+  assert.notEqual(baseAccount, robinhoodAccount);
+});
+
+test('provisional copy is shown only for provisional panel and confirmation quotes', async () => {
+  const provisional = loadContent();
+  provisional.api.runtime.current = {
+    token: { chain: 'eth', address: ADDRESS_A, symbol: 'NEW', metadataVerified: true, metadataSource: 'GMGN_TRENCH' },
+    quote: {}
+  };
+  await provisional.api.buy(1);
+  assert.equal(provisional.api.runtime.modal.note, 'provisionalQuote');
+  assert.match(provisional.api.renderPanel(), /provisionalQuote/);
+
+  const observed = loadContent();
+  observed.api.rememberNativePrice('eth', 3_000, observed.clock.now);
+  observed.api.runtime.current = {
+    token: { chain: 'eth', address: ADDRESS_A, symbol: 'LIVE', metadataVerified: true, metadataSource: 'GMGN_TRENCH' },
+    quote: { priceUsd: 2, observedAt: observed.clock.now, source: 'GMGN_NETWORK' }
+  };
+  await observed.api.buy(1);
+  assert.equal(observed.api.runtime.modal.note, undefined);
+  assert.doesNotMatch(observed.api.renderPanel(), /provisionalQuote/);
+});
+
+test('local paper quotes bind observations to the normalized active route identity', () => {
+  const normalizedAddress = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const mixedCaseAddress = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${normalizedAddress}` });
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  const quote = loaded.api.resolvePaperTradeQuote(
+    { chain: 'base', address: mixedCaseAddress, symbol: 'BOUND' },
+    { chain: 'eth', address: ADDRESS_B, priceUsd: 2, observedAt: loaded.clock.now, source: 'DEXSCREENER' }
+  );
+  assert.equal(quote.chain, 'base');
+  assert.equal(quote.address, normalizedAddress);
+  assert.equal(loaded.api.resolvePaperTradeQuote({ chain: 'eth', address: ADDRESS_A }, {}), null);
+  assert.equal(loaded.api.resolvePaperTradeQuote({ chain: 'base', address: 'invalid' }, {}), null);
+  assert.equal(loaded.api.paperExecutableQuote({ chain: 'base', address: 'invalid' }, quote), null);
 });
 
 test('header native balance attaches to connected wallet or stable header-actions fallback', () => {
@@ -852,7 +916,7 @@ test('a confirmation callback captured on one token cannot execute after same-ch
   assert.equal(loaded.calls.buy, 0);
 });
 
-test('a pending quick-buy cannot execute after same-chain navigation', async () => {
+test('quick-buy commits before same-chain navigation and background native refresh cannot duplicate it', async () => {
   const nativeGate = deferred();
   const loaded = loadContent({
     sendMessage: (message) => message.type === 'TANGO_GET_NATIVE_PRICE' ? nativeGate.promise : Promise.resolve({ ok: true })
@@ -860,10 +924,14 @@ test('a pending quick-buy cannot execute after same-chain navigation', async () 
   loaded.api.runtime.settings.fastMode = true;
   loaded.api.runtime.settings.confirmationEnabled = false;
   const action = loaded.api.handleQuickBuy({ ...quoteContext(), amountNative: 1 });
+  assert.equal(loaded.calls.buy, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.provisional, true);
   loaded.context.location.href = `https://gmgn.ai/eth/token/${ADDRESS_B}`;
   nativeGate.resolve({ ok: true, price: 3_000, observedAt: loaded.clock.now });
   await action;
-  assert.equal(loaded.calls.buy, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(loaded.calls.buy, 1);
 });
 
 test('stale or untrusted populated GMGN fields still request verified DEX fallback', () => {
@@ -892,7 +960,7 @@ test('content preserves the background native observation timestamp instead of r
   assert.equal(loaded.api.freshNativePrice('eth'), 0);
 });
 
-test('execution refreshes a native observation aged one millisecond beyond quote freshness', async () => {
+test('execution uses a stale local native observation immediately and refreshes it in background', async () => {
   const loaded = loadContent({
     sendMessage: async (message) => message.type === 'TANGO_GET_NATIVE_PRICE'
       ? { ok: true, price: 3_100, observedAt: loaded.clock.now }
@@ -907,8 +975,11 @@ test('execution refreshes a native observation aged one millisecond beyond quote
   const nativeRequests = loaded.messages.filter((message) => message.type === 'TANGO_GET_NATIVE_PRICE');
   assert.equal(nativeRequests.length, 1);
   assert.equal(loaded.calls.buy, 1);
-  assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 3_100);
+  assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 3_000);
   assert.equal(loaded.calls.buyOrders[0].quote.nativePriceObservedAt, loaded.clock.now);
+  const refresh = loaded.api.runtime.nativePricePromises.get('eth');
+  if (refresh) await refresh;
+  assert.equal(loaded.api.runtime.nativePrices.get('eth'), 3_100);
 });
 
 test('quick buy uses exact-address last-known token and native prices when refresh is unavailable', async () => {
@@ -1025,7 +1096,7 @@ test('an old failed quote request cannot suppress or remove a newer away-and-bac
   await currentRequest;
 });
 
-test('EVM market-cap-only GMGN observation falls back to a priced DEX quote before execution', async () => {
+test('supplyless EVM market-cap observation fills provisionally before background DEX refresh', async () => {
   const loaded = loadContent({
     sendMessage: async (message) => message.type === 'TANGO_GET_TOKEN_QUOTE'
       ? {
@@ -1056,12 +1127,13 @@ test('EVM market-cap-only GMGN observation falls back to a priced DEX quote befo
 
   assert.equal(loaded.messages.some((message) => message.type === 'TANGO_GET_TOKEN_QUOTE'), true);
   assert.equal(loaded.calls.buy, 1);
-  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 2);
-  assert.equal(loaded.calls.buyOrders[0].quote.source, 'DEXSCREENER');
+  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.source, 'TANGO_SYNTHETIC');
+  assert.equal(loaded.calls.buyOrders[0].quote.provisional, true);
   assert.equal(loaded.calls.buyOrders[0].quote.nativePriceObservedAt, loaded.clock.now - 1_000);
 });
 
-test('non-Pump Solana trench quick-buy fails closed on list market cap and executes only a fresh real-price quote', async () => {
+test('non-Pump Solana market cap fills provisionally while real-price refresh stays background-only', async () => {
   const address = 'So11111111111111111111111111111111111111112';
   const trenchContext = () => ({
     token: {
@@ -1092,7 +1164,9 @@ test('non-Pump Solana trench quick-buy fails closed on list market cap and execu
   unavailable.clock.now += 1_000;
   await rejected;
   assert.equal(unavailable.messages.some((message) => message.type === 'TANGO_GET_TOKEN_QUOTE'), true);
-  assert.equal(unavailable.calls.buy, 0);
+  assert.equal(unavailable.calls.buy, 1);
+  assert.equal(unavailable.calls.buyOrders[0].quote.priceUsd, 1);
+  assert.equal(unavailable.calls.buyOrders[0].quote.provisional, true);
 
   const resolved = loadContent({
     href,
@@ -1116,8 +1190,9 @@ test('non-Pump Solana trench quick-buy fails closed on list market cap and execu
   await accepted;
   assert.equal(resolved.messages.some((message) => message.type === 'TANGO_GET_TOKEN_QUOTE'), true);
   assert.equal(resolved.calls.buy, 1);
-  assert.equal(resolved.calls.buyOrders[0].quote.priceUsd, 0.002);
-  assert.equal(resolved.calls.buyOrders[0].quote.source, 'DEXSCREENER');
+  assert.equal(resolved.calls.buyOrders[0].quote.priceUsd, 1);
+  assert.equal(resolved.calls.buyOrders[0].quote.source, 'TANGO_SYNTHETIC');
+  assert.equal(resolved.calls.buyOrders[0].quote.provisional, true);
   assert.equal(resolved.calls.buyOrders[0].quote.valuationMode, 'PRICE');
   assert.equal(resolved.calls.buyOrders[0].quote.nativePriceObservedAt, resolved.clock.now - 1_000);
 });

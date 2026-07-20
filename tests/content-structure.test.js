@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const cssSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.css'), 'utf8');
+const i18nSource = fs.readFileSync(path.resolve(__dirname, '../src/shared/i18n.js'), 'utf8');
 const root = path.resolve(__dirname, '..');
 
 function between(startText, endText) {
@@ -100,17 +101,14 @@ test('header balance is read from the active account', () => {
   assert.doesNotMatch(header, /state\.account|cashBalanceSol/);
 });
 
-test('all trading entry points use the unified paper quote resolver', () => {
-  const buy = between('async function buy(', 'function previewBuy(');
-  const sell = between('async function sell(', 'async function sellPosition(');
-  const sellPosition = between('async function sellPosition(', 'async function commitSell(');
-  const closeAll = between('async function commitCloseAll(', 'async function sellBreakeven()');
-  assert.match(buy, /amountNative:/);
-  assert.doesNotMatch(buy, /amountSol:/);
-  assert.match(buy, /resolvePaperTradeQuote\(/);
-  assert.match(sell, /resolvePaperTradeQuote\(/);
-  assert.match(sellPosition, /resolvePaperTradeQuote\(/);
-  assert.match(closeAll, /resolvePaperTradeQuote\(/);
+test('paper execution paths contain no quote wait, pending intent, or network await', () => {
+  const resolver = between('function resolvePaperTradeQuote(', 'function requireExecutableQuote(');
+  const execution = between('async function buy(', 'function showToast(');
+  assert.doesNotMatch(resolver, /await|setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote/);
+  assert.doesNotMatch(execution, /queuePendingPaperIntent|pendingTradeIntents|quoteQueued/);
+  for (const name of ['buy', 'sell', 'sellPosition', 'commitCloseAll', 'sellBreakeven']) {
+    assert.match(execution, new RegExp(`resolvePaperTradeQuote\\(`), name);
+  }
 });
 
 test('content integration remains paper-only and contains no wallet or transaction submission path', () => {
@@ -133,12 +131,22 @@ test('native prices and GMGN quotes are explicitly keyed by chain', () => {
   assert.match(quoteTick, /updatePositionQuote\(runtime\.current\.token, executable\)/);
 });
 
-test('panel prefers a fresh quote and falls back only through the paper snapshot validator', () => {
+test('panel prefers a fresh quote and falls back through the complete local quote resolver', () => {
   const panel = between('function renderPanel()', 'function floatingStyle(');
   assert.ok(panel.indexOf('const liveQuote = executableQuote(current.token, current.quote)')
-    < panel.indexOf('const paperQuote = liveQuote || paperExecutableQuote(current.token, current.quote, position || current.token)'));
+    < panel.indexOf('const paperQuote = liveQuote || resolvePaperTradeQuote(current.token, current.quote, { position })'));
   assert.match(panel, /markPosition\(position, paperQuote, currentNativePriceUsd\(\)\)/);
   assert.doesNotMatch(panel, /markPosition\(position, current\?\.quote\)/);
+});
+
+test('provisional paper valuation copy is bilingual and rendered only from the provisional flag', () => {
+  assert.equal((i18nSource.match(/provisionalQuote:/g) || []).length, 2);
+  const panel = between('function renderPanel()', 'function floatingStyle(');
+  const buy = between('function previewBuy(', 'async function commitBuy(');
+  const sell = between('async function sell(', 'async function sellPosition(');
+  assert.match(panel, /paperQuote\?\.provisional === true[\s\S]*t\('provisionalQuote'\)/);
+  assert.match(buy, /order\.quote\.provisional === true \? t\('provisionalQuote'\) : undefined/);
+  assert.match(sell, /order\.quote\.provisional === true \? t\('provisionalQuote'\) : undefined/);
 });
 
 test('fresh quote merges never inherit executable valuation fields from an older observation', () => {

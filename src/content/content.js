@@ -13,7 +13,7 @@
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null,
-    routeEpoch: 0, routeIdentity: null, pendingTradeIntents: new Map()
+    routeEpoch: 0, routeIdentity: null
   };
 
   const host = document.createElement('div');
@@ -107,7 +107,6 @@
     runtime.gmgnQuotes.clear();
     runtime.quoteRequests.clear();
     runtime.quoteRetryAt.clear();
-    runtime.pendingTradeIntents.clear();
     runtime.markerPayloads = new WeakMap();
     syncChartMarkers(true);
     Tango.GMGN.clearQuickBuy();
@@ -118,6 +117,15 @@
   function handlePageMessage(event) {
     if (event.data?.source === 'TANGO_PAPER_CHART' && event.data?.type === 'READY') {
       syncChartMarkers(true);
+      return;
+    }
+    if (event.source === window && event.data?.source === 'TANGO_GMGN_PAGE'
+      && event.data?.type === 'NATIVE_PRICES') {
+      for (const price of event.data.prices || []) {
+        Tango.Chains.all().filter((chain) => chain.nativeSymbol === price.symbol)
+          .forEach((chain) => rememberNativePrice(chain.id, price.priceUsd, price.observedAt));
+      }
+      queueRender();
       return;
     }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
@@ -365,8 +373,6 @@
     syncQuickBuyButtons();
     await syncVisiblePositionMetadata(routeCapture);
     if (!routeCaptureIsCurrent(routeCapture)) return;
-    await retryPendingPaperIntents(routeCapture);
-    if (!routeCaptureIsCurrent(routeCapture)) return;
     const currentKey = runtime.current?.token
       ? Tango.Engine.positionKey(runtime.current.token.chain, runtime.current.token.address) : '';
     if (previousKey !== currentKey || runtime.current) queueRender();
@@ -515,20 +521,6 @@
     return token;
   }
 
-  async function waitForGmgnQuote(chain, address, timeoutMs = 900, requireMetadata = false,
-    routeCapture = captureRoute()) {
-    window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
-    const attempts = Math.max(1, Math.ceil(timeoutMs / 100));
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain) return null;
-      const quote = freshGmgnQuote(chain, address);
-      const hasMetadata = !isPlaceholderTokenLabel(quote?.symbol) || !isPlaceholderTokenLabel(quote?.name);
-      if (acceptedTokenObservation(quote, { chain, address }) && (!requireMetadata || hasMetadata)) return quote;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    return null;
-  }
-
   function mergeQuote(context, quote) {
     if (!quote) return context.quote;
     const chain = context.token?.chain;
@@ -563,35 +555,6 @@
     });
     runtime.quoteRequests.set(key, request);
     return request;
-  }
-
-  async function resolveQuickBuyQuote(context, routeCapture = captureRoute()) {
-    const chain = activeChain();
-    if (!routeCaptureIsCurrent(routeCapture) || !chain || context?.token?.chain !== chain.id) return null;
-    let networkQuote = freshGmgnQuote(chain.id, context.token.address);
-    if (acceptedTokenObservation(networkQuote, context.token)) mergeQuote(context, networkQuote);
-    let hasTokenValue = acceptedTokenObservation(context.quote, context.token);
-    if (!hasTokenValue) {
-      networkQuote = await waitForGmgnQuote(chain.id, context.token.address, 900, false, routeCapture);
-      if (!routeCaptureIsCurrent(routeCapture)) return null;
-      if (acceptedTokenObservation(networkQuote, context.token)) mergeQuote(context, networkQuote);
-      hasTokenValue = acceptedTokenObservation(context.quote, context.token);
-    }
-    const tokenRequest = hasTokenValue ? Promise.resolve(null) : sharedQuoteRequest({
-      type: 'TANGO_GET_TOKEN_QUOTE', chain: context.token.chain, address: context.token.address
-    }, 1800);
-    const nativeRequest = freshNativePrice(chain.id) > 0
-      ? Promise.resolve(null)
-      : sharedQuoteRequest({ type: 'TANGO_GET_NATIVE_PRICE', chain: chain.id });
-    const [tokenResponse, nativeResponse] = await Promise.all([tokenRequest, nativeRequest]);
-    if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain.id) return null;
-    if (acceptedTokenObservation(tokenResponse?.quote, context.token)) mergeQuote(context, tokenResponse.quote);
-    const nativePrice = nativeResponse?.price
-      ? rememberNativePrice(chain.id, nativeResponse.price, Number(nativeResponse.observedAt || 0))
-      : freshNativePrice(chain.id);
-    context.quote.nativePriceUsd = nativePrice;
-    context.quote.nativePriceObservedAt = nativePrice ? runtime.nativePriceObservedAt.get(chain.id) : 0;
-    return context.quote;
   }
 
   function trustedTokenObservation(candidate, token) {
@@ -657,84 +620,118 @@
     return observations[0] || { price: 0, observedAt: 0 };
   }
 
-  function paperExecutableQuote(token, candidate, position = persistedQuoteContext(token)) {
+  function paperExecutableQuote(token, candidate, position) {
     const chain = activeChain();
     if (!chain || token?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, token?.address || token?.tokenAddress)) {
       return null;
     }
-    if (!trustedTokenObservation(candidate, token)) return null;
-    const native = lastKnownNativeObservation(chain.id, candidate, position);
-    if (!(native.price > 0)) return null;
     const now = Date.now();
-    const originalObservedAt = Number(candidate.originalObservedAt || candidate.observedAt || 0);
-    const nativeOriginalObservedAt = Number(candidate.nativeOriginalObservedAt || native.observedAt || 0);
-    const staleMs = Number(Tango.QUOTE_STALE_MS || 15_000);
-    const paperFallback = candidate.paperFallback === true
-      || now - originalObservedAt > staleMs
-      || now - nativeOriginalObservedAt > staleMs;
-    const quote = {
-      ...candidate,
-      nativePriceUsd: native.price,
-      observedAt: paperFallback ? now : originalObservedAt,
-      nativePriceObservedAt: paperFallback ? now : nativeOriginalObservedAt,
-      originalObservedAt,
-      nativeOriginalObservedAt,
-      paperFallback
+    return {
+      ...(candidate || {}),
+      chain: chain.id,
+      address: Tango.Chains.normalizeAddress(chain.id, token.address || token.tokenAddress),
+      observedAt: now,
+      nativePriceObservedAt: now,
+      paperFallback: true
     };
-    const validation = Tango.Engine.validateQuote(quote, now, undefined, position || token);
-    return validation.ok ? quote : null;
   }
 
-  async function resolvePaperTradeQuote(token, candidate, {
-    position = persistedQuoteContext(token), routeCapture = captureRoute()
-  } = {}) {
+  function refreshPaperQuoteInBackground(token) {
     const chain = activeChain();
-    if (!routeCaptureIsCurrent(routeCapture) || !chain || token?.chain !== chain.id
-      || !Tango.Chains.validateAddress(chain.id, token?.address || token?.tokenAddress)) return null;
-    const normalizedAddress = Tango.Chains.normalizeAddress(chain.id, token.address || token.tokenAddress);
-    const normalizedToken = { ...token, address: normalizedAddress };
-    const cachedNetwork = cachedGmgnQuote(chain.id, normalizedAddress);
-    applyGmgnNetworkMetadata(token, cachedNetwork);
-    applyGmgnNetworkMetadata(normalizedToken, cachedNetwork);
-    const context = { token: normalizedToken, quote: { ...(candidate || {}) } };
-    const immediate = executableQuote(normalizedToken, context.quote);
-    if (immediate) return immediate;
-
-    await resolveQuickBuyQuote(context, routeCapture);
-    if (!routeCaptureIsCurrent(routeCapture)) return null;
-    const refreshedNetwork = cachedGmgnQuote(chain.id, normalizedAddress);
-    applyGmgnNetworkMetadata(token, refreshedNetwork);
-    applyGmgnNetworkMetadata(context.token, refreshedNetwork);
-    const refreshed = executableQuote(normalizedToken, context.quote);
-    if (refreshed) return refreshed;
-
-    const candidates = [
-      context.quote,
-      cachedGmgnQuote(chain.id, normalizedAddress),
-      candidate,
-      positionQuote(position)
-    ].filter((observation) => trustedTokenObservation(observation, normalizedToken))
-      .sort((left, right) => Number(right.observedAt || 0) - Number(left.observedAt || 0));
-    for (const observation of candidates) {
-      const fallback = paperExecutableQuote(normalizedToken, observation, position);
-      if (fallback) return fallback;
-    }
-    return null;
+    const address = token?.address || token?.tokenAddress;
+    if (!chain || token?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, address)) return;
+    const normalizedAddress = Tango.Chains.normalizeAddress(chain.id, address);
+    const routeCapture = captureRoute();
+    const currentMatches = runtime.current?.token?.chain === chain.id
+      && Tango.Chains.validateAddress(chain.id, runtime.current.token.address)
+      && Tango.Chains.normalizeAddress(chain.id, runtime.current.token.address) === normalizedAddress;
+    const context = currentMatches ? runtime.current : {
+      token: { ...token, chain: chain.id, address: normalizedAddress },
+      quote: cachedGmgnQuote(chain.id, normalizedAddress) || positionQuote(persistedQuoteContext(token)) || {}
+    };
+    Promise.resolve().then(() => ensureTokenQuote(context, routeCapture)).catch(() => null);
+    Promise.resolve().then(() => ensureNativePrice(context, routeCapture)).catch(() => null);
   }
 
-  function queuePendingPaperIntent(key, routeCapture, retry) {
-    if (!routeCaptureIsCurrent(routeCapture) || runtime.pendingTradeIntents.has(key)) return;
-    showToast(t('quoteQueued'), 'info');
-    runtime.pendingTradeIntents.set(key, { routeCapture, retry });
-  }
-
-  async function retryPendingPaperIntents(routeCapture = captureRoute()) {
-    const pending = [...runtime.pendingTradeIntents.entries()];
-    for (const [key, intent] of pending) {
-      if (!routeCaptureIsCurrent(routeCapture) || !routeCaptureIsCurrent(intent.routeCapture)) return;
-      runtime.pendingTradeIntents.delete(key);
-      await intent.retry();
-    }
+  function resolvePaperTradeQuote(token, candidate, options = {}) {
+    const chain = activeChain();
+    const address = token?.address || token?.tokenAddress;
+    if (!chain || token?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, address)) return null;
+    const normalizedAddress = Tango.Chains.normalizeAddress(chain.id, address);
+    const position = options?.position === undefined ? persistedQuoteContext(token) : options.position;
+    const exact = runtime.gmgnQuotes.get(gmgnQuoteKey(chain.id, normalizedAddress)) || null;
+    const candidateSource = String(candidate?.source || '').toUpperCase();
+    const candidateIsTrusted = candidateSource === 'DEXSCREENER' || candidateSource.startsWith('GMGN');
+    const boundCandidate = candidateIsTrusted ? {
+      ...(candidate || {}), chain: chain.id, address: normalizedAddress
+    } : null;
+    const merged = exact && boundCandidate
+      ? Tango.GMGNQuotes.mergeObservation(exact, boundCandidate)
+      : boundCandidate || exact;
+    const positionAddress = position?.tokenAddress || position?.address;
+    const boundPosition = position?.chain === chain.id
+      && Tango.Chains.validateAddress(chain.id, positionAddress)
+      && Tango.Chains.normalizeAddress(chain.id, positionAddress) === normalizedAddress
+      ? position : null;
+    const local = merged || positionQuote(boundPosition) || {};
+    const marketCapUsd = Number(local.marketCapUsd);
+    const safeMarketCapUsd = Number.isFinite(marketCapUsd) && marketCapUsd > 0 ? marketCapUsd : 0;
+    const observedPrice = Number(local.priceUsd);
+    const safeObservedPrice = Number.isFinite(observedPrice) && observedPrice > 0 ? observedPrice : 0;
+    const legacyPumpSupply = chain.id === 'sol' && /pump$/i.test(normalizedAddress)
+      && boundPosition?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1'
+      && boundPosition?.valuationMode === 'MARKET_CAP'
+      && Number(boundPosition?.marketCapDivisor) === 1_000_000_000
+      ? 1_000_000_000 : 0;
+    const supply = Tango.Supply.resolve({
+      chain: chain.id,
+      totalSupply: local.totalSupply || boundPosition?.totalSupply || legacyPumpSupply,
+      supplySource: local.supplySource || local.totalSupplySource || boundPosition?.supplySource
+        || (legacyPumpSupply ? 'LEGACY_PUMP_RULE' : ''),
+      priceUsd: safeObservedPrice,
+      marketCapUsd: safeMarketCapUsd,
+      launchpad: token.launchpad || local.launchpad || boundPosition?.launchpad,
+      launchMode: token.launchMode || local.launchMode || boundPosition?.launchMode
+    });
+    const calculatedPrice = !safeObservedPrice && safeMarketCapUsd > 0 && supply
+      ? safeMarketCapUsd / supply.totalSupply
+      : 0;
+    const derivedPrice = Number.isFinite(calculatedPrice) && calculatedPrice > 0 ? calculatedPrice : 0;
+    const historicalValue = Number(boundPosition?.lastPriceUsd || boundPosition?.averageEntryPriceUsd || 0);
+    const historicalPrice = Number.isFinite(historicalValue) && historicalValue > 0 ? historicalValue : 0;
+    const priceUsd = safeObservedPrice || derivedPrice || historicalPrice || 1;
+    const native = lastKnownNativeObservation(chain.id, local, boundPosition);
+    const nativePriceUsd = Number(native.price || 1);
+    const now = Date.now();
+    const syntheticTokenPrice = !(safeObservedPrice > 0 || derivedPrice > 0 || historicalPrice > 0);
+    const syntheticNativePrice = !(native.price > 0);
+    const fallbackSupply = derivedPrice > 0 && supply?.confidence === 'fallback';
+    return {
+      ...local,
+      chain: chain.id,
+      address: normalizedAddress,
+      priceUsd,
+      marketCapUsd: safeMarketCapUsd,
+      liquidityUsd: Number.isFinite(Number(local.liquidityUsd)) && Number(local.liquidityUsd) > 0
+        ? Number(local.liquidityUsd) : 0,
+      nativePriceUsd,
+      observedAt: now,
+      nativePriceObservedAt: now,
+      originalObservedAt: Number(local.observedAt || 0),
+      nativeOriginalObservedAt: Number(native.observedAt || 0),
+      source: syntheticTokenPrice ? 'TANGO_SYNTHETIC' : String(local.source || 'GMGN_LAST_KNOWN'),
+      valuationMode: derivedPrice > 0 ? 'MARKET_CAP' : 'PRICE',
+      priceProvenance: syntheticTokenPrice ? 'SYNTHETIC_PRICE'
+        : derivedPrice > 0 ? 'MARKET_CAP_DERIVED' : 'OBSERVED_PRICE',
+      totalSupply: supply ? Number(supply.totalSupply) : undefined,
+      marketCapDivisor: supply ? Number(supply.totalSupply) : undefined,
+      supplySource: supply?.source || '',
+      supplyConfidence: supply?.confidence || '',
+      syntheticTokenPrice,
+      syntheticNativePrice,
+      provisional: syntheticTokenPrice || syntheticNativePrice || fallbackSupply,
+      paperFallback: true
+    };
   }
 
   function requireExecutableQuote(token, candidate) {
@@ -822,13 +819,9 @@
       if (!chain || order.token?.chain !== chain.id) throw new Error('unsupportedChain');
       if (!(order.amountNative > 0)) throw new Error('invalidAmount');
       if (order.amountNative > Number(activeAccount()?.cashBalanceNative || 0)) throw new Error('insufficientBalance');
-      order.quote = await resolvePaperTradeQuote(context?.token, context?.quote, { routeCapture });
-      if (!routeCaptureIsCurrent(routeCapture)) return;
-      if (!order.quote) {
-        const pendingKey = `BUY:${gmgnQuoteKey(order.token.chain, order.token.address)}:${order.amountNative}`;
-        queuePendingPaperIntent(pendingKey, routeCapture, () => buy(amountNative, context, routeCapture));
-        return;
-      }
+      order.quote = resolvePaperTradeQuote(context?.token, context?.quote);
+      if (!order.quote) throw new Error('invalidQuote');
+      refreshPaperQuoteInBackground(order.token);
       const orderKey = `${order.token.chain}:${order.token.address || ''}:${order.amountNative}`;
       if (runtime.modal?.type === 'confirm' && runtime.modal.orderKey === orderKey) return;
       if (!routeCaptureIsCurrent(routeCapture)) return;
@@ -869,6 +862,7 @@
         [t('tradingFee'), Tango.Format.native(fee, chain.nativeSymbol, language())],
         [t('networkFee'), Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())]
       ],
+      note: order.quote.provisional === true ? t('provisionalQuote') : undefined,
       allowSessionSuppress: true,
       action: () => commitBuy(order, routeCapture)
     };
@@ -904,13 +898,9 @@
       const position = runtime.state.positions[key];
       if (!position) throw new Error('noPosition');
       if (!(order.percent > 0 && order.percent <= 100)) throw new Error('invalidAmount');
-      order.quote = await resolvePaperTradeQuote(context?.token, context?.quote, { position, routeCapture });
-      if (!routeCaptureIsCurrent(routeCapture)) return;
-      if (!order.quote) {
-        const pendingKey = `SELL:${key}:${order.percent}`;
-        queuePendingPaperIntent(pendingKey, routeCapture, () => sell(percent, context, routeCapture));
-        return;
-      }
+      order.quote = resolvePaperTradeQuote(context?.token, context?.quote, { position });
+      if (!order.quote) throw new Error('invalidQuote');
+      refreshPaperQuoteInBackground(order.token);
       const validation = Tango.Engine.validateQuote(order.quote, Date.now(), undefined, persistedQuoteContext(order.token));
       if (!validation.ok) throw new Error(validation.reason);
       if (requiresConfirmation()) {
@@ -920,6 +910,7 @@
         runtime.modal = {
           type: 'confirm', title: t('simulatedSell'),
           rows: [[t('token'), order.token.symbol], [t('amount'), `${percent}%`], valuationRow],
+          note: order.quote.provisional === true ? t('provisionalQuote') : undefined,
           allowSessionSuppress: true,
           action: () => commitSell(order, routeCapture)
         };
@@ -933,13 +924,9 @@
     if (activeChain()?.id !== position.chain) return showToast(t('unsupportedChain'), 'error');
     const routeCapture = captureRoute();
     const token = { chain: position.chain, address: position.tokenAddress, symbol: position.symbol };
-    const quote = await resolvePaperTradeQuote(token, positionQuote(position), { position, routeCapture });
-    if (!routeCaptureIsCurrent(routeCapture)) return;
-    if (!quote) {
-      const pendingKey = `SELL:${Tango.Engine.positionKey(position.chain, position.tokenAddress)}:${percent}`;
-      queuePendingPaperIntent(pendingKey, routeCapture, () => sellPosition(position, percent));
-      return;
-    }
+    const quote = resolvePaperTradeQuote(token, positionQuote(position), { position });
+    if (!quote) return showToast(t('invalidQuote'), 'error');
+    refreshPaperQuoteInBackground(token);
     await sell(percent, { token, quote }, routeCapture);
   }
 
@@ -992,19 +979,15 @@
       const positions = Tango.ChainView.positions(runtime.state, chain);
       const quoteFailures = new Map();
       const resolvedQuotes = new Map();
-      await Promise.all(positions.map(async (position) => {
+      positions.forEach((position) => {
         const key = Tango.Engine.positionKey(position.chain, position.tokenAddress);
         const token = { chain: position.chain, address: position.tokenAddress, symbol: position.symbol };
-        const quote = await resolvePaperTradeQuote(token, positionQuote(position), { position, routeCapture });
-        if (quote) resolvedQuotes.set(key, quote);
-        else quoteFailures.set(key, 'quoteLoading');
-      }));
-      if (!routeCaptureIsCurrent(routeCapture)) return;
-      if (resolvedQuotes.size !== positions.length) {
-        queuePendingPaperIntent(`CLOSE_ALL:${chain}`, routeCapture, () => commitCloseAll(routeCapture));
-        runtime.modal = null;
-        return;
-      }
+        const quote = resolvePaperTradeQuote(token, positionQuote(position), { position });
+        if (quote) {
+          resolvedQuotes.set(key, quote);
+          refreshPaperQuoteInBackground(token);
+        } else quoteFailures.set(key, 'invalidQuote');
+      });
       const orders = Tango.ChainView.closeOrders(runtime.state, chain, (position) => {
         const key = Tango.Engine.positionKey(position.chain, position.tokenAddress);
         const quote = resolvedQuotes.get(key) || null;
@@ -1047,13 +1030,9 @@
     const routeCapture = captureRoute();
     const position = currentPosition();
     if (!position) return showToast(t('noPosition'), 'error');
-    const quote = await resolvePaperTradeQuote(runtime.current?.token, runtime.current?.quote, { position, routeCapture });
-    if (!routeCaptureIsCurrent(routeCapture)) return;
-    if (!quote) {
-      const key = `BREAKEVEN:${Tango.Engine.positionKey(position.chain, position.tokenAddress)}`;
-      queuePendingPaperIntent(key, routeCapture, sellBreakeven);
-      return;
-    }
+    const quote = resolvePaperTradeQuote(runtime.current?.token, runtime.current?.quote, { position });
+    if (!quote) return showToast(t('invalidQuote'), 'error');
+    refreshPaperQuoteInBackground(runtime.current.token);
     const percent = Tango.Engine.breakevenSellPercent(position, quote, runtime.settings);
     if (!(percent > 0 && percent <= 100)) return showToast(t('breakevenUnavailable'), 'error');
     await sell(percent);
@@ -1295,7 +1274,7 @@
     if (!current?.token || current.token.chain !== chain.id) return '';
     const position = currentPosition();
     const liveQuote = executableQuote(current.token, current.quote);
-    const paperQuote = liveQuote || paperExecutableQuote(current.token, current.quote, position || current.token);
+    const paperQuote = liveQuote || resolvePaperTradeQuote(current.token, current.quote, { position });
     const mark = position ? Tango.Engine.markPosition(position, paperQuote, currentNativePriceUsd()) : null;
     const quoteValid = Boolean(paperQuote);
     const symbol = current?.token?.symbol || 'GMGN';
@@ -1338,7 +1317,9 @@
           <span>${t('pnl')} <strong class="${pnlClass(mark?.unrealizedPnlNative)}">${position ? Tango.Format.percent(mark.roi, language(), true) : '--'}</strong></span>
           <span>${t('pnlAmount')} <strong class="${pnlClass(totalProfit)}">${accountMoney(totalProfit, true)}</strong></span>
         </div>
-        ${quoteValid ? '' : `<div class="tango-warning">${t('quoteLoading')}</div>`}
+        ${paperQuote?.provisional === true
+          ? `<div class="tango-warning">${t('provisionalQuote')}</div>`
+          : quoteValid ? '' : `<div class="tango-warning">${t('quoteLoading')}</div>`}
       </div>`}
     </div>`;
   }
