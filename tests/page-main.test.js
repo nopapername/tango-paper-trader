@@ -181,6 +181,35 @@ test('an older fetch request completing last cannot replace a newer token observ
   assert.equal(loaded.published[0].observedAt, 200);
 });
 
+test('XHR request ordering follows send time rather than open time', () => {
+  const clock = { now: 100 };
+  const loaded = loadPageMain(async () => jsonResponse({}), clock);
+  const openedFirst = new loaded.context.XMLHttpRequest();
+  openedFirst.open('GET', '/api/token/quote');
+  clock.now = 200;
+  const openedSecond = new loaded.context.XMLHttpRequest();
+  openedSecond.open('GET', '/api/token/quote');
+
+  clock.now = 300;
+  openedSecond.send();
+  clock.now = 400;
+  openedFirst.send();
+  openedFirst.status = 200;
+  openedFirst.responseText = JSON.stringify({ address: EVM_ADDRESS, priceUsd: 4 });
+  openedFirst.dispatch('load');
+  clock.now = 500;
+  openedSecond.status = 200;
+  openedSecond.responseText = JSON.stringify({ address: EVM_ADDRESS, priceUsd: 3 });
+  openedSecond.dispatch('load');
+
+  loaded.published.length = 0;
+  loaded.context.__messageData = { source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' };
+  vm.runInNewContext("__listeners.get('message')({ source: window, data: __messageData })", loaded.context);
+  assert.equal(loaded.published.length, 1);
+  assert.equal(loaded.published[0].priceUsd, 4);
+  assert.equal(loaded.published[0].observedAt, 400);
+});
+
 test('major_coin_prices publishes passive native observations without a new request', async () => {
   const loaded = loadPageMain(async () => jsonResponse(
     { data: [{ symbol: 'ETH', price: 3500 }] },

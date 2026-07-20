@@ -210,6 +210,31 @@ test('older response fields cannot overwrite newer price, supply, or metadata', 
   assert.equal(merged.symbol, 'NEW');
 });
 
+test('invalid values and timestamps are ignored per field without freezing later observations', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const valid = Quotes.mergeObservation(null, {
+    chain: 'eth', address, priceUsd: 2, symbol: 'VALID', observedAt: 100, source: 'GMGN_NETWORK'
+  });
+  const poisoned = Quotes.mergeObservation(valid, {
+    chain: 'eth', address,
+    priceUsd: Infinity, priceObservedAt: 200,
+    totalSupply: Infinity, totalSupplyObservedAt: 200,
+    symbol: 'POISON', symbolObservedAt: Number.MAX_SAFE_INTEGER,
+    name: 'Fresh Name', nameObservedAt: 200,
+    observedAt: Number.MAX_SAFE_INTEGER, source: 'GMGN_NETWORK'
+  });
+
+  assert.equal(poisoned.priceUsd, 2);
+  assert.equal(poisoned.totalSupply, 0);
+  assert.equal(poisoned.symbol, 'VALID');
+  assert.equal(poisoned.name, 'Fresh Name');
+  const recovered = Quotes.mergeObservation(poisoned, {
+    chain: 'eth', address, priceUsd: 3, observedAt: 300, source: 'GMGN_NETWORK'
+  });
+  assert.equal(recovered.priceUsd, 3);
+  assert.equal(recovered.priceObservedAt, 300);
+});
+
 test('major coin price payloads produce only registered native symbols', () => {
   assert.deepEqual(Quotes.extractNativePrices({ data: [
     { symbol: 'SOL', price: '150' },

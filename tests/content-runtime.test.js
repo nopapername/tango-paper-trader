@@ -783,6 +783,27 @@ test('an older native observation cannot replace a newer cached price', () => {
   assert.equal(loaded.api.runtime.nativePriceObservedAt.get('eth'), loaded.clock.now);
 });
 
+test('malformed and far-future native messages cannot poison the cached price', () => {
+  const loaded = loadContent();
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES',
+    prices: [{ symbol: 'ETH', priceUsd: 3_500, observedAt: loaded.clock.now }]
+  });
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES', prices: [
+      { symbol: 'ETH', priceUsd: Infinity, observedAt: loaded.clock.now + 1 },
+      { symbol: 'ETH', priceUsd: 4_000, observedAt: Number.MAX_SAFE_INTEGER },
+      { symbol: 'ETH', priceUsd: 4_500, observedAt: String(loaded.clock.now + 2) },
+      { symbol: 'ETH', priceUsd: 'not-a-number', observedAt: loaded.clock.now + 3 }
+    ]
+  });
+
+  assert.equal(loaded.api.runtime.nativePrices.get('eth'), 3_500);
+  assert.equal(loaded.api.runtime.nativePriceObservedAt.get('eth'), loaded.clock.now);
+  assert.equal(loaded.api.runtime.nativePrices.get('base'), 3_500);
+  assert.equal(loaded.api.runtime.nativePriceObservedAt.get('base'), loaded.clock.now);
+});
+
 test('provisional copy is shown only for provisional panel and confirmation quotes', async () => {
   const provisional = loadContent();
   provisional.api.runtime.current = {

@@ -84,11 +84,16 @@
     if (!registered || !Tango.Chains.validateAddress(registered.id, address)) return '';
     return `${registered.id}:${Tango.Chains.normalizeAddress(registered.id, address)}`;
   }
+  function validObservationTime(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+      && value - Date.now() <= 5_000;
+  }
   function rememberNativePrice(chain, price, observedAt = Date.now()) {
     const numeric = Number(price || 0);
-    const nextObservedAt = Number(observedAt || 0);
+    const nextObservedAt = observedAt;
     const previousObservedAt = Number(runtime.nativePriceObservedAt.get(chain) || 0);
-    if (!(numeric > 0) || !(nextObservedAt > 0) || nextObservedAt < previousObservedAt) {
+    if (!Number.isFinite(numeric) || !(numeric > 0) || !validObservationTime(nextObservedAt)
+      || nextObservedAt < previousObservedAt) {
       return Number(runtime.nativePrices.get(chain) || 0);
     }
     runtime.nativePrices.set(chain, numeric);

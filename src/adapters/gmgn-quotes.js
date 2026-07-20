@@ -10,6 +10,7 @@
   const LOGO_KEYS = ['logo', 'logo_url', 'logoUrl', 'image', 'image_url', 'imageUrl'];
   const LAUNCHPAD_KEYS = ['launchpad', 'launchPad', 'platform'];
   const LAUNCH_MODE_KEYS = ['launch_mode', 'launchMode'];
+  const MAX_FUTURE_SKEW_MS = 5_000;
 
   function numberFrom(value) {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -39,13 +40,26 @@
     return String(value).trim().slice(0, maxLength);
   }
 
+  function validObservationTime(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+      && value - Date.now() <= MAX_FUTURE_SKEW_MS;
+  }
+
   function newerPositive(previous, next, valueField, timeField, sourceField, fallbackTime) {
-    const previousTime = Number(previous?.[timeField]
-      || (Number(previous?.[valueField]) > 0 ? previous?.observedAt : 0) || 0);
-    const nextTime = Number(next?.[timeField] || fallbackTime || 0);
-    const useNext = Number(next?.[valueField]) > 0 && nextTime >= previousTime;
+    const previousValue = Number(previous?.[valueField] || 0);
+    const nextValue = Number(next?.[valueField] || 0);
+    const previousTimeValue = previous?.[timeField]
+      || (Number.isFinite(previousValue) && previousValue > 0 ? previous?.observedAt : 0) || 0;
+    const nextTimeValue = next?.[timeField] || fallbackTime || 0;
+    const previousValid = Number.isFinite(previousValue) && previousValue > 0
+      && validObservationTime(previousTimeValue);
+    const nextValid = Number.isFinite(nextValue) && nextValue > 0
+      && validObservationTime(nextTimeValue);
+    const previousTime = previousValid ? previousTimeValue : 0;
+    const nextTime = nextValid ? nextTimeValue : 0;
+    const useNext = nextValid && (!previousValid || nextTime >= previousTime);
     const selected = useNext ? next : previous;
-    const value = Number(selected?.[valueField] || 0);
+    const value = useNext ? nextValue : previousValid ? previousValue : 0;
     return {
       value,
       observedAt: useNext ? nextTime : previousTime,
@@ -58,13 +72,17 @@
     const clean = field === 'symbol' ? symbolText : (value) => metadataText(value, maxLength);
     const previousValue = clean(previous?.[field]);
     const nextValue = clean(next?.[field]);
-    const previousTime = previousValue
-      ? Number(previous?.[timeField] || previous?.metadataObservedAt || previous?.observedAt || 0) : 0;
-    const nextTime = nextValue
-      ? Number(next?.[timeField] || next?.metadataObservedAt || fallbackTime || 0) : 0;
-    const useNext = Boolean(nextValue) && (!previousValue || nextTime >= previousTime);
+    const previousTimeValue = previousValue
+      ? previous?.[timeField] || previous?.metadataObservedAt || previous?.observedAt || 0 : 0;
+    const nextTimeValue = nextValue
+      ? next?.[timeField] || next?.metadataObservedAt || fallbackTime || 0 : 0;
+    const previousValid = Boolean(previousValue) && validObservationTime(previousTimeValue);
+    const nextValid = Boolean(nextValue) && validObservationTime(nextTimeValue);
+    const previousTime = previousValid ? previousTimeValue : 0;
+    const nextTime = nextValid ? nextTimeValue : 0;
+    const useNext = nextValid && (!previousValid || nextTime >= previousTime);
     const selected = useNext ? next : previous;
-    const value = useNext ? nextValue : previousValue;
+    const value = useNext ? nextValue : previousValid ? previousValue : '';
     return {
       value,
       observedAt: useNext ? nextTime : previousTime,

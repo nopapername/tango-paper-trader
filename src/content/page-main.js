@@ -45,12 +45,12 @@
     return Tango.Chains.get(pathSlug) || Tango.Chains.get(parsed.searchParams.get('chain'));
   }
 
-  function requestContext(url) {
+  function requestContext(url, includeObservedAt = true) {
     let requestUrl;
     try { requestUrl = new URL(String(url?.url || url || ''), location.href).href; }
     catch { requestUrl = String(url?.url || url || ''); }
     const chain = explicitGmgnChain(requestUrl)?.id || Tango.Chains.fromUrl(location.href)?.id || null;
-    return { url: requestUrl, chain, observedAt: nextRequestObservedAt() };
+    return { url: requestUrl, chain, observedAt: includeObservedAt ? nextRequestObservedAt() : 0 };
   }
 
   function publish(quotes) {
@@ -126,13 +126,13 @@
   const xhrOpen = XMLHttpRequest.prototype.open;
   const xhrSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function tangoXhrOpen(method, url, ...rest) {
-    const requestStart = requestContext(url);
+    const requestStart = requestContext(url, false);
     this.__tangoRequestUrl = requestStart.url;
     this.__tangoRequestChain = requestStart.chain;
-    this.__tangoRequestObservedAt = requestStart.observedAt;
     return xhrOpen.call(this, method, url, ...rest);
   };
   XMLHttpRequest.prototype.send = function tangoXhrSend(...args) {
+    this.__tangoRequestObservedAt = nextRequestObservedAt();
     this.addEventListener('load', () => {
       const contentType = this.getResponseHeader('content-type') || '';
       const responseUrl = this.responseURL || this.__tangoRequestUrl;
