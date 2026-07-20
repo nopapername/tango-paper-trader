@@ -23,6 +23,15 @@ test('the current extension satisfies all static contracts', () => {
   assert.equal(result.manifest.version, '0.3.0');
 });
 
+test('extension host permissions remain limited to supported market data hosts', () => {
+  const manifest = require('../manifest.json');
+  assert.deepEqual(manifest.host_permissions, [
+    'https://gmgn.ai/*',
+    'https://api.coingecko.com/*',
+    'https://api.dexscreener.com/*'
+  ]);
+});
+
 test('static validation enforces worker-relative bootstrap imports', () => {
   assert.equal(typeof validation.workerImportErrors, 'function');
   assert.deepEqual(validation.workerImportErrors(

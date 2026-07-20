@@ -126,6 +126,17 @@ test('content integration remains paper-only and contains no wallet or transacti
   assert.doesNotMatch(source, /connectWallet|requestSignature|signTransaction|sendTransaction|eth_sendTransaction|wallet_requestPermissions/);
 });
 
+test('extension permissions and code remain paper-only', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../manifest.json'), 'utf8'));
+  const pageMain = fs.readFileSync(path.resolve(__dirname, '../src/content/page-main.js'), 'utf8');
+  const content = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
+  assert.deepEqual(manifest.permissions, ['storage']);
+  assert.equal(manifest.permissions.includes('web3'), false);
+  assert.doesNotMatch(`${pageMain}\n${content}`,
+    /connectWallet|requestSignature|signTransaction|sendTransaction|eth_sendTransaction|wallet_requestPermissions|strategy_order|swap\/route/);
+  assert.doesNotMatch(pageMain, /new\s+WebSocket\s*\(/);
+});
+
 test('native prices and GMGN quotes are explicitly keyed by chain', () => {
   const nativePrice = between('function ensureNativePrice(', 'function ensureTokenQuote(');
   const quoteTick = between('async function performQuoteTick()', 'const tickQuote =');
