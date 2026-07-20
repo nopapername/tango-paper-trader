@@ -163,6 +163,29 @@
     const numeric = Number(value || 0); const sign = signed && numeric > 0 ? '+' : numeric < 0 ? '-' : '';
     return `${sign}${Tango.Format.usd(Math.abs(numeric) * reference, language())}`;
   }
+  function currentNativePriceUsd() {
+    const chain = activeChain();
+    if (!chain) return 0;
+    return Number(runtime.nativePrices.get(chain.id)
+      || (runtime.current?.token?.chain === chain.id ? runtime.current?.quote?.nativePriceUsd : 0)
+      || 0);
+  }
+  function canonicalUsdSummary() {
+    const chain = activeChain();
+    if (!chain || runtime.settings?.displayCurrency !== 'USD') return null;
+    const price = currentNativePriceUsd();
+    return price > 0 ? Tango.Engine.chainUsdSummary(runtime.state, chain.id, price) : null;
+  }
+  function usdMoney(value, signed = false) {
+    const numeric = Number(value || 0); const sign = signed && numeric > 0 ? '+' : numeric < 0 ? '-' : '';
+    return `${sign}${Tango.Format.usd(Math.abs(numeric), language())}`;
+  }
+  function positionUsdValue(position, mark = Tango.Engine.markPosition(position, freshExecutableQuote(position))) {
+    return Number(position.quantity || 0) * Number(mark.priceUsd || 0);
+  }
+  function positionUsdTotal(positions) {
+    return positions.reduce((sum, position) => sum + positionUsdValue(position), 0);
+  }
   function esc(value) {
     return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   }
@@ -703,9 +726,12 @@
     const positions = Tango.ChainView.positions(runtime.state, chain.id);
     if (!positions.length) return showToast(t('noPositions'), 'error');
     const summary = Tango.Engine.portfolioSummary(runtime.state, chain.id);
+    const usdMode = runtime.settings?.displayCurrency === 'USD';
     runtime.modal = {
       type: 'confirm', title: t('closeAllConfirm'),
-      rows: [[t('positions'), positions.length], [t('positionTotal'), accountMoney(summary.positionsValueNative)]],
+      rows: [[t('positions'), positions.length], [t('positionTotal'), usdMode
+        ? usdMoney(positionUsdTotal(positions))
+        : accountMoney(summary.positionsValueNative)]],
       note: t('closeAllHint'),
       action: () => commitCloseAll(routeCapture)
     };
@@ -848,11 +874,14 @@
 
   function renderBar(summary) {
     const collapsed = runtime.settings.barCollapsed;
+    const usdSummary = canonicalUsdSummary();
+    const pnl = usdSummary ? usdSummary.pnlUsd : summary.totalPnlNative;
+    const pnlMoney = usdSummary ? usdMoney(pnl, true) : accountMoney(pnl, true);
     return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)} ${collapsed ? 'collapsed' : ''}" style="${floatingStyle(runtime.settings.barPosition)}">
       <div class="tango-bar-main" data-action="toggle-drawer">
-        ${collapsed ? `<strong class="${pnlClass(summary.totalPnlNative)}">${accountMoney(summary.totalPnlNative, true)}</strong>` : `
+        ${collapsed ? `<strong class="${pnlClass(pnl)}">${pnlMoney}</strong>` : `
           <span class="tango-paper-badge tango-bar-paper">${t('paper')}</span>
-          <div class="tango-stat tango-pnl-hero"><strong class="${pnlClass(summary.totalPnlNative)}">${accountMoney(summary.totalPnlNative, true)}</strong><span>${t('pnl')}</span></div>`}
+          <div class="tango-stat tango-pnl-hero"><strong class="${pnlClass(pnl)}">${pnlMoney}</strong><span>${t('pnl')}</span></div>`}
         <span class="tango-bar-hint">${t('clickForPositions')} · ${summary.positionCount}</span>
       </div>
       <button class="tango-icon-button" data-action="collapse-bar">${collapsed ? '＋' : '－'}</button>
@@ -1053,15 +1082,19 @@
   function renderDrawer(summary) {
     if (!runtime.drawerOpen) return '';
     const positions = Tango.ChainView.positions(runtime.state, activeChain().id);
+    const usdMode = runtime.settings?.displayCurrency === 'USD';
     return `<div class="tango-drawer tango-card" style="${floatingStyle(runtime.settings.drawerPosition)}">
       <div class="tango-drawer-header" data-drawer-drag><div class="tango-brand"><span class="tango-dot"></span>${t('openPositions')}</div><div class="tango-drawer-actions"><button class="tango-button tango-close-all" data-action="close-all" ${positions.length ? '' : 'disabled'}>${t('closeAll')}</button><button class="tango-icon-button" data-action="toggle-drawer">✕</button></div></div>
-      <div class="tango-position-total"><span>${t('positionTotal')}</span><strong>${accountMoney(summary.positionsValueNative)}</strong><small>${positions.length} ${t('positions')}</small></div>
+      <div class="tango-position-total"><span>${t('positionTotal')}</span><strong>${usdMode ? usdMoney(positionUsdTotal(positions)) : accountMoney(summary.positionsValueNative)}</strong><small>${positions.length} ${t('positions')}</small></div>
       ${positions.length ? positions.map((position) => {
         const liveQuote = freshExecutableQuote(position);
         const mark = Tango.Engine.markPosition(position, liveQuote);
+        const positionValue = usdMode
+          ? usdMoney(positionUsdValue(position, mark))
+          : accountMoney(mark.valueNative);
         return `<div class="tango-position">
           <div class="tango-row"><button class="tango-position-link" data-position-open data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}" title="${t('openToken')}">${position.logoUrl ? `<img src="${esc(position.logoUrl)}" alt="">` : `<span class="tango-position-fallback">${esc(position.symbol.slice(0, 1))}</span>`}<span><strong>${esc(position.symbol)} ↗</strong><small>${esc(position.name || position.tokenAddress.slice(0, 8))}</small></span></button><strong class="${pnlClass(mark.unrealizedPnlNative)}">${accountMoney(mark.unrealizedPnlNative, true)} · ${Tango.Format.percent(mark.roi, language(), true)}</strong></div>
-          <div class="tango-position-meta"><span>${t('value')} ${accountMoney(mark.valueNative)}</span><span>${t('cost')} ${accountMoney(position.costBasisNative)}</span><span>${t('held')} ${Tango.Format.duration(Date.now()-position.openedAt, language())}</span></div>
+          <div class="tango-position-meta"><span>${t('value')} ${positionValue}</span><span>${t('cost')} ${accountMoney(position.costBasisNative)}</span><span>${t('held')} ${Tango.Format.duration(Date.now()-position.openedAt, language())}</span></div>
           <div class="tango-mini-actions">
             <button class="tango-button sell-position" data-position-sell="25" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}">25%</button>
             <button class="tango-button sell-position" data-position-sell="50" data-key="${esc(Tango.Engine.positionKey(position.chain, position.tokenAddress))}">50%</button>

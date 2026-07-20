@@ -56,6 +56,18 @@ test('drawer and close all operate on current-chain positions only', () => {
   assert.match(closeAll, /Tango\.Store\.executeCloseAll\(chain, orders\)/);
 });
 
+test('content USD portfolio and position values do not reconvert native marks', () => {
+  const bar = between('function renderBar(', 'function calendarDateKey(');
+  const drawer = between('function renderDrawer(', 'function chartMarkerPayload(');
+  const closeAll = between('function requestCloseAll(', 'async function commitCloseAll(');
+  assert.match(source, /Tango\.Engine\.chainUsdSummary\(/);
+  assert.doesNotMatch(bar, /accountMoney\(summary\.totalPnlNative/);
+  assert.match(source, /return price > 0 \? Tango\.Engine\.chainUsdSummary/);
+  assert.match(drawer, /usdMoney\(positionUsdTotal\(positions\)\)/);
+  assert.match(drawer, /usdMoney\(positionUsdValue\(position, mark\)\)/);
+  assert.match(closeAll, /usdMode\s*\? usdMoney\(positionUsdTotal\(positions\)\)/);
+});
+
 test('all content state writes express mutation intent to the extension-owned coordinator', () => {
   assert.doesNotMatch(source, /Tango\.Store\.saveState\(/);
   assert.match(source, /Tango\.Store\.executeBuy\(executableOrder\)/);

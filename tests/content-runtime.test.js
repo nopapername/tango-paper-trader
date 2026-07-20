@@ -11,7 +11,8 @@ const START = "  start().catch((error) => console.error('[Tango Paper Trader]', 
 const EXPOSE = `  global.__contentTest = {
     runtime, performQuoteTick, handleRouteChange, handleQuickBuy, buy,
     ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
-    requireExecutableQuote, freshExecutableQuote, renderPanel, commitCloseAll, savePresetEdits, bindEvents, bindDraggable
+    requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
+    commitCloseAll, savePresetEdits, bindEvents, bindDraggable
   };`;
 const instrumentedSource = contentSource.replace(START, EXPOSE);
 
@@ -178,8 +179,40 @@ function loadContent({ href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurr
       updatePositionQuote: (state) => state,
       executeBuy(state, order) { calls.buy += 1; calls.buyOrders.push(order); return { state, trade: {} }; },
       executeSell: (state) => ({ state, trade: {} }), executeCloseAll: (state) => ({ state, trades: [], failures: [] }),
-      portfolioSummary: () => ({ totalPnlNative: 0, positionsValueNative: 0, positionCount: 0 }),
-      markPosition: () => ({ unrealizedPnlNative: 0, valueNative: 0, roi: 0 }), breakevenSellPercent: () => null
+      markPosition(position, quote) {
+        const priceUsd = Number(quote?.priceUsd || position?.lastPriceUsd || 0);
+        const nativePriceUsd = Number(quote?.nativePriceUsd || position?.lastNativePriceUsd || 0);
+        const valueNative = priceUsd > 0 && nativePriceUsd > 0
+          ? Number(position?.quantity || 0) * priceUsd / nativePriceUsd
+          : Number(position?.costBasisNative || 0);
+        const unrealizedPnlNative = valueNative - Number(position?.costBasisNative || 0);
+        const roi = Number(position?.costBasisNative || 0) > 0
+          ? unrealizedPnlNative / Number(position.costBasisNative) * 100
+          : 0;
+        return { priceUsd, nativePriceUsd, valueNative, unrealizedPnlNative, roi };
+      },
+      portfolioSummary(state, chain) {
+        const account = state.accounts[chain];
+        const positions = Object.values(state.positions || {}).filter((position) => position.chain === chain);
+        const positionsValueNative = positions.reduce((sum, position) => sum + context.Tango.Engine.markPosition(position).valueNative, 0);
+        const equityNative = Number(account.cashBalanceNative) + positionsValueNative;
+        return {
+          cashBalanceNative: Number(account.cashBalanceNative), positionsValueNative, equityNative,
+          totalPnlNative: equityNative - Number(account.initialBalanceNative || 0), positionCount: positions.length
+        };
+      },
+      chainUsdSummary(state, chain, nativePriceUsd) {
+        if (!(Number(nativePriceUsd) > 0)) throw new Error('invalidNativePrice');
+        const account = state.accounts[chain];
+        const positionsUsd = Object.values(state.positions || {})
+          .filter((position) => position.chain === chain)
+          .reduce((sum, position) => sum + Number(position.quantity || 0) * Number(position.lastPriceUsd || 0), 0);
+        const cashUsd = Number(account.cashBalanceNative) * Number(nativePriceUsd);
+        const principalUsd = Number(account.initialBalanceNative) * Number(nativePriceUsd);
+        const assetsUsd = cashUsd + positionsUsd;
+        return { cashUsd, positionsUsd, principalUsd, assetsUsd, pnlUsd: assetsUsd - principalUsd };
+      },
+      breakevenSellPercent: () => null
     },
     GMGN: {
       clearQuickBuy() {}, discoverTokenCards: () => 0, readVisibleTokenMetadata: () => [],
@@ -342,6 +375,83 @@ test('content drag persistence rejection restores the authoritative position wit
   assert.equal(loaded.api.runtime.settings.panelPosition, null);
   assert.equal(loaded.calls.getAll, 1);
   assert.equal(loaded.api.runtime.toast.message, 'settingsSaveFailed');
+});
+
+test('content USD aggregate and position renders use canonical token USD marks', () => {
+  const loaded = loadContent();
+  const position = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', name: 'Test Token',
+    quantity: 1, costBasisNative: 1, lastPriceUsd: 100, lastNativePriceUsd: 100,
+    openedAt: loaded.clock.now - 1_000
+  };
+  loaded.api.runtime.state.accounts.eth = {
+    initialBalanceNative: 10, cashBalanceNative: 9, realizedPnlNative: 0
+  };
+  loaded.api.runtime.state.positions = { [`eth:${ADDRESS_A}`]: position };
+  loaded.api.runtime.settings.displayCurrency = 'USD';
+  loaded.api.runtime.nativePrices.set('eth', 200);
+  loaded.api.runtime.drawerOpen = true;
+  const summary = loaded.context.Tango.Engine.portfolioSummary(loaded.api.runtime.state, 'eth');
+  const usdSummary = loaded.context.Tango.Engine.chainUsdSummary(loaded.api.runtime.state, 'eth', 200);
+
+  const bar = loaded.api.renderBar(summary);
+  const drawer = loaded.api.renderDrawer(summary);
+  loaded.api.requestCloseAll();
+
+  assert.equal(usdSummary.assetsUsd, 1_900);
+  assert.equal(usdSummary.pnlUsd, -100);
+  assert.match(bar, /-\$100/);
+  assert.doesNotMatch(bar, /\$1900|\$2000|\$0/);
+  assert.equal((drawer.match(/\$100/g) || []).length >= 2, true, 'drawer total and row value use the token USD mark');
+  assert.doesNotMatch(drawer, /value[^<]*\$200/);
+  assert.equal(loaded.api.runtime.modal.rows[1][1], '$100');
+});
+
+test('content native aggregate and position renders remain native-denominated', () => {
+  const loaded = loadContent();
+  const position = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', name: 'Test Token',
+    quantity: 1, costBasisNative: 1, lastPriceUsd: 100, lastNativePriceUsd: 100,
+    openedAt: loaded.clock.now - 1_000
+  };
+  loaded.api.runtime.state.accounts.eth = {
+    initialBalanceNative: 10, cashBalanceNative: 9, realizedPnlNative: 0
+  };
+  loaded.api.runtime.state.positions = { [`eth:${ADDRESS_A}`]: position };
+  loaded.api.runtime.settings.displayCurrency = 'NATIVE';
+  loaded.api.runtime.nativePrices.set('eth', 200);
+  loaded.api.runtime.drawerOpen = true;
+  const summary = loaded.context.Tango.Engine.portfolioSummary(loaded.api.runtime.state, 'eth');
+
+  const bar = loaded.api.renderBar(summary);
+  const drawer = loaded.api.renderDrawer(summary);
+  loaded.api.requestCloseAll();
+
+  assert.match(bar, /0 ETH/);
+  assert.doesNotMatch(bar, /\$/);
+  assert.match(drawer, /positionTotal[\s\S]*1 ETH/);
+  assert.match(drawer, /value[^<]*1 ETH/);
+  assert.equal(loaded.api.runtime.modal.rows[1][1], '1 ETH');
+});
+
+test('content USD position values use token marks before a native USD quote arrives', () => {
+  const loaded = loadContent();
+  loaded.api.runtime.state.positions = {
+    [`eth:${ADDRESS_A}`]: {
+      chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', name: 'Test Token',
+      quantity: 1, costBasisNative: 1, lastPriceUsd: 100, openedAt: loaded.clock.now - 1_000
+    }
+  };
+  loaded.api.runtime.settings.displayCurrency = 'USD';
+  loaded.api.runtime.drawerOpen = true;
+  const summary = loaded.context.Tango.Engine.portfolioSummary(loaded.api.runtime.state, 'eth');
+
+  const drawer = loaded.api.renderDrawer(summary);
+  loaded.api.requestCloseAll();
+
+  assert.match(drawer, /positionTotal[\s\S]*\$100/);
+  assert.match(drawer, /value[^<]*\$100/);
+  assert.equal(loaded.api.runtime.modal.rows[1][1], '$100');
 });
 
 test('content preset Enter handler returns the contained save promise', async () => {
