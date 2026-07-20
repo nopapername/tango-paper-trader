@@ -160,6 +160,125 @@ test('strict state rejects unknown supply provenance on market-cap positions and
   );
 });
 
+test('strict state binds legacy Pump rule sources to canonical Pump provenance and one-billion supply', () => {
+  const settings = State.normalizeSettings({});
+  const buildPosition = (position) => {
+    const value = State.createInitialState({ now: 1 });
+    value.positions = { [`${position.chain}:${position.tokenAddress}`]: position };
+    return value;
+  };
+  const buildTrade = (trade) => {
+    const value = State.createInitialState({ now: 1 });
+    value.trades = [trade];
+    return value;
+  };
+  const validLegacyPosition = validPosition({
+    chain: 'sol', tokenAddress: VALID_PUMP_ADDRESS,
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 1_000_000_000,
+    totalSupply: 1_000_000_000, supplySource: 'LEGACY_PUMP_RULE',
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1',
+    averageEntryPriceUsd: 0.002, averageEntryMarketCap: 2_000_000,
+    lastPriceUsd: 0.002, lastMarketCapUsd: 2_000_000
+  });
+  const validLegacyTrade = validTrade({
+    chain: 'sol', tokenAddress: VALID_PUMP_ADDRESS, nativeSymbol: 'SOL',
+    valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED',
+    totalSupply: 1_000_000_000, supplySource: 'LEGACY_PUMP_RULE',
+    marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1',
+    observedPriceUsd: 0.002, executionPriceUsd: 0.002, marketCapUsd: 2_000_000
+  });
+
+  assert.doesNotThrow(() => State.normalizeState(buildPosition(validLegacyPosition), settings, { strict: true }));
+  assert.doesNotThrow(() => State.normalizeState(buildTrade(validLegacyTrade), settings, { strict: true }));
+
+  const invalidPositions = [
+    {
+      ...validLegacyPosition, chain: 'base', tokenAddress: EVM_ADDRESS,
+      marketCapDivisor: 123, totalSupply: 123, marketCapProvenance: undefined,
+      averageEntryPriceUsd: 2, averageEntryMarketCap: 246,
+      lastPriceUsd: 2, lastMarketCapUsd: 246
+    },
+    {
+      ...validLegacyPosition, marketCapDivisor: 123, totalSupply: 123,
+      averageEntryPriceUsd: 2, averageEntryMarketCap: 246,
+      lastPriceUsd: 2, lastMarketCapUsd: 246
+    },
+    { ...validLegacyPosition, marketCapProvenance: undefined }
+  ];
+  const invalidTrades = [
+    {
+      ...validLegacyTrade, chain: 'base', tokenAddress: EVM_ADDRESS, nativeSymbol: 'ETH',
+      totalSupply: 123, marketCapProvenance: undefined,
+      observedPriceUsd: 2, executionPriceUsd: 2, marketCapUsd: 246
+    },
+    {
+      ...validLegacyTrade, totalSupply: 123,
+      observedPriceUsd: 2, executionPriceUsd: 2, marketCapUsd: 246
+    },
+    { ...validLegacyTrade, marketCapProvenance: undefined }
+  ];
+
+  for (const position of invalidPositions) {
+    assert.throws(
+      () => State.normalizeState(buildPosition(position), settings, { strict: true }),
+      /invalidPosition/
+    );
+  }
+  for (const trade of invalidTrades) {
+    assert.throws(
+      () => State.normalizeState(buildTrade(trade), settings, { strict: true }),
+      /invalidTrade/
+    );
+  }
+});
+
+test('strict state binds launchpad rule sources to the contextual rule supply', () => {
+  const settings = State.normalizeSettings({});
+  const buildPosition = (position) => {
+    const value = State.createInitialState({ now: 1 });
+    value.positions = { [`${position.chain}:${position.tokenAddress}`]: position };
+    return value;
+  };
+  const buildTrade = (trade) => {
+    const value = State.createInitialState({ now: 1 });
+    value.trades = [trade];
+    return value;
+  };
+  const validRulePosition = validPosition({
+    chain: 'base', tokenAddress: EVM_ADDRESS, launchpad: 'Clanker',
+    valuationMode: 'MARKET_CAP', marketCapDivisor: 100_000_000_000,
+    totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    averageEntryPriceUsd: 0.000002, averageEntryMarketCap: 200_000,
+    lastPriceUsd: 0.000002, lastMarketCapUsd: 200_000
+  });
+  const validRuleTrade = validTrade({
+    chain: 'base', tokenAddress: EVM_ADDRESS, nativeSymbol: 'ETH', launchpad: 'Clanker',
+    valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED',
+    totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    observedPriceUsd: 0.000002, executionPriceUsd: 0.000002, marketCapUsd: 200_000
+  });
+
+  assert.doesNotThrow(() => State.normalizeState(buildPosition(validRulePosition), settings, { strict: true }));
+  assert.doesNotThrow(() => State.normalizeState(buildTrade(validRuleTrade), settings, { strict: true }));
+
+  const invalidRulePosition = {
+    ...validRulePosition, marketCapDivisor: 1_000_000_000, totalSupply: 1_000_000_000,
+    averageEntryPriceUsd: 0.0002, lastPriceUsd: 0.0002
+  };
+  const invalidRuleTrade = {
+    ...validRuleTrade, totalSupply: 1_000_000_000,
+    observedPriceUsd: 0.0002, executionPriceUsd: 0.0002
+  };
+  assert.throws(
+    () => State.normalizeState(buildPosition(invalidRulePosition), settings, { strict: true }),
+    /invalidPosition/
+  );
+  assert.throws(
+    () => State.normalizeState(buildTrade(invalidRuleTrade), settings, { strict: true }),
+    /invalidTrade/
+  );
+});
+
 test('selected-chain reset removes only that chain calibration events', () => {
   const state = State.createInitialState({ now: 1 });
   state.calibrations = [

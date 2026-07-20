@@ -7,7 +7,7 @@ const vm = require('node:vm');
 global.Tango = {};
 const Chains = require('../src/core/chains.js');
 require('../src/shared/constants.js');
-require('../src/core/state.js');
+const RealState = require('../src/core/state.js');
 const RealEngine = require('../src/core/engine.js');
 const GMGNQuotes = require('../src/adapters/gmgn-quotes.js');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
@@ -56,6 +56,81 @@ function defaultSettings() {
     chains: Object.fromEntries(Chains.all().map(({ id }) => [id, { ...chain }])), sellPresets: [100]
   };
 }
+
+test('Engine fallback without Supply accepts only contextually valid explicit trusted sources', () => {
+  assert.equal(global.Tango.Supply, undefined);
+  const settings = RealState.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0,
+    chains: { base: { networkFeeNative: 0 }, sol: { networkFeeNative: 0 } }
+  });
+  const base = { chain: 'base', address: ADDRESS_A, symbol: 'BASE' };
+  const pump = {
+    chain: 'sol', address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP', symbol: 'PUMP'
+  };
+  const marketCapQuote = {
+    priceUsd: 0, marketCapUsd: 200_000, nativePriceUsd: 2_000,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const cases = [
+    {
+      name: 'exact', token: base,
+      quote: { ...marketCapQuote, totalSupply: 100_000_000_000, supplySource: 'GMGN_EXACT' },
+      expectedSource: 'GMGN_EXACT', expectedSupply: 100_000_000_000
+    },
+    {
+      name: 'ratio', token: base,
+      quote: {
+        ...marketCapQuote, priceUsd: 0.000002,
+        totalSupply: 100_000_000_000, supplySource: 'GMGN_RATIO'
+      },
+      expectedSource: 'GMGN_RATIO', expectedSupply: 100_000_000_000
+    },
+    {
+      name: 'launchpad rule', token: { ...base, launchpad: 'Clanker' },
+      quote: { ...marketCapQuote, totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE' },
+      expectedSource: 'LAUNCHPAD_RULE', expectedSupply: 100_000_000_000
+    },
+    {
+      name: 'legacy Pump rule', token: pump,
+      quote: {
+        ...marketCapQuote, marketCapUsd: 4_000, nativePriceUsd: 100,
+        totalSupply: 1_000_000_000, supplySource: 'LEGACY_PUMP_RULE',
+        source: 'GMGN_TRENCH_MC', marketCapDivisor: 1_000_000_000
+      },
+      expectedSource: 'LEGACY_PUMP_RULE', expectedSupply: 1_000_000_000
+    }
+  ];
+
+  for (const item of cases) {
+    const initial = RealState.createInitialState({ now: 1 });
+    initial.initialized = true;
+    const result = RealEngine.executeBuy(initial, {
+      token: item.token, quote: item.quote, amountNative: 1
+    }, settings, 1_000);
+    assert.equal(result.position.supplySource, item.expectedSource, item.name);
+    assert.equal(result.position.totalSupply, item.expectedSupply, item.name);
+  }
+});
+
+test('Engine fallback without Supply rejects unknown direct supply provenance', () => {
+  assert.equal(global.Tango.Supply, undefined);
+  const initial = RealState.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const settings = RealState.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { base: { networkFeeNative: 0 } }
+  });
+  assert.throws(() => RealEngine.executeBuy(initial, {
+    token: { chain: 'base', address: ADDRESS_A },
+    quote: {
+      priceUsd: 0, marketCapUsd: 200_000, nativePriceUsd: 2_000,
+      totalSupply: 100_000_000_000, supplySource: 'CALLER_UNKNOWN',
+      observedAt: 1_000, nativePriceObservedAt: 1_000,
+      source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+    },
+    amountNative: 1
+  }, settings, 1_000), /invalidQuote/);
+});
 
 function mergeSettingsPatch(settings, patch) {
   const chains = { ...settings.chains };

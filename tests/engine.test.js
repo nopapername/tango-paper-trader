@@ -134,6 +134,80 @@ test('implicit legacy Pump provenance cannot launder an unrelated caller total s
   }
 });
 
+test('explicit rule supply claims require their canonical chain and launch context', () => {
+  const pumpToken = {
+    ...token,
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
+  const marketCapQuote = {
+    priceUsd: 0, marketCapUsd: 4_000, nativePriceUsd: 100,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP',
+    priceProvenance: 'MARKET_CAP_DERIVED', marketCapDivisor: 1_000_000_000
+  };
+  const invalid = [
+    {
+      token: baseToken,
+      quote: { ...marketCapQuote, totalSupply: 1_000_000_000, supplySource: 'LEGACY_PUMP_RULE' }
+    },
+    {
+      token: pumpToken,
+      quote: { ...marketCapQuote, totalSupply: 123, supplySource: 'LEGACY_PUMP_RULE' }
+    },
+    {
+      token: pumpToken,
+      quote: {
+        ...marketCapQuote, totalSupply: 1_000_000_000, supplySource: 'LEGACY_PUMP_RULE',
+        source: 'GMGN_NETWORK'
+      }
+    },
+    {
+      token: pumpToken,
+      quote: {
+        ...marketCapQuote, totalSupply: 1_000_000_000, supplySource: 'LEGACY_PUMP_RULE',
+        source: 'GMGN_NETWORK', marketCapProvenance: 'SOLANA_PUMP_TRENCH_V1'
+      }
+    },
+    {
+      token: baseToken,
+      quote: { ...marketCapQuote, totalSupply: 1_000_000_000, supplySource: 'LAUNCHPAD_RULE' }
+    }
+  ];
+
+  for (const item of invalid) {
+    const input = state();
+    const snapshot = structuredClone(input);
+    assert.throws(
+      () => Engine.executeBuy(input, { ...item, amountNative: 1 }, paperSettings, 1_000),
+      /invalidQuote/
+    );
+    assert.deepEqual(input, snapshot);
+  }
+
+  const legacy = Engine.executeBuy(state(), {
+    token: pumpToken,
+    quote: {
+      ...marketCapQuote, totalSupply: 1_000_000_000, supplySource: 'LEGACY_PUMP_RULE'
+    },
+    amountNative: 1
+  }, paperSettings, 1_000);
+  assert.equal(legacy.position.totalSupply, 1_000_000_000);
+  assert.equal(legacy.position.supplySource, 'LEGACY_PUMP_RULE');
+
+  const launchpad = Engine.executeBuy(state(), {
+    token: baseToken,
+    quote: {
+      ...marketCapQuote, marketCapUsd: 200_000, nativePriceUsd: 2_000,
+      totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE', source: 'GMGN_NETWORK'
+    },
+    amountNative: 1
+  }, paperSettings, 1_000);
+  assert.equal(launchpad.position.totalSupply, 100_000_000_000);
+  assert.equal(launchpad.position.supplySource, 'LAUNCHPAD_RULE');
+});
+
 test('implicit legacy Pump positions ignore unrelated persisted total supply', () => {
   const position = {
     chain: 'sol', tokenAddress: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
@@ -179,6 +253,38 @@ test('Base market-cap rebuys reuse the position verified exact supply', () => {
   assert.equal(rebought.position.valuationMode, 'MARKET_CAP');
 });
 
+test('supply-less Base rebuy and sell trades persist the resolved launchpad rule context', () => {
+  const fallbackQuote = {
+    priceUsd: 0, marketCapUsd: 200_000, totalSupply: 100_000_000_000,
+    supplySource: 'LAUNCHPAD_RULE', nativePriceUsd: 2_000,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: baseToken, quote: fallbackQuote, amountNative: 1
+  }, paperSettings, 1_000);
+  const minimalToken = { chain: 'base', address: baseToken.address };
+  const supplylessQuote = {
+    priceUsd: 0, marketCapUsd: 300_000, nativePriceUsd: 2_000,
+    observedAt: 2_000, nativePriceObservedAt: 2_000,
+    source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+
+  const rebought = Engine.executeBuy(bought.state, {
+    token: minimalToken, quote: supplylessQuote, amountNative: 1
+  }, paperSettings, 2_000);
+  assert.equal(rebought.trade.supplySource, 'LAUNCHPAD_RULE');
+  assert.equal(rebought.trade.launchpad, 'Clanker');
+  assert.doesNotThrow(() => State.normalizeState(rebought.state, paperSettings, { strict: true }));
+
+  const sold = Engine.executeSell(bought.state, {
+    token: minimalToken, quote: supplylessQuote, percent: 50
+  }, paperSettings, 2_000);
+  assert.equal(sold.trade.supplySource, 'LAUNCHPAD_RULE');
+  assert.equal(sold.trade.launchpad, 'Clanker');
+  assert.doesNotThrow(() => State.normalizeState(sold.state, paperSettings, { strict: true }));
+});
+
 test('nominal token and native prices create an auditable provisional paper fill', () => {
   const initialState = state();
   const syntheticQuote = {
@@ -208,6 +314,34 @@ test('provisional quotes require a concrete calibration dimension', () => {
     }, paperSettings, 1_000),
     /invalidQuote/
   );
+});
+
+test('provisional fallback flags require a resolved market-cap supply dimension', () => {
+  const initial = state();
+  const nakedFallback = {
+    priceUsd: 1, nativePriceUsd: 1, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'TANGO_SYNTHETIC', provisional: true,
+    valuationMode: 'PRICE', priceProvenance: 'SYNTHETIC_PRICE'
+  };
+  for (const fallback of [
+    { supplyConfidence: 'fallback' },
+    { supplySource: 'LAUNCHPAD_RULE' }
+  ]) {
+    assert.throws(
+      () => Engine.executeBuy(initial, {
+        token: ethToken, quote: { ...nakedFallback, ...fallback }, amountNative: 1
+      }, paperSettings, 1_000),
+      /invalidQuote/
+    );
+  }
+
+  const later = Engine.updatePositionQuote(initial, ethToken, {
+    priceUsd: 2, nativePriceUsd: 2_000, observedAt: 2_000, nativePriceObservedAt: 2_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  }, 2_000);
+  assert.equal(later, initial);
+  assert.deepEqual(initial.positions, {});
+  assert.equal(Engine.portfolioSummary(initial, 'eth').equityNative, initial.accounts.eth.cashBalanceNative);
 });
 
 test('fallback-supply provisional calibration preserves equity on the later exact observation', () => {
@@ -261,7 +395,7 @@ test('first trusted quote calibrates a synthetic position without creating PnL',
   assert.equal(position.needsCalibration, false);
 });
 
-test('calibratePosition reports explicit no-op and calibrated outcomes', () => {
+test('public calibratePosition preserves the raw state return contract', () => {
   const syntheticQuote = {
     priceUsd: 1, nativePriceUsd: 1, observedAt: 1_000, nativePriceObservedAt: 1_000,
     source: 'TANGO_SYNTHETIC', provisional: true,
@@ -274,15 +408,14 @@ test('calibratePosition reports explicit no-op and calibrated outcomes', () => {
   const noop = Engine.calibratePosition(bought.state, ethToken, {
     ...syntheticQuote, observedAt: 2_000, nativePriceObservedAt: 2_000
   }, 2_000);
-  assert.equal(noop.status, 'NOOP');
-  assert.equal(noop.state, bought.state);
+  assert.equal(noop, bought.state);
 
   const calibrated = Engine.calibratePosition(bought.state, ethToken, {
     priceUsd: 2, nativePriceUsd: 2_000, observedAt: 2_000, nativePriceObservedAt: 2_000,
     source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
   }, 2_000);
-  assert.equal(calibrated.status, 'CALIBRATED');
-  assert.equal(calibrated.state.calibrations.length, 1);
+  assert.notEqual(calibrated, bought.state);
+  assert.equal(calibrated.calibrations.length, 1);
 });
 
 test('calibration arithmetic failures are explicit and never write non-finite economics', () => {
@@ -312,11 +445,9 @@ test('calibration arithmetic failures are explicit and never write non-finite ec
     const input = structuredClone(bought.state);
     input.positions[key].costBasisNative = item.costBasisNative;
     const result = Engine.calibratePosition(input, ethToken, item.quote, 2_000);
-    assert.equal(result.status, 'FAILED', item.name);
-    assert.equal(result.reason, 'calibrationFailed', item.name);
-    assert.equal(result.state, input, item.name);
+    assert.equal(result, input, item.name);
     assert.equal(
-      Object.values(result.state.positions[key])
+      Object.values(result.positions[key])
         .filter((value) => typeof value === 'number')
         .every(Number.isFinite),
       true,
@@ -336,9 +467,7 @@ test('calibration arithmetic failures are explicit and never write non-finite ec
       amountNative: 1
     }, paperSettings, 1_000);
     const result = Engine.calibratePosition(supplied.state, ethToken, item.quote, 2_000);
-    assert.equal(result.status, 'FAILED', item.name);
-    assert.equal(result.reason, 'calibrationFailed', item.name);
-    assert.equal(result.state, supplied.state, item.name);
+    assert.equal(result, supplied.state, item.name);
   }
 });
 
@@ -395,8 +524,7 @@ test('calibration and quote refresh use the injected clock to reject stale obser
   const now = 2_000 + Tango.QUOTE_STALE_MS + 1;
 
   const calibration = Engine.calibratePosition(bought.state, ethToken, staleQuote, now);
-  assert.equal(calibration.status, 'NOOP');
-  assert.equal(calibration.state, bought.state);
+  assert.equal(calibration, bought.state);
   assert.equal(Engine.updatePositionQuote(bought.state, ethToken, staleQuote, now), bought.state);
 });
 
@@ -429,6 +557,101 @@ test('a stronger exact supply neutrally corrects a legacy market-cap position', 
   assert.ok(Math.abs(Engine.markPosition(position).valueNative - before) < 1e-9);
   assert.ok(Math.abs(position.quantity - bought.position.quantity * 2) < 1e-6);
   assert.equal(corrected.calibrations[0].reason, 'SUPPLY');
+});
+
+test('synthetic Pump PRICE calibration persists trusted legacy provenance for strict roundtrip', () => {
+  const pumpToken = {
+    ...token,
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
+    metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH'
+  };
+  const zeroFeeSettings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { sol: { networkFeeNative: 0 } }
+  });
+  const synthetic = Engine.executeBuy(state(), {
+    token: pumpToken,
+    quote: {
+      priceUsd: 1, nativePriceUsd: 1, observedAt: 1_000, nativePriceObservedAt: 1_000,
+      source: 'TANGO_SYNTHETIC', provisional: true,
+      syntheticTokenPrice: true, syntheticNativePrice: true,
+      valuationMode: 'PRICE', priceProvenance: 'SYNTHETIC_PRICE'
+    },
+    amountNative: 1
+  }, zeroFeeSettings, 1_000);
+  const equityBefore = Engine.markPosition(synthetic.position).valueNative;
+  const calibrated = Engine.updatePositionQuote(synthetic.state, pumpToken, {
+    priceUsd: 0, marketCapUsd: 4_000, nativePriceUsd: 100,
+    observedAt: 2_000, nativePriceObservedAt: 2_000,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP',
+    priceProvenance: 'MARKET_CAP_DERIVED', marketCapDivisor: 1_000_000_000
+  }, 2_000);
+  const key = Engine.positionKey('sol', pumpToken.address);
+  const position = calibrated.positions[key];
+
+  assert.equal(position.valuationMode, 'PRICE');
+  assert.equal(position.lastPriceProvenance, 'MARKET_CAP_RATIO_DERIVED');
+  assert.equal(position.supplySource, 'LEGACY_PUMP_RULE');
+  assert.equal(position.marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.ok(Math.abs(Engine.markPosition(position).valueNative - equityBefore) < 1e-12);
+  assert.doesNotThrow(() => State.normalizeState(calibrated, zeroFeeSettings, { strict: true }));
+
+  const rebought = Engine.executeBuy(synthetic.state, {
+    token: pumpToken,
+    quote: {
+      priceUsd: 0, marketCapUsd: 4_000, nativePriceUsd: 100,
+      observedAt: 2_000, nativePriceObservedAt: 2_000,
+      source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP',
+      priceProvenance: 'MARKET_CAP_DERIVED', marketCapDivisor: 1_000_000_000
+    },
+    amountNative: 1
+  }, zeroFeeSettings, 2_000);
+  assert.equal(rebought.trade.marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.doesNotThrow(() => State.normalizeState(rebought.state, zeroFeeSettings, { strict: true }));
+});
+
+test('ordinary Pump PRICE refresh, rebuy, and sell persist validated legacy provenance', () => {
+  const pumpToken = {
+    ...token,
+    address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
+    metadataVerified: true,
+    metadataSource: 'GMGN_DETAIL'
+  };
+  const zeroFeeSettings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { sol: { networkFeeNative: 0 } }
+  });
+  const priceQuote = {
+    priceUsd: 2, nativePriceUsd: 100, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  };
+  const trenchQuote = {
+    priceUsd: 0, marketCapUsd: 4_000, nativePriceUsd: 100,
+    observedAt: 2_000, nativePriceObservedAt: 2_000,
+    source: 'GMGN_TRENCH_MC', valuationMode: 'MARKET_CAP',
+    priceProvenance: 'MARKET_CAP_DERIVED', marketCapDivisor: 1_000_000_000
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: pumpToken, quote: priceQuote, amountNative: 1
+  }, zeroFeeSettings, 1_000);
+
+  const refreshed = Engine.updatePositionQuote(bought.state, pumpToken, trenchQuote, 2_000);
+  const key = Engine.positionKey('sol', pumpToken.address);
+  assert.equal(refreshed.positions[key].marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.doesNotThrow(() => State.normalizeState(refreshed, zeroFeeSettings, { strict: true }));
+
+  const rebought = Engine.executeBuy(bought.state, {
+    token: { chain: 'sol', address: pumpToken.address }, quote: trenchQuote, amountNative: 1
+  }, zeroFeeSettings, 2_000);
+  assert.equal(rebought.trade.marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.equal(rebought.position.marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.doesNotThrow(() => State.normalizeState(rebought.state, zeroFeeSettings, { strict: true }));
+
+  const sold = Engine.executeSell(bought.state, {
+    token: { chain: 'sol', address: pumpToken.address }, quote: trenchQuote, percent: 50
+  }, zeroFeeSettings, 2_000);
+  assert.equal(sold.trade.marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.equal(sold.position.marketCapProvenance, 'SOLANA_PUMP_TRENCH_V1');
+  assert.doesNotThrow(() => State.normalizeState(sold.state, zeroFeeSettings, { strict: true }));
 });
 
 test('exact supply correction preserves equity and realized PnL after a partial sell', () => {
@@ -891,6 +1114,102 @@ test('execution rejects non-finite amounts and unsafe fee settings', () => {
   const badNetworkFee = structuredClone(settings);
   badNetworkFee.chains.sol.networkFeeNative = Infinity;
   assert.throws(() => Engine.executeBuy(state(), { token, quote, amountNative: 1 }, badNetworkFee, 1_000), /invalidSettings/);
+});
+
+test('round rejects finite inputs whose requested precision would become non-finite', () => {
+  assert.throws(() => Engine.round(Number.MAX_VALUE), /invalidArithmetic/);
+});
+
+test('ordinary buys reject derived overflow, underflow, zero rounding, and unsafe aggregates without mutation', () => {
+  const expectUnchanged = (input, action, name) => {
+    const snapshot = structuredClone(input);
+    assert.throws(action, /invalidArithmetic/, name);
+    assert.deepEqual(input, snapshot, name);
+  };
+  const extremeQuote = (priceUsd, nativePriceUsd) => ({
+    priceUsd, nativePriceUsd, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  });
+
+  let input = state();
+  expectUnchanged(input, () => Engine.executeBuy(input, {
+    token: ethToken, quote: extremeQuote(Number.EPSILON, Number.MAX_VALUE), amountNative: 1
+  }, paperSettings, 1_000), 'quantity overflow');
+
+  input = state();
+  expectUnchanged(input, () => Engine.executeBuy(input, {
+    token: ethToken, quote: extremeQuote(Number.MAX_VALUE, Number.EPSILON), amountNative: 1
+  }, paperSettings, 1_000), 'quantity underflow');
+
+  input = state();
+  expectUnchanged(input, () => Engine.executeBuy(input, {
+    token: ethToken, quote: extremeQuote(2, 2_000), amountNative: Number.EPSILON
+  }, paperSettings, 1_000), 'rounded zero amount');
+
+  const bought = Engine.executeBuy(state(), {
+    token: ethToken, quote: extremeQuote(2, 2_000), amountNative: 1
+  }, paperSettings, 1_000).state;
+  const key = Engine.positionKey('eth', ethToken.address);
+  bought.positions[key].quantity = Number.MAX_VALUE;
+  bought.positions[key].averageEntryPriceUsd = Number.MAX_VALUE;
+  expectUnchanged(bought, () => Engine.executeBuy(bought, {
+    token: ethToken,
+    quote: { ...extremeQuote(2, 2_000), observedAt: 2_000, nativePriceObservedAt: 2_000 },
+    amountNative: 1
+  }, paperSettings, 2_000), 'weighted average overflow');
+
+  input = state();
+  input.accounts.eth.cashBalanceNative = Number.MAX_VALUE;
+  expectUnchanged(input, () => Engine.executeBuy(input, {
+    token: ethToken, quote: extremeQuote(2, 2_000), amountNative: 1
+  }, paperSettings, 1_000), 'cash balance rounding overflow');
+});
+
+test('ordinary sells reject derived proceeds and PnL overflow or underflow without mutation', () => {
+  const normalQuote = {
+    priceUsd: 2, nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: ethToken, quote: normalQuote, amountNative: 1
+  }, paperSettings, 1_000).state;
+  const key = Engine.positionKey('eth', ethToken.address);
+  const expectUnchanged = (input, quoteOverride, name) => {
+    const snapshot = structuredClone(input);
+    assert.throws(() => Engine.executeSell(input, {
+      token: ethToken,
+      quote: {
+        ...normalQuote, ...quoteOverride, observedAt: 2_000, nativePriceObservedAt: 2_000
+      },
+      percent: 50
+    }, paperSettings, 2_000), /invalidArithmetic/, name);
+    assert.deepEqual(input, snapshot, name);
+  };
+
+  expectUnchanged(structuredClone(bought), {
+    priceUsd: Number.MAX_VALUE, nativePriceUsd: Number.EPSILON
+  }, 'proceeds overflow');
+  expectUnchanged(structuredClone(bought), {
+    priceUsd: Number.EPSILON, nativePriceUsd: Number.MAX_VALUE
+  }, 'proceeds underflow');
+
+  const pnlOverflow = structuredClone(bought);
+  pnlOverflow.positions[key].costBasisNative = Number.MAX_VALUE;
+  expectUnchanged(pnlOverflow, {}, 'realized USD PnL overflow');
+
+  const costShareUnderflow = structuredClone(bought);
+  costShareUnderflow.positions[key].costBasisNative = Number.MIN_VALUE;
+  expectUnchanged(costShareUnderflow, {}, 'cost share underflow');
+
+  const accountOverflow = structuredClone(bought);
+  accountOverflow.accounts.eth.cashBalanceNative = Number.MAX_VALUE;
+  expectUnchanged(accountOverflow, {}, 'cash balance rounding overflow');
+
+  const dailyOverflow = structuredClone(bought);
+  dailyOverflow.dailyRealizedByChain.eth['1970-01-01'] = {
+    native: Number.MAX_VALUE, usdAtExecution: 0
+  };
+  expectUnchanged(dailyOverflow, { priceUsd: 4 }, 'daily realized rounding overflow');
 });
 
 test('execution stores canonical mixed-case EVM identity', () => {

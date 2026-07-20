@@ -2,6 +2,9 @@
   const Tango = global.Tango = global.Tango || {};
   const MARKET_CAP_PROVENANCE = 'SOLANA_PUMP_TRENCH_V1';
   const MARKET_CAP_DIVISOR = 1_000_000_000;
+  const TRUSTED_SUPPLY_SOURCES = Object.freeze([
+    'GMGN_EXACT', 'GMGN_RATIO', 'LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE'
+  ]);
   const VALUATION_MODES = ['PRICE', 'MARKET_CAP'];
   const PRICE_PROVENANCES = [
     'OBSERVED_PRICE', 'MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED',
@@ -24,14 +27,48 @@
     return cap > 0 && value > 0
       && Math.abs(cap / value - MARKET_CAP_DIVISOR) <= MARKET_CAP_DIVISOR * 0.001;
   };
+  const cleanRuleIdentity = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const localRuleSupply = (chain, launchpad, launchMode) => {
+    const id = Tango.Chains?.get?.(chain)?.id || '';
+    const platform = cleanRuleIdentity(launchpad);
+    const mode = cleanRuleIdentity(launchMode);
+    if (id === 'sol' && ['pump', 'pumpfun'].includes(platform)) {
+      return mode.includes('mayhem') ? 2_000_000_000 : MARKET_CAP_DIVISOR;
+    }
+    if (['bankr', 'clanker'].includes(platform) && ['base', 'robinhood'].includes(id)) {
+      return 100_000_000_000;
+    }
+    if (id === 'bsc' && ['fourmeme', 'flap'].includes(platform)) return MARKET_CAP_DIVISOR;
+    if (id === 'base' && ['zora', 'zoracoins'].includes(platform)) return MARKET_CAP_DIVISOR;
+    if (id === 'xlayer' && ['dyor', 'bow', 'bowfun'].includes(platform)) return MARKET_CAP_DIVISOR;
+    return 0;
+  };
+  const contextualRuleSupply = (value) => {
+    const resolved = typeof Tango.Supply?.ruleSupply === 'function'
+      ? Number(Tango.Supply.ruleSupply(value?.chain, value?.launchpad, value?.launchMode))
+      : localRuleSupply(value?.chain, value?.launchpad, value?.launchMode);
+    return Number.isFinite(resolved) && resolved > 0 ? resolved : 0;
+  };
   const trustedSupplyIdentity = (value) => {
     const totalSupply = Number(value?.totalSupply);
     const source = String(value?.supplySource || '');
-    return Number.isFinite(totalSupply) && totalSupply > 0
-      && Boolean(source)
-      && Boolean(Tango.Supply?.isTrustedSource?.(source))
-      ? { totalSupply, source }
-      : null;
+    if (!Number.isFinite(totalSupply) || totalSupply <= 0
+      || !TRUSTED_SUPPLY_SOURCES.includes(source)) return null;
+    const marketCap = value?.marketCapUsd ?? value?.lastMarketCapUsd;
+    const price = value?.observedPriceUsd ?? value?.lastPriceUsd;
+    if (source === 'GMGN_RATIO' && !supplyRatioMatches(marketCap, price, totalSupply)) return null;
+    if (source === 'LAUNCHPAD_RULE' && contextualRuleSupply(value) !== totalSupply) return null;
+    if (source === 'LEGACY_PUMP_RULE') {
+      const address = value?.tokenAddress ?? value?.address;
+      const validDivisor = value?.side
+        ? (value?.marketCapDivisor == null || Number(value.marketCapDivisor) === MARKET_CAP_DIVISOR)
+        : Number(value?.marketCapDivisor) === MARKET_CAP_DIVISOR;
+      if (!coherentPumpIdentity(value?.chain, address)
+        || value?.marketCapProvenance !== MARKET_CAP_PROVENANCE
+        || totalSupply !== MARKET_CAP_DIVISOR
+        || !validDivisor) return null;
+    }
+    return { totalSupply, source };
   };
   const supplyRatioMatches = (marketCap, price, totalSupply) => {
     const cap = Number(marketCap); const value = Number(price); const supply = Number(totalSupply);
@@ -62,7 +99,7 @@
   });
   const native = (object, modern, legacy, fallback = 0) => Number(object?.[modern] ?? object?.[legacy] ?? fallback);
 
-  const isTrustedSupplySource = (value) => !value || Boolean(Tango.Supply?.isTrustedSource?.(value));
+  const isTrustedSupplySource = (value) => !value || TRUSTED_SUPPLY_SOURCES.includes(String(value));
   const optionalText = (value, maximum = 100) => typeof value === 'string' && value.length <= maximum;
   const PROVENANCE_FIELDS = [
     ['quoteSource', (value) => optionalText(value)],
@@ -186,6 +223,7 @@
     const derivedPrice = ['MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED']
       .includes(trade.priceProvenance);
     const supply = trustedSupplyIdentity(trade);
+    if (String(trade.supplySource || '') && !supply) throw new Error('invalidTrade');
     const coherentTrustedSupply = Boolean(supply
       && supplyRatioMatches(trade.marketCapUsd, trade.observedPriceUsd, supply.totalSupply));
     if ((valuationMode === 'MARKET_CAP' || derivedPrice)
@@ -422,9 +460,12 @@
         && position.valuationMode === 'MARKET_CAP'
         && position.marketCapDivisor === MARKET_CAP_DIVISOR;
       const supply = trustedSupplyIdentity(position);
+      if (String(position.supplySource || '') && !supply) throw new Error('invalidPosition');
       const coherentTrustedSupply = Boolean(supply
         && Number(position.marketCapDivisor) === supply.totalSupply
         && supplyRatioMatches(position.lastMarketCapUsd, position.lastPriceUsd, supply.totalSupply));
+      const coherentLegacyRatioContext = supply?.source === 'LEGACY_PUMP_RULE'
+        && coherentTrustedSupply;
       const derivedPrice = ['MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED']
         .some((provenance) => position.lastPriceProvenance === provenance
           || position.averageEntryPriceProvenance === provenance);
@@ -432,7 +473,8 @@
         && !coherentLegacyMarketCapContext && !coherentTrustedSupply) {
         throw new Error('invalidPosition');
       }
-      if (position.marketCapProvenance != null && !coherentLegacyMarketCapContext) {
+      if (position.marketCapProvenance != null
+        && !coherentLegacyMarketCapContext && !coherentLegacyRatioContext) {
         throw new Error('invalidPosition');
       }
     }
