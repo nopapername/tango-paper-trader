@@ -16,10 +16,13 @@
     if (id === 'sol' && ['pump', 'pumpfun'].includes(platform)) {
       return mode.includes('mayhem') ? 2_000_000_000 : 1_000_000_000;
     }
-    if (['bankr', 'bankrbot', 'clanker'].includes(platform)
-      && ['base', 'robinhood'].includes(id)) return 100_000_000_000;
-    const oneBillion = new Set(['fourmeme', 'flap', 'zora', 'zoracoins', 'dyor', 'bow', 'bowfun']);
-    return oneBillion.has(platform) ? 1_000_000_000 : 0;
+    if (['bankr', 'clanker'].includes(platform) && ['base', 'robinhood'].includes(id)) {
+      return 100_000_000_000;
+    }
+    if (id === 'bsc' && ['fourmeme', 'flap'].includes(platform)) return 1_000_000_000;
+    if (id === 'base' && ['zora', 'zoracoins'].includes(platform)) return 1_000_000_000;
+    if (id === 'xlayer' && ['dyor', 'bow', 'bowfun'].includes(platform)) return 1_000_000_000;
+    return 0;
   }
 
   function resolve(observation = {}) {

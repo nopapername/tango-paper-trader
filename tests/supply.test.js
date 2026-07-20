@@ -26,6 +26,14 @@ test('launchpad and mode rules distinguish 1B, 2B, and 100B supplies', () => {
   assert.equal(Supply.ruleSupply('xlayer', 'DYOR', ''), 1_000_000_000);
 });
 
+test('launchpad fallback rejects known platforms on the wrong chain', () => {
+  assert.equal(Supply.ruleSupply('eth', 'Zora', ''), 0);
+  assert.equal(Supply.ruleSupply('base', 'Four.meme', ''), 0);
+  assert.equal(Supply.ruleSupply('bsc', 'DYOR', ''), 0);
+  assert.equal(Supply.ruleSupply('sol', 'Bankr', ''), 0);
+  assert.equal(Supply.resolve({ chain: 'eth', launchpad: 'Zora' }), null);
+});
+
 test('unknown launchpads do not synthesize a factual supply', () => {
   assert.equal(Supply.resolve({ chain: 'eth', launchpad: 'unknown.fun' }), null);
   assert.equal(Supply.resolve({ chain: 'eth', marketCapUsd: 1000, priceUsd: 0 }), null);
