@@ -63,9 +63,18 @@
     window.postMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: merged }, '*');
   }
 
-  function inspectPayload(payload, chain) {
-    if (!chain) return;
-    try { publish(Tango.GMGNQuotes.extract(payload, chain, Date.now())); } catch {}
+  function inspectPayload(payload, chain, url) {
+    if (chain) {
+      try { publish(Tango.GMGNQuotes.extract(payload, chain, Date.now())); } catch {}
+    }
+    if (/\/api\/v1\/major_coin_prices(?:\?|$)/i.test(String(url || ''))) {
+      try {
+        const prices = Tango.GMGNQuotes.extractNativePrices(payload, Date.now());
+        if (prices.length) window.postMessage({
+          source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES', prices
+        }, '*');
+      } catch {}
+    }
   }
 
   function responseMatchesRequestChain(url, chain) {
@@ -78,7 +87,7 @@
     try {
       const parsed = new URL(String(url || ''), location.href);
       if (!/(^|\.)gmgn\.ai$/i.test(parsed.hostname)) return false;
-      return /(?:token|rank|launchpad|pump|trench|pool|market|quote|price|swap|new)/i.test(parsed.pathname + parsed.search);
+      return /(?:token|rank|launchpad|pump|trench|pool|market|quote|price|new)/i.test(parsed.pathname + parsed.search);
     } catch { return false; }
   }
 
@@ -93,7 +102,7 @@
           const responseUrl = response?.url || requestStart.url;
           if (response?.ok && responseMatchesRequestChain(responseUrl, requestStart.chain)
             && shouldInspectResponse(responseUrl, contentType)) {
-            response.clone().json().then((payload) => inspectPayload(payload, requestStart.chain)).catch(() => null);
+            response.clone().json().then((payload) => inspectPayload(payload, requestStart.chain, responseUrl)).catch(() => null);
           }
         }).catch(() => null);
         return request;
@@ -116,7 +125,10 @@
       if (this.status >= 200 && this.status < 300
         && responseMatchesRequestChain(responseUrl, this.__tangoRequestChain)
         && shouldInspectResponse(responseUrl, contentType)) {
-        try { inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText), this.__tangoRequestChain); } catch {}
+        try {
+          inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText),
+            this.__tangoRequestChain, responseUrl);
+        } catch {}
       }
     }, { once: true });
     return xhrSend.apply(this, args);

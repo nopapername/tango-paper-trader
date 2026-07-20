@@ -16,6 +16,7 @@ function deferred() {
 
 function loadPageMain(fetchImpl) {
   const published = [];
+  const nativePublished = [];
   const listeners = new Map();
   class FakeElement {}
   class FakeXhr {
@@ -35,7 +36,10 @@ function loadPageMain(fetchImpl) {
     location: { href: `https://gmgn.ai/eth/token/${EVM_ADDRESS}` },
     fetch: fetchImpl,
     addEventListener(type, listener) { listeners.set(type, listener); },
-    postMessage(message) { if (message?.type === 'TOKEN_QUOTES') published.push(...message.quotes); },
+    postMessage(message) {
+      if (message?.type === 'TOKEN_QUOTES') published.push(...message.quotes);
+      if (message?.type === 'NATIVE_PRICES') nativePublished.push(...message.prices);
+    },
     Tango: {
       GMGNQuotes: {
         extract(payload, chain, observedAt) {
@@ -44,6 +48,16 @@ function loadPageMain(fetchImpl) {
             symbol: payload.symbol || '', name: payload.name || '', logoUrl: payload.logoUrl || '',
             observedAt, source: 'GMGN_NETWORK'
           }];
+        },
+        extractNativePrices(payload, observedAt) {
+          return (payload.data || [])
+            .filter((entry) => ['SOL', 'ETH', 'BNB', 'OKB'].includes(entry.symbol))
+            .map((entry) => ({
+              symbol: entry.symbol,
+              priceUsd: Number(entry.price || entry.price_usd),
+              observedAt,
+              source: 'GMGN_MAJOR_COIN'
+            }));
         },
         mergeObservation(previous, next) {
           if (previous && (previous.chain !== next.chain || previous.address !== next.address)) return null;
@@ -63,7 +77,7 @@ function loadPageMain(fetchImpl) {
   context.top = context;
   vm.runInNewContext(chainsSource, context, { filename: 'src/core/chains.js' });
   vm.runInNewContext(source, context, { filename: 'src/content/page-main.js' });
-  return { context, published, listeners };
+  return { context, published, nativePublished, listeners };
 }
 
 function jsonResponse(payload, url = 'https://gmgn.ai/api/token/quote') {
@@ -137,4 +151,22 @@ test('quote replay preserves metadata when a later response contains only price'
   assert.equal(loaded.published[0].symbol, 'RIGHT');
   assert.equal(loaded.published[0].name, 'Right Token');
   assert.equal(loaded.published[0].logoUrl, 'right.png');
+});
+
+test('major_coin_prices publishes passive native observations without a new request', async () => {
+  const loaded = loadPageMain(async () => jsonResponse(
+    { data: [{ symbol: 'ETH', price: 3500 }] },
+    'https://gmgn.ai/api/v1/major_coin_prices'
+  ));
+  await loaded.context.fetch('/api/v1/major_coin_prices');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(loaded.nativePublished, [{
+    symbol: 'ETH', priceUsd: 3500, observedAt: loaded.nativePublished[0].observedAt,
+    source: 'GMGN_MAJOR_COIN'
+  }]);
+});
+
+test('page tap does not create a WebSocket or include GMGN execution endpoints', () => {
+  assert.doesNotMatch(source, /new\s+WebSocket\s*\(/);
+  assert.doesNotMatch(source, /strategy_order|wallet\/list|swap\/route|sendTransaction|signTransaction/);
 });
