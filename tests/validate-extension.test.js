@@ -38,6 +38,11 @@ test('paper-only static validator rejects representative wallet, RPC, approval, 
   const dangerousFixtures = [
     ['ethereum request', 'ethereum.request({ method: "eth_chainId" });'],
     ['wallet RPC property access', 'const request = window.ethereum.request;'],
+    ['quoted window ethereum request', 'window["ethereum"].request({ method: "eth_chainId" });'],
+    ['optional quoted global ethereum request', 'globalThis["ethereum"]?.["request"]({ method: "eth_chainId" });'],
+    ['quoted ethereum request', 'ethereum["request"]({ method: "eth_chainId" });'],
+    ['quoted provider send', 'window["provider"]["send"]("eth_chainId");'],
+    ['optional quoted wallet request', 'wallet?.["request"]({ method: "eth_chainId" });'],
     ['personal sign', 'ethereum.request({ method: "personal_sign" });'],
     ['eth sign', 'window.ethereum.request({ method: "eth_sign" });'],
     ['typed-data signature', 'globalThis.ethereum?.request({ method: "eth_signTypedData_v4" });'],
@@ -63,6 +68,10 @@ test('paper-only static validator rejects representative wallet, RPC, approval, 
     const file = name.includes('isolated') ? 'src/content/content.js' : 'src/content/page-main.js';
     assert.ok(paperOnlySafetyErrors([{ file, source }]).length > 0, name);
   }
+  assert.deepEqual(paperOnlySafetyErrors([{
+    file: 'src/content/page-main.js',
+    source: 'const label = "ethereum request";'
+  }]), []);
 });
 
 test('static validation enforces worker-relative bootstrap imports', () => {

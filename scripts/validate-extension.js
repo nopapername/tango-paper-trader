@@ -36,7 +36,7 @@ const REQUIRED_WORKER_IMPORT_ORDER = [
   'core/state-coordinator.js'
 ];
 const PAPER_ONLY_SAFETY_RULES = [
-  ['wallet RPC transport', /\b(?:(?:window|globalThis)\s*\.\s*)?(?:ethereum|provider|wallet)\s*(?:\.|\?\.)\s*(?:request|send|sendAsync)\b/],
+  ['wallet RPC transport', /(?:\b(?:window|globalThis)\s*(?:\.\s*(?:ethereum|provider|wallet)\b|\[\s*['"](?:ethereum|provider|wallet)['"]\s*\])|\b(?:ethereum|provider|wallet)\b)\s*(?:(?:\.|\?\.)\s*(?:request|send|sendAsync)\b|(?:\?\.\s*)?\[\s*['"](?:request|send|sendAsync)['"]\s*\])/],
   ['wallet signing or transaction RPC', /\b(?:personal_sign|eth_sign(?:TypedData(?:_[A-Za-z0-9]+)?)?|eth_send(?:Raw)?Transaction|wallet_requestPermissions|wallet_switchEthereumChain|wallet_addEthereumChain)\b/],
   ['wallet transaction helper', /\b(?:connectWallet|requestSignature|signTransaction|sendTransaction|broadcastTransaction)\b/],
   ['token approval', /\b(?:approve|approveToken|approveTransaction)\b/],
