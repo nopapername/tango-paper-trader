@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { performance } = require('node:perf_hooks');
 const vm = require('node:vm');
 
 global.Tango = {};
@@ -625,6 +626,20 @@ test('quick buy with no market data commits immediately with a provisional 1 USD
   assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 1);
   assert.equal(loaded.calls.buyOrders[0].quote.provisional, true);
   assert.equal(loaded.api.runtime.toast.type, 'success');
+});
+
+test('local quick-buy feedback completes under 100 ms without timer advancement', async () => {
+  const loaded = loadContent({ sendMessage: () => new Promise(() => {}) });
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  const started = performance.now();
+  await loaded.api.handleQuickBuy({
+    token: { chain: 'eth', address: ADDRESS_A, symbol: 'FAST', metadataVerified: true, metadataSource: 'GMGN_TRENCH' },
+    quote: {}, amountNative: 1
+  });
+  const elapsed = performance.now() - started;
+  assert.equal(loaded.calls.buy, 1);
+  assert.ok(elapsed < 100, `expected <100ms, got ${elapsed}ms`);
 });
 
 test('market-cap-only quick buy derives price locally and never requests before commit', async () => {

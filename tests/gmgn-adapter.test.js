@@ -745,3 +745,26 @@ test('trench quick buy snapshots once and dispatches without polling timers', as
     Object.assign(global, original);
   }
 });
+
+test('incremental discovery scans only supplied mutation roots', () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  const originalCardQuery = harness.card.querySelectorAll;
+  harness.card.querySelectorAll = (selector) => selector === '.BuyButton-continer'
+    ? [harness.slot]
+    : originalCardQuery(selector);
+  const originalDocumentQuery = harness.document.querySelectorAll;
+  harness.document.querySelectorAll = (selector) => {
+    if (selector === '.BuyButton-continer') throw new Error('unexpected full document scan');
+    return originalDocumentQuery(selector);
+  };
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(GMGN.discoverTokenCards(() => {}, 0.1, 'PAPER', [harness.card]), 1);
+    assert.ok(harness.replacement);
+  } finally {
+    Object.assign(global, original);
+  }
+});

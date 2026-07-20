@@ -104,12 +104,14 @@ test('header balance is read from the active account', () => {
 test('paper execution paths contain no quote wait, pending intent, or network await', () => {
   const resolver = between('function resolvePaperTradeQuote(', 'function requireExecutableQuote(');
   const execution = between('async function buy(', 'function showToast(');
+  const quickBuy = between('async function handleQuickBuy(', 'async function buy(');
   const buy = between('async function buy(', 'function previewBuy(');
   const sell = between('async function sell(', 'async function sellPosition(');
   const sellPosition = between('async function sellPosition(', 'async function commitSell(');
   const closeAll = between('async function commitCloseAll(', 'async function sellBreakeven()');
   const breakeven = between('async function sellBreakeven(', 'function showToast(');
   assert.doesNotMatch(resolver, /await|setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote/);
+  assert.doesNotMatch(quickBuy, /setTimeout|waitForGmgnQuote|latestCardMarketCap/);
   assert.doesNotMatch(execution, /queuePendingPaperIntent|pendingTradeIntents|quoteQueued/);
   for (const [name, entryPoint] of Object.entries({ buy, sell, sellPosition, closeAll, breakeven })) {
     assert.match(entryPoint, /resolvePaperTradeQuote\(/, name);
@@ -175,6 +177,17 @@ test('same-chain navigation invalidates stale token modals before the next quote
   const identityCheck = 'Tango.GMGN.resolveCurrentTokenRead(runtime.current, null) !== runtime.current';
   assert.match(route, new RegExp(identityCheck.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.ok(route.indexOf(identityCheck) < route.indexOf('tickQuote()'));
+});
+
+test('mutation processing batches affected roots while route changes fully reconcile quick buy', () => {
+  const route = between('function handleRouteChange()', 'async function start()');
+  const start = between('async function start()', "document.addEventListener('input'");
+  assert.match(source, /pendingMutationRoots:\s*new Set\(\)/);
+  assert.match(route, /syncQuickBuyButtons\(\)/);
+  assert.match(start, /record\.target/);
+  assert.match(start, /record\.addedNodes/);
+  assert.match(start, /pendingMutationRoots\.clear\(\)/);
+  assert.match(start, /syncQuickBuyButtons\(roots\)/);
 });
 
 test('panel balance labels leave room for multichain native symbols', () => {

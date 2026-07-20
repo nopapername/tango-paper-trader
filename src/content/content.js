@@ -13,7 +13,7 @@
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null,
-    routeEpoch: 0, routeIdentity: null
+    routeEpoch: 0, routeIdentity: null, pendingMutationRoots: new Set()
   };
 
   const host = document.createElement('div');
@@ -302,22 +302,25 @@
     requestAnimationFrame(() => { runtime.renderQueued = false; render(); });
   }
 
-  function syncQuickBuyButtons() {
+  function syncQuickBuyButtons(roots) {
     const chain = activeChain();
     const settings = chainSettings();
     if (chain && settings && runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) {
-      Tango.GMGN.discoverTokenCards(handleQuickBuy, settings.buyPresets?.[0] || 0.1, t('paper'));
+      Tango.GMGN.discoverTokenCards(handleQuickBuy, settings.buyPresets?.[0] || 0.1, t('paper'), roots);
     } else {
       Tango.GMGN.clearQuickBuy();
     }
   }
 
-  function queueQuickBuySync() {
+  function queueQuickBuySync(root) {
+    if (root) runtime.pendingMutationRoots.add(root);
     if (runtime.quickBuySyncQueued) return;
     runtime.quickBuySyncQueued = true;
     requestAnimationFrame(() => {
       runtime.quickBuySyncQueued = false;
-      syncQuickBuyButtons();
+      const roots = [...runtime.pendingMutationRoots];
+      runtime.pendingMutationRoots.clear();
+      if (roots.length) syncQuickBuyButtons(roots);
     });
   }
 
@@ -1551,6 +1554,7 @@
     const previousRouteIdentity = runtime.routeIdentity ?? currentRouteIdentity(runtime.lastUrl);
     runtime.lastUrl = location.href;
     advanceRouteEpoch();
+    runtime.pendingMutationRoots.clear();
     const nextChainId = activeChain()?.id || null;
     const currentNoLongerMatches = runtime.current
       && Tango.GMGN.resolveCurrentTokenRead(runtime.current, null) !== runtime.current;
@@ -1565,6 +1569,7 @@
     }
     queueRender();
     window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
+    syncQuickBuyButtons();
     tickQuote();
   }
 
@@ -1579,14 +1584,22 @@
     runtime.markerTimer = setInterval(syncChartMarkers, 1000);
     runtime.routeTimer = setInterval(handleRouteChange, 150);
     let mutationTimer;
-    runtime.observer = new MutationObserver(() => {
+    runtime.observer = new MutationObserver((records) => {
       if (location.href !== runtime.lastUrl) {
         handleRouteChange();
+      }
+      for (const record of records) {
+        if (record.target?.nodeType === 1) runtime.pendingMutationRoots.add(record.target);
+        for (const node of record.addedNodes || []) {
+          if (node?.nodeType === 1) runtime.pendingMutationRoots.add(node);
+        }
       }
       if (mutationTimer) return;
       mutationTimer = setTimeout(() => {
         mutationTimer = null;
-        syncQuickBuyButtons();
+        const roots = [...runtime.pendingMutationRoots];
+        runtime.pendingMutationRoots.clear();
+        if (roots.length) syncQuickBuyButtons(roots);
         if (runtime.settings?.enabled && runtime.state?.initialized) {
           renderHeaderAccountSummary({});
           if (Tango.GMGN.needsCurrentTokenRead(runtime.current)) tickQuote();
@@ -1596,7 +1609,10 @@
     });
     runtime.observer.observe(document.body, { childList: true, subtree: true });
     const handleQuickBuyAmountChange = (event) => {
-      if (event.target?.closest?.('[data-sentry-component="BuyAmountInput"]')) queueQuickBuySync();
+      if (event.target?.closest?.('[data-sentry-component="BuyAmountInput"]')) {
+        const root = event.target.closest('[data-sentry-component="TrenchColumn"], [class~="group/a"]') || event.target;
+        queueQuickBuySync(root);
+      }
     };
     document.addEventListener('input', handleQuickBuyAmountChange, true);
     document.addEventListener('change', handleQuickBuyAmountChange, true);

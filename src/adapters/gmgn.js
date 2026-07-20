@@ -696,20 +696,37 @@
     (document.head || document.documentElement).appendChild(style);
   }
 
-  function discoverTokenCards(onQuickBuy, defaultAmountSol = 0.1, paperLabel = 'PAPER') {
+  function quickBuySlots(roots) {
+    if (!Array.isArray(roots) || !roots.length) {
+      return Array.from(document.querySelectorAll('.BuyButton-continer')).slice(0, 80);
+    }
+    const slots = new Set();
+    for (const root of roots.slice(0, 80)) {
+      if (root?.matches?.('.BuyButton-continer')) slots.add(root);
+      root?.querySelectorAll?.('.BuyButton-continer').forEach((slot) => slots.add(slot));
+      const closest = root?.closest?.('.BuyButton-continer');
+      if (closest) slots.add(closest);
+    }
+    return [...slots].slice(0, 80);
+  }
+
+  function discoverTokenCards(onQuickBuy, defaultAmountSol = 0.1, paperLabel = 'PAPER', roots) {
+    const incremental = Array.isArray(roots) && roots.length > 0;
     if (!isTrenchPage()) {
-      clearQuickBuy();
+      if (!incremental) clearQuickBuy();
       return 0;
     }
     const chain = chainFromUrl();
     const chainDefinition = Tango.Chains.get(chain);
     if (!chainDefinition) return 0;
     ensureQuickBuyStyle();
-    const nativeSlots = Array.from(document.querySelectorAll('.BuyButton-continer')).slice(0, 80);
-    const candidateSlots = new Set(nativeSlots);
-    document.querySelectorAll('.tango-native-buy-overridden').forEach((slot) => {
-      if (!candidateSlots.has(slot)) restoreQuickBuySlot(slot);
-    });
+    const nativeSlots = quickBuySlots(roots);
+    if (!incremental) {
+      const candidateSlots = new Set(nativeSlots);
+      document.querySelectorAll('.tango-native-buy-overridden').forEach((slot) => {
+        if (!candidateSlots.has(slot)) restoreQuickBuySlot(slot);
+      });
+    }
     let injected = 0;
     for (const slot of nativeSlots) {
       const card = slot.closest('[class~="group/a"]');
