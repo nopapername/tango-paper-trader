@@ -337,6 +337,9 @@
     const data = await Tango.Store.getAll();
     runtime.state = data.state;
     runtime.settings = data.settings;
+    const becameEnabled = previousSettings?.enabled === false
+      && runtime.settings.enabled === true
+      && runtime.state.initialized === true;
     const currentChainSettings = chainSettings();
     const quickBuyConfigChanged = previousSettings && (
       previousSettings.enabled !== runtime.settings.enabled ||
@@ -346,6 +349,13 @@
     );
     if (!chain || !runtime.settings.enabled || !runtime.state.initialized || !runtime.settings.showListQuickBuy || quickBuyConfigChanged) Tango.GMGN.clearQuickBuy();
     if (!runtime.settings.enabled) runtime.current = null;
+    if (becameEnabled) {
+      ensureRouteTokenContext();
+      syncSelectedChainFromRoute(captureRoute());
+      window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
+      syncQuickBuyButtons();
+      tickQuote();
+    }
     queueRender();
   }
 

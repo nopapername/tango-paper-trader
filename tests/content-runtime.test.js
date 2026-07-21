@@ -17,7 +17,7 @@ const GMGNQuotes = require('../src/adapters/gmgn-quotes.js');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const START = "  start().catch((error) => console.error('[Tango Paper Trader]', error));";
 const EXPOSE = `  global.__contentTest = {
-    runtime, start, performQuoteTick, handleRouteChange, handleQuickBuy, buy, sell, sellPosition, sellBreakeven,
+    runtime, start, performRefresh, refresh, performQuoteTick, handleRouteChange, handleQuickBuy, buy, sell, sellPosition, sellBreakeven,
     ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
     resolvePaperTradeQuote, paperExecutableQuote,
     requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
@@ -147,7 +147,7 @@ function mergeSettingsPatch(settings, patch) {
 }
 
 function loadContent({
-  href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurrentToken, sendMessage, patchSettings,
+  href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, getAll, readCurrentToken, sendMessage, patchSettings,
   updatePositionQuote,
   requestAnimationFrame = () => 0, timer = setTimeout,
   MutationObserver = class { observe() {} }
@@ -158,7 +158,7 @@ function loadContent({
   const calls = {
     buy: 0, buyOrders: [], sell: 0, sellOrders: [], metadataBatches: [],
     closeAll: 0, closeAllOrders: [], patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: [],
-    updatePositionQuotes: []
+    updatePositionQuotes: [], readCurrentToken: 0, discoverTokenCards: 0, storeSubscriber: null
   };
   const clock = { now: 1_000_000 };
   class FakeDate extends Date {
@@ -270,7 +270,10 @@ function loadContent({
     },
     Markers: { buildPayload: () => ({ markers: [] }) },
     Store: {
-      getAll: async () => { calls.getAll += 1; return { state: defaultState(), settings: defaultSettings() }; },
+      getAll: async () => {
+        calls.getAll += 1;
+        return getAll ? getAll() : { state: defaultState(), settings: defaultSettings() };
+      },
       async patchSettings(patch) {
         calls.patches.push(patch);
         if (patchSettings) return patchSettings(patch);
@@ -297,7 +300,7 @@ function loadContent({
         calls.metadataBatches.push(tokens);
         return context.__contentTest.runtime.state;
       },
-      subscribe() {}
+      subscribe(listener) { calls.storeSubscriber = listener; }
     },
     Engine: {
       positionKey: RealEngine.positionKey,
@@ -316,8 +319,13 @@ function loadContent({
       breakevenSellPercent: () => null
     },
     GMGN: {
-      clearQuickBuy() {}, discoverTokenCards: () => 0, readVisibleTokenMetadata: () => [],
-      readCurrentToken: readCurrentToken || (async () => null),
+      clearQuickBuy() {},
+      discoverTokenCards: () => { calls.discoverTokenCards += 1; return 0; },
+      readVisibleTokenMetadata: () => [],
+      readCurrentToken: async () => {
+        calls.readCurrentToken += 1;
+        return readCurrentToken ? readCurrentToken() : null;
+      },
       resolveCurrentTokenRead(previous, next, url = context.location.href) {
         if (next) return next;
         const parsed = new URL(url);
@@ -373,6 +381,39 @@ test('a delayed quote tick cannot restore the old token after same-chain navigat
   gate.resolve(oldContext);
   await tick;
   assert.notEqual(loaded.api.runtime.current, oldContext);
+});
+
+test('OFF-to-ON settings refresh restores the detail route content lifecycle once', async () => {
+  const animationFrames = [];
+  const enabledSettings = defaultSettings();
+  const loaded = loadContent({
+    getAll: () => ({ state: defaultState(), settings: enabledSettings }),
+    readCurrentToken: async () => quoteContext(),
+    requestAnimationFrame(callback) { animationFrames.push(callback); return animationFrames.length; }
+  });
+  loaded.api.runtime.settings = { ...loaded.api.runtime.settings, enabled: false };
+  loaded.pageMessages.length = 0;
+
+  async function flushRefresh() {
+    await new Promise((resolve) => setImmediate(resolve));
+    while (animationFrames.length) animationFrames.shift()();
+    await Promise.resolve();
+  }
+
+  await loaded.api.performRefresh();
+  await flushRefresh();
+
+  assert.equal(loaded.api.runtime.settings.enabled, true);
+  assert.ok(loaded.api.runtime.current?.token);
+  assert.ok(loaded.calls.discoverTokenCards >= 1);
+  assert.equal(loaded.calls.readCurrentToken, 1);
+  assert.equal(loaded.pageMessages.filter((message) => message.type === 'REQUEST_QUOTES').length, 1);
+  assert.notEqual(loaded.shell.innerHTML, '');
+
+  await loaded.api.performRefresh();
+  await flushRefresh();
+
+  assert.equal(loaded.pageMessages.filter((message) => message.type === 'REQUEST_QUOTES').length, 1);
 });
 
 test('content preset edits patch only active-chain buys and global sells', async () => {
