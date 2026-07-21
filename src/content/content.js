@@ -14,7 +14,12 @@
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null,
     routeEpoch: 0, routeIdentity: null, pendingMutationRoots: new Set(),
-    selectedChainSync: null, positionCalibrationPromises: new Map()
+    selectedChainSync: null,
+    selectedChainPersistence: {
+      desiredChain: null, persistedChain: null, dirty: false, opportunity: 0
+    },
+    positionCalibrationPromises: new Map(), positionCalibrationTargets: new Map(),
+    positionCalibrationDirty: new Set()
   };
 
   const host = document.createElement('div');
@@ -95,25 +100,47 @@
     runtime.routeEpoch += 1;
     runtime.routeIdentity = currentRouteIdentity();
   }
-  function syncSelectedChainFromRoute(routeCapture = captureRoute()) {
+  function syncSelectedChainFromRoute() {
     const chain = activeChain();
     if (!chain || !runtime.settings) return null;
-    const pending = runtime.selectedChainSync;
-    if (pending?.chain === chain.id && pending?.epoch === routeCapture.epoch) return pending.promise;
-    if (runtime.settings.selectedChain === chain.id && !pending) return null;
-    const expectedChain = chain.id;
-    const promise = Tango.Store.patchSettings({ selectedChain: expectedChain })
-      .then((saved) => {
-        if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== expectedChain) return runtime.settings;
-        if (saved?.selectedChain === expectedChain) runtime.settings = saved;
-        queueRender();
-        return runtime.settings;
-      })
-      .catch(() => runtime.settings)
-      .finally(() => {
-        if (runtime.selectedChainSync?.promise === promise) runtime.selectedChainSync = null;
-      });
-    runtime.selectedChainSync = { chain: expectedChain, epoch: routeCapture.epoch, promise };
+    const persistence = runtime.selectedChainPersistence;
+    if (persistence.persistedChain === null) {
+      persistence.persistedChain = runtime.settings.selectedChain;
+    }
+    persistence.desiredChain = chain.id;
+    persistence.opportunity += 1;
+    if (persistence.persistedChain !== chain.id) persistence.dirty = true;
+    if (runtime.selectedChainSync) return runtime.selectedChainSync.promise;
+    if (!persistence.dirty && persistence.persistedChain === chain.id) return null;
+    const promise = (async () => {
+      while (persistence.dirty) {
+        const expectedChain = persistence.desiredChain;
+        const attemptOpportunity = persistence.opportunity;
+        let saved;
+        try {
+          saved = await Tango.Store.patchSettings({ selectedChain: expectedChain });
+        } catch {
+          persistence.dirty = true;
+          if (persistence.opportunity > attemptOpportunity) continue;
+          break;
+        }
+        if (saved?.selectedChain !== expectedChain) {
+          persistence.dirty = true;
+          if (persistence.opportunity > attemptOpportunity) continue;
+          break;
+        }
+        persistence.persistedChain = expectedChain;
+        persistence.dirty = persistence.desiredChain !== persistence.persistedChain;
+        if (activeChain()?.id === expectedChain && persistence.desiredChain === expectedChain) {
+          runtime.settings = saved;
+          queueRender();
+        }
+      }
+      return runtime.settings;
+    })().finally(() => {
+      if (runtime.selectedChainSync?.promise === promise) runtime.selectedChainSync = null;
+    });
+    runtime.selectedChainSync = { promise };
     return promise;
   }
   function activeAccount() {
@@ -163,6 +190,8 @@
     runtime.quoteRequests.clear();
     runtime.quoteRetryAt.clear();
     runtime.positionCalibrationPromises.clear();
+    runtime.positionCalibrationTargets.clear();
+    runtime.positionCalibrationDirty.clear();
     runtime.markerPayloads = new WeakMap();
     syncChartMarkers(true);
     Tango.GMGN.clearQuickBuy();
@@ -797,8 +826,10 @@
     const marketCapUsd = Number(local.marketCapUsd);
     const safeMarketCapUsd = Number.isFinite(marketCapUsd) && marketCapUsd > 0 ? marketCapUsd : 0;
     const observedPrice = Number(local.priceUsd);
+    const observedPriceProvenance = String(local.priceProvenance || '').toUpperCase();
     const safeObservedPrice = local.syntheticTokenPrice !== true
-      && String(local.priceProvenance || '').toUpperCase() !== 'MARKET_CAP_DERIVED'
+      && !observedPriceProvenance.includes('DERIVED')
+      && !observedPriceProvenance.includes('SYNTHETIC')
       && Number.isFinite(observedPrice) && observedPrice > 0 ? observedPrice : 0;
     const legacyPumpSupply = chain.id === 'sol' && /pump$/i.test(normalizedAddress)
       && boundPosition?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1'
@@ -816,6 +847,8 @@
     const positionExactSupply = boundPosition?.supplySource === 'GMGN_EXACT'
       && Number.isFinite(Number(boundPosition?.totalSupply)) && Number(boundPosition.totalSupply) > 0
       ? Number(boundPosition.totalSupply) : 0;
+    const resolvedLaunchpad = token.launchpad || local.launchpad || boundPosition?.launchpad || '';
+    const resolvedLaunchMode = token.launchMode || local.launchMode || boundPosition?.launchMode || '';
     const supply = Tango.Supply.resolve({
       chain: chain.id,
       totalSupply: localExactSupply || positionExactSupply || legacyPumpSupply,
@@ -823,8 +856,17 @@
         : legacyPumpSupply ? 'LEGACY_PUMP_RULE' : '',
       priceUsd: safeObservedPrice,
       marketCapUsd: safeMarketCapUsd,
-      launchpad: token.launchpad || local.launchpad || boundPosition?.launchpad,
-      launchMode: token.launchMode || local.launchMode || boundPosition?.launchMode
+      address: normalizedAddress,
+      observationId: local.observationId,
+      priceObservationId: local.priceObservationId,
+      marketCapObservationId: local.marketCapObservationId,
+      priceObservedAt: local.priceObservedAt || local.originalObservedAt || local.observedAt,
+      marketCapObservedAt: local.marketCapObservedAt || local.originalObservedAt || local.observedAt,
+      priceSource: local.priceSource || local.source,
+      marketCapSource: local.marketCapSource || local.source,
+      priceProvenance: local.priceProvenance,
+      launchpad: resolvedLaunchpad,
+      launchMode: resolvedLaunchMode
     });
     const calculatedPrice = !safeObservedPrice && safeMarketCapUsd > 0 && supply
       ? safeMarketCapUsd / supply.totalSupply
@@ -850,6 +892,8 @@
       ...local,
       chain: chain.id,
       address: normalizedAddress,
+      launchpad: resolvedLaunchpad,
+      launchMode: resolvedLaunchMode,
       provisionalSupply,
       priceUsd,
       marketCapUsd: safeMarketCapUsd,
@@ -888,6 +932,15 @@
   function positionCalibrationUpgrade(position, quote) {
     if (!position || !quote) return false;
     if (supplyQuality(quote.supplySource) > supplyQuality(position.supplySource)) return true;
+    const lateLaunchModeCorrection = String(position.supplySource || '').toUpperCase() === 'LAUNCHPAD_RULE'
+      && String(quote.supplySource || '').toUpperCase() === 'LAUNCHPAD_RULE'
+      && !String(position.launchMode || '').trim()
+      && Boolean(String(quote.launchMode || '').trim())
+      && Number.isFinite(Number(position.totalSupply)) && Number(position.totalSupply) > 0
+      && Number.isFinite(Number(quote.totalSupply)) && Number(quote.totalSupply) > 0
+      && Math.abs(Number(quote.totalSupply) - Number(position.totalSupply))
+        > Number(position.totalSupply) * Number.EPSILON;
+    if (lateLaunchModeCorrection) return true;
     if (position.syntheticTokenPrice === true && quote.syntheticTokenPrice !== true) return true;
     if (position.syntheticNativePrice === true && quote.syntheticNativePrice !== true) return true;
     return (position.needsCalibration === true || position.provisional === true)
@@ -903,7 +956,14 @@
     const quote = resolvePaperTradeQuote(context.token, context.quote, { position });
     if (!positionCalibrationUpgrade(position, quote)) return null;
     const key = Tango.Engine.positionKey(context.token.chain, context.token.address);
-    if (runtime.positionCalibrationPromises.has(key)) return runtime.positionCalibrationPromises.get(key);
+    if (runtime.positionCalibrationPromises.has(key)) {
+      const pendingTarget = runtime.positionCalibrationTargets.get(key);
+      if (!pendingTarget || positionCalibrationUpgrade(pendingTarget, quote)) {
+        runtime.positionCalibrationTargets.set(key, quote);
+        runtime.positionCalibrationDirty.add(key);
+      }
+      return runtime.positionCalibrationPromises.get(key);
+    }
     const token = { ...context.token };
     const request = Tango.Store.updatePositionQuote(token, quote)
       .then((state) => {
@@ -920,9 +980,16 @@
       .finally(() => {
         if (runtime.positionCalibrationPromises.get(key) === request) {
           runtime.positionCalibrationPromises.delete(key);
+          runtime.positionCalibrationTargets.delete(key);
+          const rerun = runtime.positionCalibrationDirty.delete(key);
+          if (rerun && routeCaptureIsCurrent(routeCapture)) {
+            const nextRequest = queueImmediateCurrentCalibration(captureRoute());
+            if (nextRequest) nextRequest.catch(() => null);
+          }
         }
       });
     runtime.positionCalibrationPromises.set(key, request);
+    runtime.positionCalibrationTargets.set(key, quote);
     return request;
   }
 

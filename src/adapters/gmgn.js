@@ -21,10 +21,15 @@
     { pattern: /(?:^|\.)flap\.sh$/i, name: 'Flap' },
     { pattern: /(?:^|\.)pump\.fun$/i, name: 'Pump.fun' },
     { pattern: /(?:^|\.)zora\.co$/i, name: 'Zora' },
-    { pattern: /bankr/i, name: 'Bankr' },
-    { pattern: /clanker/i, name: 'Clanker' },
-    { pattern: /(?:^|\.)dyor/i, name: 'DYOR' },
+    { pattern: /(?:^|\.)bankr\.bot$/i, name: 'Bankr' },
+    { pattern: /(?:^|\.)clanker\.world$/i, name: 'Clanker' },
+    { pattern: /(?:^|\.)(?:dyor\.fun|dyor\.io|dyor\.exchange)$/i, name: 'DYOR' },
     { pattern: /(?:^|\.)bow\.fun$/i, name: 'Bow.fun' }
+  ]);
+  const DETAIL_LAUNCHPADS = Object.freeze([
+    ...CARD_LAUNCHPADS,
+    { pattern: /(?:^|\.)stroid\.xyz$/i, name: 'Stroid' },
+    { pattern: /(?:^|\.)trench\.today$/i, name: 'Trench.today' }
   ]);
 
   function chainFromUrl(url = global.location?.href || '') {
@@ -362,15 +367,54 @@
     return images.length === 1 ? images[0].src || '' : '';
   }
 
-  function detailLaunchpad(scope) {
-    const hrefs = Array.from(scope?.querySelectorAll?.('a[href]') || []).map((link) => link.href || '');
-    const match = hrefs.find((href) => /pump\.fun|four\.meme|flap|zora|bankr|clanker|bow\.fun|dyor|stroid|trench\.today/i.test(href));
-    if (!match) return '';
-    const launchpad = match.match(/pump\.fun|four\.meme|flap|zora|bankr|clanker|bow\.fun|dyor|stroid|trench\.today/i)?.[0] || '';
-    return {
-      'pump.fun': 'Pump.fun', 'four.meme': 'Four.meme', flap: 'Flap', zora: 'Zora', bankr: 'Bankr',
-      clanker: 'Clanker', 'bow.fun': 'Bow.fun', dyor: 'DYOR', stroid: 'Stroid', 'trench.today': 'Trench.today'
-    }[launchpad.toLowerCase()] || launchpad;
+  function exposedLaunchpadAddress(href, chain) {
+    let parsed;
+    try { parsed = new URL(href || '', global.location?.origin || 'https://gmgn.ai'); }
+    catch { return ''; }
+    const candidates = [
+      ...parsed.pathname.split('/').filter(Boolean).reverse(),
+      ...['address', 'token', 'ca'].map((key) => parsed.searchParams.get(key)).filter(Boolean)
+    ];
+    for (const candidate of candidates) {
+      let decoded;
+      try { decoded = decodeURIComponent(candidate); } catch { continue; }
+      if (Tango.Chains.validateAddress(chain, decoded)) return Tango.Chains.normalizeAddress(chain, decoded);
+    }
+    return '';
+  }
+
+  function detailLaunchpad(scope, address, chain) {
+    const normalizedAddress = Tango.Chains.normalizeAddress(chain, address);
+    for (const link of scope?.querySelectorAll?.('a[href]') || []) {
+      const href = link.href || link.getAttribute?.('href') || '';
+      let parsed;
+      try { parsed = new URL(href, global.location?.origin || 'https://gmgn.ai'); }
+      catch { continue; }
+      const launchpad = DETAIL_LAUNCHPADS.find((entry) => entry.pattern.test(parsed.hostname));
+      if (!launchpad || exposedLaunchpadAddress(parsed.href, chain) !== normalizedAddress) continue;
+      return launchpad.name;
+    }
+    return '';
+  }
+
+  function launchModeFromScope(scope, launchpad) {
+    if (String(launchpad || '').toLowerCase().replace(/[^a-z0-9]/g, '') !== 'pumpfun') return '';
+    const selector = [
+      '[data-launch-mode]', '[data-token-launch-mode]',
+      '[data-testid*="launch-mode" i]', '[data-testid*="mayhem" i]',
+      '[data-sentry-component*="mayhem" i]', '[aria-label="Mayhem" i]',
+      '[title="Mayhem" i]', '[class~="mayhem"]', '[class*="mayhem" i]'
+    ].join(',');
+    for (const element of scope?.querySelectorAll?.(selector) || []) {
+      const value = element.getAttribute?.('data-launch-mode')
+        || element.getAttribute?.('data-token-launch-mode')
+        || element.getAttribute?.('aria-label')
+        || element.getAttribute?.('title')
+        || element.textContent
+        || '';
+      if (/^mayhem$/i.test(String(value).trim())) return 'Mayhem';
+    }
+    return '';
   }
 
   function detailQuote(detail, chain, address) {
@@ -389,10 +433,12 @@
     const declaredSupply = parseMoney(baseItems.find((item) => /^(total supply|\u603b\u4f9b\u5e94\u91cf)$/i
       .test(item.querySelector('.info-item-title')?.textContent?.trim() || ''))?.querySelector('.info-item-value')?.textContent)
       || scanLabeledValue(['total supply', '\u603b\u4f9b\u5e94\u91cf'], quoteScope);
-    const launchpad = detailLaunchpad(quoteScope);
-    const launchMode = '';
+    const launchpad = detailLaunchpad(quoteScope, address, chain);
+    const launchMode = launchModeFromScope(quoteScope, launchpad);
+    const observedAt = priceUsd > 0 || marketCapUsd > 0 || declaredSupply > 0 ? Date.now() : 0;
     const supply = Tango.Supply?.resolve?.({
-      chain, launchpad, launchMode, marketCapUsd, priceUsd, totalSupply: declaredSupply,
+      chain, address, launchpad, launchMode, marketCapUsd, priceUsd, totalSupply: declaredSupply,
+      observedAt, source: 'GMGN', priceProvenance: priceUsd > 0 ? 'OBSERVED_PRICE' : '',
       supplySource: declaredSupply > 0 ? 'GMGN_EXACT' : ''
     }) || null;
     const marketCapDerived = !(priceUsd > 0) && Boolean(supply) && marketCapUsd > 0;
@@ -403,7 +449,7 @@
       valuationMode: marketCapDerived ? 'MARKET_CAP' : 'PRICE',
       priceProvenance: marketCapDerived ? 'MARKET_CAP_DERIVED' : (resolvedPriceUsd > 0 ? 'OBSERVED_PRICE' : ''),
       ...(marketCapDerived ? { marketCapDivisor: supply.totalSupply } : {}),
-      source: 'GMGN', observedAt: resolvedPriceUsd > 0 || marketCapUsd > 0 ? Date.now() : 0
+      source: 'GMGN', observedAt
     };
   }
 
@@ -551,9 +597,10 @@
     if (!chain || !Tango.Chains.validateAddress(chain.id, address)) return null;
     const identity = cardTokenIdentity(card, address, chain.id);
     if (!identity) return null;
+    const launchpad = cardLaunchpad(card, address, chain.id);
     return {
       ...identity, logoUrl: cardTokenLogo(card),
-      launchpad: cardLaunchpad(card, address, chain.id), launchMode: ''
+      launchpad, launchMode: launchModeFromScope(card, launchpad)
     };
   }
 
@@ -565,12 +612,8 @@
       catch { continue; }
       const match = CARD_LAUNCHPADS.find((entry) => entry.pattern.test(parsed.hostname));
       if (!match) continue;
-      const exposed = [...parsed.pathname.split('/').filter(Boolean)].reverse()
-        .find((part) => {
-          try { return Tango.Chains.validateAddress(chain, decodeURIComponent(part)); }
-          catch { return false; }
-        });
-      if (exposed && Tango.Chains.normalizeAddress(chain, decodeURIComponent(exposed)) !== normalizedAddress) continue;
+      const exposed = exposedLaunchpadAddress(parsed.href, chain);
+      if (!exposed || exposed !== normalizedAddress) continue;
       return match.name;
     }
     return '';

@@ -4,6 +4,9 @@ const assert = require('node:assert/strict');
 global.Tango = {};
 require('../src/core/chains.js');
 require('../src/core/supply.js');
+require('../src/shared/constants.js');
+const State = require('../src/core/state.js');
+const Engine = require('../src/core/engine.js');
 const GMGN = require('../src/adapters/gmgn.js');
 
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
@@ -12,7 +15,8 @@ const EVM_ADDRESS_2 = '0x2222222222222222222222222222222222222222';
 const PUMP_ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 
 function quickBuyHarness({
-  chain = 'sol', address = PUMP_ADDRESS, marketCap = '$10K', launchpadHref = ''
+  chain = 'sol', address = PUMP_ADDRESS, marketCap = '$10K', launchpadHref = '', launchMode = '',
+  identityText = 'TEST Test Token', unrelatedText = ''
 } = {}) {
   const href = chain === 'sol'
     ? `https://pump.fun/coin/${address}`
@@ -20,11 +24,19 @@ function quickBuyHarness({
   const launchpadLink = launchpadHref
     ? { href: launchpadHref, getAttribute: () => launchpadHref }
     : null;
+  const launchModeBadge = launchMode ? {
+    textContent: launchMode,
+    getAttribute: (name) => name === 'data-launch-mode' ? launchMode : null
+  } : null;
   const card = {
     isConnected: true,
-    innerText: `${address}\nTEST Test Token\nMC\n${marketCap}`,
+    innerText: `${address}\n${identityText}\n${unrelatedText}\nMC\n${marketCap}`,
     getAttribute: (name) => name === 'href' ? href : null,
-    querySelectorAll: (selector) => selector === 'a[href]' && launchpadLink ? [launchpadLink] : [],
+    querySelectorAll(selector) {
+      if (selector === 'a[href]' && launchpadLink) return [launchpadLink];
+      if (selector.includes('[data-launch-mode]') && launchModeBadge) return [launchModeBadge];
+      return [];
+    },
     firstElementChild: { querySelector: () => null }
   };
   const column = {
@@ -99,7 +111,8 @@ function quickBuyHarness({
 
 function detailDocument({
   chain, address, priceUsd, marketCapUsd, liquidityUsd,
-  totalSupply = '0', launchpad = '', linked = true
+  totalSupply = '0', launchpad = '', launchMode = '', linked = true,
+  launchpadAddress = address, launchpadHref = '', tokenName = 'Test Token'
 }) {
   const infoItem = (title, value) => ({
     querySelector(selector) {
@@ -116,13 +129,19 @@ function detailDocument({
   };
   const link = { href: `https://gmgn.ai/${chain}/token/${address}`, getAttribute: () => null };
   const launchpadLink = {
-    href: launchpad ? `https://${launchpad.toLowerCase()}.fun/token/${address}` : '',
+    href: launchpadHref || (launchpad
+      ? `https://${({ zora: 'zora.co' }[launchpad.toLowerCase()] || `${launchpad.toLowerCase()}.fun`)}/token/${launchpadAddress}`
+      : ''),
     getAttribute: () => null
   };
+  const launchModeBadge = launchMode ? {
+    textContent: launchMode,
+    getAttribute: (name) => name === 'data-launch-mode' ? launchMode : null
+  } : null;
   const scopedLinks = linked ? [link, ...(launchpad ? [launchpadLink] : [])] : [];
   const symbolNode = { textContent: 'TEST', getAttribute: () => 'TEST', parentElement: null };
   const header = {
-    textContent: `Test Token TEST ${address}`,
+    textContent: `${tokenName} TEST ${address}`,
     parentElement: null,
     querySelector(selector) {
       if (selector === '[data-testid="token-detail-symbol"]') return symbolNode;
@@ -139,6 +158,7 @@ function detailDocument({
     querySelectorAll(selector) {
       if (selector === '[data-sentry-component="TokenHeader"]') return [header];
       if (selector.includes('a[href')) return scopedLinks;
+      if (selector.includes('[data-launch-mode]') && launchModeBadge) return [launchModeBadge];
       return [];
     }
   };
@@ -635,6 +655,70 @@ test('quick-buy binds launchpad supply rules to the same GMGN card address', asy
   }
 });
 
+test('Pump Mayhem quick-buy emits a trusted 2B order and derives engine quantity from 2B', async () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const harness = quickBuyHarness({
+    chain: 'sol', address: PUMP_ADDRESS, marketCap: '$10K', launchMode: 'Mayhem',
+    launchpadHref: `https://pump.fun/coin/${PUMP_ADDRESS}`
+  });
+  const orders = [];
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=sol', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(GMGN.discoverTokenCards((order) => orders.push(order)), 1);
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders.length, 1);
+    const [order] = orders;
+    assert.equal(order.token.launchpad, 'Pump.fun');
+    assert.equal(order.token.launchMode, 'Mayhem');
+    assert.equal(order.quote.totalSupply, 2_000_000_000);
+    assert.equal(order.quote.supplySource, 'LAUNCHPAD_RULE');
+    assert.equal(order.quote.priceUsd, 10_000 / 2_000_000_000);
+
+    const initial = State.createInitialState({ now: 1, initialBalances: { sol: 10 } });
+    initial.initialized = true;
+    const settings = State.normalizeSettings({
+      slippageBps: 0, platformFeeBps: 0, chains: { sol: { networkFeeNative: 0 } }
+    });
+    const executed = Engine.executeBuy(initial, {
+      ...order,
+      quote: {
+        ...order.quote, nativePriceUsd: 100,
+        nativePriceObservedAt: order.quote.observedAt
+      }
+    }, settings, order.quote.observedAt);
+    assert.ok(Math.abs(executed.position.quantity - 2_000_000) < 1e-6);
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+  }
+});
+
+test('Pump token identity or unrelated prose containing Mayhem does not select 2B mode', async () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const harness = quickBuyHarness({
+    chain: 'sol', address: PUMP_ADDRESS, identityText: 'MAYHEM Mayhem Token',
+    unrelatedText: 'Mayhem community update',
+    launchpadHref: `https://pump.fun/coin/${PUMP_ADDRESS}`
+  });
+  const orders = [];
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=sol', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(GMGN.discoverTokenCards((order) => orders.push(order)), 1);
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders[0].token.launchMode, '');
+    assert.equal(orders[0].quote.totalSupply, 1_000_000_000);
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+  }
+});
+
 test('quick-buy ignores a launchpad link exposing another card address', async () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
   const harness = quickBuyHarness({
@@ -873,6 +957,84 @@ test('detail quote fields are read only from the verified BaseInfoBar scope', as
     assert.equal(current?.quote.priceUsd, 2);
     assert.equal(current?.quote.marketCapUsd, 2000);
     assert.equal(current?.quote.liquidityUsd, 500);
+    assert.equal(current?.quote.totalSupply, 1_000);
+    assert.equal(current?.quote.supplySource, 'GMGN_RATIO');
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+  }
+});
+
+test('verified Pump detail scope carries Mayhem mode into the 2B launchpad rule', async () => {
+  const original = { document: global.document, location: global.location };
+  const detail = detailDocument({
+    chain: 'sol', address: PUMP_ADDRESS, priceUsd: 0, marketCapUsd: 10_000, liquidityUsd: 500,
+    launchpad: 'pump', launchMode: 'Mayhem'
+  });
+  global.document = detail.document;
+  global.location = { href: `https://gmgn.ai/sol/token/${PUMP_ADDRESS}`, origin: 'https://gmgn.ai' };
+  try {
+    const current = await GMGN.readCurrentToken();
+    assert.equal(current?.token.launchpad, 'Pump.fun');
+    assert.equal(current?.token.launchMode, 'Mayhem');
+    assert.equal(current?.quote.totalSupply, 2_000_000_000);
+    assert.equal(current?.quote.supplySource, 'LAUNCHPAD_RULE');
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+  }
+});
+
+test('Pump detail mode requires a dedicated badge and a same-address launchpad link', async () => {
+  const original = { document: global.document, location: global.location };
+  global.location = { href: `https://gmgn.ai/sol/token/${PUMP_ADDRESS}`, origin: 'https://gmgn.ai' };
+  try {
+    const namedMayhem = detailDocument({
+      chain: 'sol', address: PUMP_ADDRESS, priceUsd: 0, marketCapUsd: 10_000, liquidityUsd: 500,
+      launchpad: 'pump', tokenName: 'Mayhem Token'
+    });
+    global.document = namedMayhem.document;
+    const named = await GMGN.readCurrentToken();
+    assert.equal(named?.token.launchMode, '');
+    assert.equal(named?.quote.totalSupply, 1_000_000_000);
+
+    const wrongAddress = detailDocument({
+      chain: 'sol', address: PUMP_ADDRESS, priceUsd: 0, marketCapUsd: 10_000, liquidityUsd: 500,
+      launchpad: 'pump', launchMode: 'Mayhem', launchpadAddress: SOL_ADDRESS
+    });
+    global.document = wrongAddress.document;
+    const mismatched = await GMGN.readCurrentToken();
+    assert.equal(mismatched?.token.launchpad, '');
+    assert.equal(mismatched?.token.launchMode, '');
+
+    const spoofHost = detailDocument({
+      chain: 'sol', address: PUMP_ADDRESS, priceUsd: 0, marketCapUsd: 10_000, liquidityUsd: 500,
+      launchpad: 'pump', launchMode: 'Mayhem',
+      launchpadHref: `https://example.invalid/pump.fun/token/${PUMP_ADDRESS}`
+    });
+    global.document = spoofHost.document;
+    const spoofed = await GMGN.readCurrentToken();
+    assert.equal(spoofed?.token.launchpad, '');
+    assert.equal(spoofed?.token.launchMode, '');
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+  }
+});
+
+test('detail launchpad metadata rejects a same-address noncanonical hostname', async () => {
+  const original = { document: global.document, location: global.location };
+  const detail = detailDocument({
+    chain: 'base', address: EVM_ADDRESS, priceUsd: 0, marketCapUsd: 200_000, liquidityUsd: 500,
+    launchpad: 'clanker', launchpadHref: `https://notclanker.invalid/token/${EVM_ADDRESS}`
+  });
+  global.document = detail.document;
+  global.location = { href: `https://gmgn.ai/base/token/${EVM_ADDRESS}`, origin: 'https://gmgn.ai' };
+  try {
+    const current = await GMGN.readCurrentToken();
+    assert.equal(current?.token.launchpad, '');
+    assert.equal(current?.quote.totalSupply, 0);
+    assert.equal(current?.quote.supplySource, '');
   } finally {
     global.document = original.document;
     global.location = original.location;

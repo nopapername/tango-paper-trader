@@ -88,7 +88,7 @@ test('unknown caller supply is discarded before ratio and verified Base launchpa
       quote: {
         priceUsd: 0.000002, marketCapUsd: 200_000, totalSupply: 1, supplySource,
         nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000,
-        source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+        source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
       },
       amountNative: 1
     }, paperSettings, 1_000);
@@ -108,6 +108,24 @@ test('unknown caller supply is discarded before ratio and verified Base launchpa
   }, paperSettings, 1_000);
   assert.equal(fallback.position.totalSupply, 100_000_000_000);
   assert.equal(fallback.position.supplySource, 'LAUNCHPAD_RULE');
+});
+
+test('an incoherent declared GMGN ratio falls through to the verified launchpad rule', () => {
+  const result = Engine.executeBuy(state(), {
+    token: baseToken,
+    quote: {
+      priceUsd: 2, marketCapUsd: 200_000,
+      totalSupply: 100_000, supplySource: 'GMGN_RATIO',
+      priceObservedAt: 2_000, marketCapObservedAt: 1_000,
+      priceSource: 'GMGN_NETWORK', marketCapSource: 'GMGN_NETWORK',
+      nativePriceUsd: 2_000, observedAt: 2_000, nativePriceObservedAt: 2_000,
+      source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+    },
+    amountNative: 1
+  }, paperSettings, 2_000);
+
+  assert.equal(result.position.totalSupply, 100_000_000_000);
+  assert.equal(result.position.supplySource, 'LAUNCHPAD_RULE');
 });
 
 test('implicit legacy Pump provenance cannot launder an unrelated caller total supply', () => {
@@ -433,6 +451,45 @@ test('fallback-supply provisional calibration preserves equity on the later exac
   assert.ok(Math.abs(Engine.markPosition(position).valueNative - equityBefore) < 1e-12);
   assert.equal(position.provisional, false);
   assert.equal(position.needsCalibration, false);
+});
+
+test('late verified Pump Mayhem mode neutrally corrects same-rank launchpad supply', () => {
+  const pumpToken = {
+    ...token, address: 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP',
+    launchpad: 'Pump.fun', launchMode: '', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+  };
+  const standardQuote = {
+    priceUsd: 10_000 / 1_000_000_000, marketCapUsd: 10_000,
+    totalSupply: 1_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    launchpad: 'Pump.fun', launchMode: '', nativePriceUsd: 100,
+    observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_TRENCH', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: pumpToken, quote: standardQuote, amountNative: 1
+  }, settings, 1_000);
+  const key = Engine.positionKey('sol', pumpToken.address);
+  const before = bought.position;
+  const beforeMark = Engine.markPosition(before);
+  const beforeAccount = structuredClone(bought.state.accounts.sol);
+  const mayhemToken = { ...pumpToken, launchMode: 'Mayhem' };
+  const updated = Engine.updatePositionQuote(bought.state, mayhemToken, {
+    ...standardQuote,
+    priceUsd: 10_000 / 2_000_000_000,
+    totalSupply: 2_000_000_000,
+    launchMode: 'Mayhem', observedAt: 2_000, nativePriceObservedAt: 2_000
+  }, 2_000);
+  const after = updated.positions[key];
+
+  assert.equal(after.totalSupply, 2_000_000_000);
+  assert.equal(after.supplySource, 'LAUNCHPAD_RULE');
+  assert.equal(after.launchMode, 'Mayhem');
+  assert.equal(after.quantity, before.quantity * 2);
+  assert.equal(after.costBasisNative, before.costBasisNative);
+  assert.equal(after.realizedPnlNative, before.realizedPnlNative);
+  assert.equal(Engine.markPosition(after).valueNative, beforeMark.valueNative);
+  assert.deepEqual(updated.accounts.sol, beforeAccount);
+  assert.equal(updated.trades.length, bought.state.trades.length);
 });
 
 test('first trusted quote calibrates a synthetic position without creating PnL', () => {
@@ -1412,7 +1469,11 @@ test('ratio-derived PRICE positions remain strict-importable across trusted Pump
     metadataVerified: true,
     metadataSource: 'GMGN_TRENCH'
   };
-  const priceBuy = Engine.executeBuy(state(), { token: pumpToken, quote, amountNative: 1 }, settings, 1_000);
+  const priceBuy = Engine.executeBuy(state(), {
+    token: pumpToken,
+    quote: { ...quote, source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE' },
+    amountNative: 1
+  }, settings, 1_000);
   const marketCapQuote = {
     priceUsd: 0, marketCapUsd: 4_000_000, nativePriceUsd: 100,
     observedAt: 2_000, nativePriceObservedAt: 2_000,

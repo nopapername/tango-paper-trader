@@ -19,7 +19,7 @@ const START = "  start().catch((error) => console.error('[Tango Paper Trader]', 
 const EXPOSE = `  global.__contentTest = {
     runtime, start, performRefresh, refresh, performQuoteTick, handleRouteChange, handleQuickBuy, buy, sell, sellPosition, sellBreakeven,
     ensureTokenQuote, ensureNativePrice, freshNativePrice, rememberNativePrice,
-    resolvePaperTradeQuote, paperExecutableQuote,
+    resolvePaperTradeQuote, positionCalibrationUpgrade, queueImmediateCurrentCalibration, paperExecutableQuote,
     requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
     commitCloseAll, savePresetEdits, bindEvents, bindDraggable, render, renderHeaderAccountSummary,
     detailRouteToken, acceptedTokenObservation, renderPnlCalendar,
@@ -33,8 +33,9 @@ const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
 function deferred() {
   let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 function defaultState() {
@@ -88,7 +89,8 @@ test('Engine fallback without Supply accepts only contextually valid explicit tr
       name: 'ratio', token: base,
       quote: {
         ...marketCapQuote, priceUsd: 0.000002,
-        totalSupply: 100_000_000_000, supplySource: 'GMGN_RATIO'
+        totalSupply: 100_000_000_000, supplySource: 'GMGN_RATIO',
+        valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
       },
       expectedSource: 'GMGN_RATIO', expectedSupply: 100_000_000_000
     },
@@ -1049,6 +1051,29 @@ test('resolver quotes preserve valid GMGN exact, ratio, and verified launchpad-r
   }
 });
 
+test('resolver does not promote a newer price and older market cap into a GMGN ratio', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  loaded.api.runtime.gmgnQuotes.set(`base:${ADDRESS_A}`, GMGNQuotes.mergeObservation(null, {
+    chain: 'base', address: ADDRESS_A, marketCapUsd: 200_000,
+    observedAt: loaded.clock.now - 1_000, source: 'GMGN_NETWORK'
+  }));
+
+  const quote = loaded.api.resolvePaperTradeQuote(
+    {
+      chain: 'base', address: ADDRESS_A, symbol: 'CLANK', launchpad: 'Clanker',
+      metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+    },
+    {
+      chain: 'base', address: ADDRESS_A, priceUsd: 2,
+      observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }
+  );
+
+  assert.equal(quote.supplySource, 'LAUNCHPAD_RULE');
+  assert.equal(quote.totalSupply, 100_000_000_000);
+});
+
 test('a newer DEX price keeps an older exact GMGN supply and its field provenance', () => {
   const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
   loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
@@ -1128,7 +1153,88 @@ test('startup persists the GMGN route chain as the extension selected chain', as
   assert.equal(loaded.api.runtime.settings.selectedChain, 'base');
 });
 
-test('SPA chain persistence ignores a stale completion from an earlier route', async () => {
+test('route-chain persistence uses one worker and drains only the latest desired chain', async () => {
+  const gates = [];
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=eth',
+    patchSettings(patch) {
+      const gate = deferred();
+      gates.push({ chain: patch.selectedChain, gate });
+      return gate.promise;
+    }
+  });
+
+  loaded.context.location.href = 'https://gmgn.ai/?chain=base';
+  loaded.api.handleRouteChange();
+  loaded.context.location.href = `https://gmgn.ai/base/token/${ADDRESS_A}`;
+  loaded.api.handleRouteChange();
+  loaded.context.location.href = 'https://gmgn.ai/?chain=bsc';
+  loaded.api.handleRouteChange();
+
+  assert.deepEqual(gates.map(({ chain }) => chain), ['base']);
+
+  gates[0].gate.resolve({ ...defaultSettings(), selectedChain: 'base' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(gates.map(({ chain }) => chain), ['base', 'bsc']);
+
+  gates[1].gate.resolve({ ...defaultSettings(), selectedChain: 'bsc' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(loaded.api.runtime.settings.selectedChain, 'bsc');
+});
+
+test('failed route-chain persistence stays dirty and retries on the next route opportunity', async () => {
+  let attempt = 0;
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=eth',
+    patchSettings: async (patch) => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('write failed');
+      return { ...defaultSettings(), ...patch };
+    }
+  });
+
+  loaded.context.location.href = 'https://gmgn.ai/?chain=base';
+  loaded.api.handleRouteChange();
+  await new Promise((resolve) => setImmediate(resolve));
+  loaded.context.location.href = `https://gmgn.ai/base/token/${ADDRESS_A}`;
+  loaded.api.handleRouteChange();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(attempt, 2);
+  assert.equal(loaded.api.runtime.settings.selectedChain, 'base');
+});
+
+test('a newer route opportunity drains after the older in-flight persistence fails', async () => {
+  const baseGate = deferred();
+  const bscGate = deferred();
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=eth',
+    patchSettings(patch) {
+      return patch.selectedChain === 'base' ? baseGate.promise : bscGate.promise;
+    }
+  });
+
+  loaded.context.location.href = 'https://gmgn.ai/?chain=base';
+  loaded.api.handleRouteChange();
+  loaded.context.location.href = 'https://gmgn.ai/?chain=bsc';
+  loaded.api.handleRouteChange();
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'base' }
+  ]);
+
+  baseGate.reject(new Error('base write failed'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'base' },
+    { selectedChain: 'bsc' }
+  ]);
+
+  bscGate.resolve({ ...defaultSettings(), selectedChain: 'bsc' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(loaded.api.runtime.settings.selectedChain, 'bsc');
+});
+
+test('SPA chain persistence serializes an earlier write before applying the latest route', async () => {
   const writes = new Map();
   const loaded = loadContent({
     href: 'https://gmgn.ai/?chain=eth',
@@ -1146,13 +1252,16 @@ test('SPA chain persistence ignores a stale completion from an earlier route', a
   loaded.api.handleRouteChange();
 
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'base' }
+  ]);
+
+  writes.get('base').resolve({ ...defaultSettings(), selectedChain: 'base' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
     { selectedChain: 'base' },
     { selectedChain: 'bsc' }
   ]);
-
   writes.get('bsc').resolve({ ...defaultSettings(), selectedChain: 'bsc' });
-  await new Promise((resolve) => setImmediate(resolve));
-  writes.get('base').resolve({ ...defaultSettings(), selectedChain: 'base' });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(loaded.api.runtime.settings.selectedChain, 'bsc');
@@ -1183,16 +1292,47 @@ test('serialized GMGN chain persistence ends on the current chain after an away-
   loaded.api.handleRouteChange();
 
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'base' }
+  ]);
+  baseGate.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
     { selectedChain: 'base' },
     { selectedChain: 'eth' }
   ]);
-
-  baseGate.resolve();
   await Promise.all(writes);
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(persisted.selectedChain, 'eth');
   assert.equal(loaded.api.runtime.settings.selectedChain, 'eth');
+});
+
+test('route chain reconciliation persists A after the URL returns A before its route handler runs', async () => {
+  const baseGate = deferred();
+  let persisted = defaultSettings();
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=eth',
+    patchSettings: async (patch) => {
+      if (patch.selectedChain === 'base') await baseGate.promise;
+      persisted = mergeSettingsPatch(persisted, patch);
+      return persisted;
+    }
+  });
+
+  loaded.context.location.href = 'https://gmgn.ai/?chain=base';
+  loaded.api.handleRouteChange();
+  loaded.context.location.href = 'https://gmgn.ai/?chain=eth';
+
+  baseGate.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  loaded.api.handleRouteChange();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'base' },
+    { selectedChain: 'eth' }
+  ]);
+  assert.equal(persisted.selectedChain, 'eth');
 });
 
 test('every valid detail route renders a placeholder panel without chart or market data', async () => {
@@ -1275,6 +1415,111 @@ test('an exact GMGN supply immediately calibrates the current provisional positi
   assert.match(loaded.api.renderPanel(), /50 OLD/);
 });
 
+test('a duplicate in-flight calibration target does not schedule a redundant retry', async () => {
+  const key = `base:${ADDRESS_A}`;
+  const writeGate = deferred();
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    updatePositionQuote(_token, _quote, state) {
+      return writeGate.promise.then(() => state);
+    }
+  });
+  loaded.api.runtime.current = {
+    token: {
+      chain: 'base', address: ADDRESS_A, symbol: 'CLANK', launchpad: 'Clanker',
+      metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+    },
+    quote: {
+      chain: 'base', address: ADDRESS_A, marketCapUsd: 200_000,
+      totalSupply: 1_000_000_000, totalSupplySource: 'GMGN_NETWORK_EXACT',
+      observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }
+  };
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'base', tokenAddress: ADDRESS_A, symbol: 'CLANK', name: 'Clank', quantity: 100,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 0.000002,
+    lastPriceUsd: 0.000002, lastMarketCapUsd: 200_000, lastNativePriceUsd: 1,
+    quoteObservedAt: loaded.clock.now - 1, totalSupply: 100_000_000_000,
+    marketCapDivisor: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    launchpad: 'Clanker', needsCalibration: true, provisional: true,
+    syntheticNativePrice: true, provisionalNativePrice: true, openedAt: 1
+  };
+
+  const firstRequest = loaded.api.queueImmediateCurrentCalibration();
+  loaded.api.queueImmediateCurrentCalibration();
+  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
+
+  writeGate.resolve();
+  await firstRequest;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
+});
+
+test('a stronger native observation during supply calibration reruns immediately after settlement', async () => {
+  const key = `base:${ADDRESS_A}`;
+  const firstWrite = deferred();
+  const secondWrite = deferred();
+  let writeIndex = 0;
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    updatePositionQuote(_token, quote, state) {
+      writeIndex += 1;
+      const next = structuredClone(state);
+      if (writeIndex === 1) {
+        next.positions[key] = {
+          ...next.positions[key], totalSupply: quote.totalSupply, supplySource: quote.supplySource,
+          marketCapDivisor: quote.totalSupply, syntheticNativePrice: true,
+          provisionalNativePrice: true, needsCalibration: true
+        };
+        return firstWrite.promise.then(() => next);
+      }
+      next.positions[key] = {
+        ...next.positions[key], lastNativePriceUsd: quote.nativePriceUsd,
+        syntheticNativePrice: false, provisionalNativePrice: false, needsCalibration: false
+      };
+      return secondWrite.promise.then(() => next);
+    }
+  });
+  loaded.api.runtime.current = {
+    token: {
+      chain: 'base', address: ADDRESS_A, symbol: 'CLANK', launchpad: 'Clanker',
+      metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+    },
+    quote: {
+      chain: 'base', address: ADDRESS_A, marketCapUsd: 200_000,
+      totalSupply: 1_000_000_000, totalSupplySource: 'GMGN_NETWORK_EXACT',
+      observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }
+  };
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'base', tokenAddress: ADDRESS_A, symbol: 'CLANK', name: 'Clank', quantity: 100,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 0.000002,
+    lastPriceUsd: 0.000002, lastMarketCapUsd: 200_000, lastNativePriceUsd: 1,
+    quoteObservedAt: loaded.clock.now - 1, totalSupply: 100_000_000_000,
+    marketCapDivisor: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    launchpad: 'Clanker', needsCalibration: true, provisional: true,
+    syntheticNativePrice: true, provisionalNativePrice: true, openedAt: 1
+  };
+
+  const firstRequest = loaded.api.queueImmediateCurrentCalibration();
+  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES',
+    prices: [{ symbol: 'ETH', priceUsd: 2_000, observedAt: loaded.clock.now }]
+  });
+  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
+
+  firstWrite.resolve();
+  await firstRequest;
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 2);
+  assert.equal(loaded.calls.updatePositionQuotes[1].quote.nativePriceUsd, 2_000);
+  assert.equal(loaded.calls.updatePositionQuotes[1].quote.syntheticNativePrice, false);
+  secondWrite.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
 test('same-quality exact supply observations do not bypass the ordinary mark throttle', async () => {
   const key = `base:${ADDRESS_A}`;
   const loaded = loadContent({
@@ -1306,6 +1551,31 @@ test('same-quality exact supply observations do not bypass the ordinary mark thr
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+});
+
+test('late verified Pump Mayhem mode is a same-rank immediate calibration upgrade', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/sol/token/${SOL_ADDRESS}` });
+  loaded.api.rememberNativePrice('sol', 100, loaded.clock.now);
+  const position = {
+    chain: 'sol', tokenAddress: SOL_ADDRESS, symbol: 'PUMP', name: 'Pump', quantity: 1_000_000,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 0.00001,
+    lastPriceUsd: 0.00001, lastMarketCapUsd: 10_000, lastNativePriceUsd: 100,
+    quoteObservedAt: loaded.clock.now - 1, totalSupply: 1_000_000_000,
+    marketCapDivisor: 1_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    launchpad: 'Pump.fun', launchMode: '', needsCalibration: true, provisional: false, openedAt: 1
+  };
+  const quote = loaded.api.resolvePaperTradeQuote({
+    chain: 'sol', address: SOL_ADDRESS, symbol: 'PUMP', launchpad: 'Pump.fun', launchMode: 'Mayhem',
+    metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+  }, {
+    chain: 'sol', address: SOL_ADDRESS, marketCapUsd: 10_000,
+    observedAt: loaded.clock.now, source: 'GMGN'
+  }, { position });
+
+  assert.equal(quote.totalSupply, 2_000_000_000);
+  assert.equal(quote.supplySource, 'LAUNCHPAD_RULE');
+  assert.equal(quote.launchMode, 'Mayhem');
+  assert.equal(loaded.api.positionCalibrationUpgrade(position, quote), true);
 });
 
 test('supply-only observations preserve synthetic price dimensions until real observations arrive', async () => {

@@ -14,8 +14,45 @@ test('exact GMGN supply wins over ratio and launchpad rules', () => {
 
 test('same-observation market cap and price infer supply before registry fallback', () => {
   assert.deepEqual(Supply.resolve({
-    chain: 'base', launchpad: 'clanker', priceUsd: 0.000002, marketCapUsd: 2_000
+    chain: 'base', address: '0x1111111111111111111111111111111111111111',
+    launchpad: 'clanker', priceUsd: 0.000002, marketCapUsd: 2_000,
+    observedAt: 123, source: 'GMGN_NETWORK'
   }), { totalSupply: 1_000_000_000, source: 'GMGN_RATIO', confidence: 'inferred' });
+});
+
+test('incoherent valuation fields fall through to the verified launchpad rule', () => {
+  assert.deepEqual(Supply.resolve({
+    chain: 'base', address: '0x1111111111111111111111111111111111111111',
+    launchpad: 'clanker', priceUsd: 2, marketCapUsd: 200_000,
+    priceObservedAt: 200, marketCapObservedAt: 100,
+    priceSource: 'GMGN_NETWORK', marketCapSource: 'GMGN_NETWORK'
+  }), { totalSupply: 100_000_000_000, source: 'LAUNCHPAD_RULE', confidence: 'fallback' });
+});
+
+test('a declared GMGN ratio still requires one identity-bound factual observation', () => {
+  const coherent = {
+    chain: 'base', address: '0x1111111111111111111111111111111111111111',
+    launchpad: 'clanker', priceUsd: 2, marketCapUsd: 200_000,
+    totalSupply: 100_000, supplySource: 'GMGN_RATIO',
+    priceObservedAt: 200, marketCapObservedAt: 200,
+    priceSource: 'GMGN_NETWORK', marketCapSource: 'GMGN_NETWORK',
+    priceProvenance: 'OBSERVED_PRICE'
+  };
+  assert.deepEqual(Supply.resolve(coherent), {
+    totalSupply: 100_000, source: 'GMGN_RATIO', confidence: 'inferred'
+  });
+
+  for (const mismatch of [
+    { priceObservedAt: 201 },
+    { priceObservationId: 'price-1', marketCapObservationId: 'cap-1' },
+    { marketCapSource: 'DEXSCREENER' },
+    { priceProvenance: 'MARKET_CAP_DERIVED' },
+    { address: 'not-an-address' }
+  ]) {
+    assert.deepEqual(Supply.resolve({ ...coherent, ...mismatch }), {
+      totalSupply: 100_000_000_000, source: 'LAUNCHPAD_RULE', confidence: 'fallback'
+    });
+  }
 });
 
 test('launchpad and mode rules distinguish 1B, 2B, and 100B supplies', () => {

@@ -123,8 +123,40 @@
       marketCapUsd: Number(context?.marketCapUsd ?? context?.lastMarketCapUsd
         ?? context?.averageEntryMarketCap ?? 0),
       priceUsd: Number(context?.priceUsd ?? context?.observedPriceUsd
-        ?? context?.lastPriceUsd ?? context?.averageEntryPriceUsd ?? 0)
+        ?? context?.lastPriceUsd ?? context?.averageEntryPriceUsd ?? 0),
+      observationId: context?.observationId,
+      priceObservationId: context?.priceObservationId,
+      marketCapObservationId: context?.marketCapObservationId,
+      priceObservedAt: context?.priceObservedAt || context?.originalObservedAt || context?.observedAt,
+      marketCapObservedAt: context?.marketCapObservedAt || context?.originalObservedAt || context?.observedAt,
+      priceSource: context?.priceSource || context?.source,
+      marketCapSource: context?.marketCapSource || context?.source,
+      priceProvenance: context?.priceProvenance
     };
+  }
+
+  function coherentRatioObservation(context) {
+    if (typeof Tango.Supply?.coherentRatioObservation === 'function') {
+      return Tango.Supply.coherentRatioObservation(context);
+    }
+    const chain = Tango.Chains?.get?.(context?.chain);
+    const address = context?.address || context?.tokenAddress;
+    if (!chain || !Tango.Chains.validateAddress(chain.id, address)) return false;
+    const observation = supplyObservation(context);
+    const priceSource = String(observation.priceSource || '').toUpperCase();
+    const marketCapSource = String(observation.marketCapSource || '').toUpperCase();
+    const factualSource = (source) => !source.includes('SYNTHETIC') && !source.includes('DERIVED')
+      && (source === 'DEXSCREENER' || source === 'GMGN' || source.startsWith('GMGN_'));
+    const priceProvenance = String(observation.priceProvenance || '').toUpperCase();
+    if (!factualSource(priceSource) || priceSource !== marketCapSource
+      || priceProvenance.includes('SYNTHETIC') || priceProvenance.includes('DERIVED')) return false;
+    const commonId = String(observation.observationId || '');
+    const priceId = String(observation.priceObservationId || commonId);
+    const marketCapId = String(observation.marketCapObservationId || commonId);
+    if (priceId || marketCapId) return Boolean(priceId && priceId === marketCapId);
+    const priceTime = Number(observation.priceObservedAt || 0);
+    const marketCapTime = Number(observation.marketCapObservedAt || 0);
+    return Number.isSafeInteger(priceTime) && priceTime > 0 && priceTime === marketCapTime;
   }
 
   function ratioSupplyMatches(context, totalSupply) {
@@ -150,7 +182,7 @@
 
   function fallbackResolvedSupply(context) {
     const { marketCapUsd, priceUsd } = supplyObservation(context);
-    if (positiveFinite(marketCapUsd) && positiveFinite(priceUsd)) {
+    if (coherentRatioObservation(context)) {
       const inferred = marketCapUsd / priceUsd;
       if (positiveFinite(inferred) && inferred >= 1_000 && inferred <= 1e18) {
         return { totalSupply: inferred, source: 'GMGN_RATIO' };
@@ -178,8 +210,8 @@
     }
     const observation = {
       chain: context?.chain,
-      marketCapUsd: supplyObservation(context).marketCapUsd,
-      priceUsd: supplyObservation(context).priceUsd,
+      address: context?.address || context?.tokenAddress,
+      ...supplyObservation(context),
       launchpad: context?.launchpad,
       launchMode: context?.launchMode
     };
@@ -204,7 +236,21 @@
 
   function quoteSupply(quote, context) {
     const declaredSource = String(quote?.supplySource || '');
-    const trustedDeclaredSource = isTrustedSupplySource(declaredSource);
+    const declaredRatioCoherent = declaredSource !== 'GMGN_RATIO' || coherentRatioObservation({
+      chain: context?.chain,
+      address: context?.address || context?.tokenAddress,
+      marketCapUsd: quote?.marketCapUsd,
+      priceUsd: quote?.priceUsd,
+      observationId: quote?.observationId,
+      priceObservationId: quote?.priceObservationId,
+      marketCapObservationId: quote?.marketCapObservationId,
+      priceObservedAt: quote?.priceObservedAt || quote?.originalObservedAt || quote?.observedAt,
+      marketCapObservedAt: quote?.marketCapObservedAt || quote?.originalObservedAt || quote?.observedAt,
+      priceSource: quote?.priceSource || quote?.source,
+      marketCapSource: quote?.marketCapSource || quote?.source,
+      priceProvenance: quote?.priceProvenance
+    });
+    const trustedDeclaredSource = isTrustedSupplySource(declaredSource) && declaredRatioCoherent;
     const legacyPump = coherentPumpIdentity(context)
       && quote?.valuationMode === 'MARKET_CAP'
       && String(quote?.source || '').toUpperCase() === 'GMGN_TRENCH_MC'
@@ -219,6 +265,14 @@
       totalSupply: declaredSupply,
       marketCapUsd: quote?.marketCapUsd,
       priceUsd: quote?.priceUsd,
+      observationId: quote?.observationId,
+      priceObservationId: quote?.priceObservationId,
+      marketCapObservationId: quote?.marketCapObservationId,
+      priceObservedAt: quote?.priceObservedAt || quote?.originalObservedAt || quote?.observedAt,
+      marketCapObservedAt: quote?.marketCapObservedAt || quote?.originalObservedAt || quote?.observedAt,
+      priceSource: quote?.priceSource || quote?.source,
+      marketCapSource: quote?.marketCapSource || quote?.source,
+      priceProvenance: quote?.priceProvenance,
       supplySource: trustedDeclaredSource ? declaredSource : (legacyPump ? 'LEGACY_PUMP_RULE' : ''),
       marketCapDivisor: quote?.marketCapDivisor,
       marketCapProvenance: legacyPump ? MARKET_CAP_PROVENANCE : undefined,
@@ -398,15 +452,26 @@
     const newPriceUsd = effectiveQuotePrice(quote, existing, existing);
     const newNativePriceUsd = Number(quote.nativePriceUsd || existing.lastNativePriceUsd);
     const oldSupply = trustedSupply(existing);
-    const observedSupply = quoteSupply(quote, existing);
+    const verifiedMetadata = trustedMetadataSource(token);
+    const observedLaunchpad = verifiedMetadata
+      ? token.launchpad || existing.launchpad : existing.launchpad;
+    const observedLaunchMode = verifiedMetadata
+      ? token.launchMode || existing.launchMode : existing.launchMode;
+    const observedSupply = quoteSupply(quote, {
+      ...existing, launchpad: observedLaunchpad, launchMode: observedLaunchMode
+    });
     const priceCorrection = existing.provisionalTokenPrice === true
       && quote.syntheticTokenPrice !== true;
     const nativeCorrection = existing.provisionalNativePrice === true
       && quote.syntheticNativePrice !== true;
+    const sameRankModeCorrection = oldSupply?.source === 'LAUNCHPAD_RULE'
+      && observedSupply?.source === 'LAUNCHPAD_RULE'
+      && !String(existing.launchMode || '').trim()
+      && Boolean(String(observedLaunchMode || '').trim());
     const supplyCorrection = usesMarketCapValuation(existing)
       && Boolean(oldSupply)
       && Boolean(observedSupply)
-      && supplyRank(observedSupply.source) > supplyRank(oldSupply.source)
+      && (supplyRank(observedSupply.source) > supplyRank(oldSupply.source) || sameRankModeCorrection)
       && Math.abs(observedSupply.totalSupply - oldSupply.totalSupply)
         > oldSupply.totalSupply * Number.EPSILON;
     const reason = calibrationReason(priceCorrection, nativeCorrection, supplyCorrection);
@@ -449,6 +514,8 @@
       lastPriceProvenance: priceProvenanceForQuote(quote, existing),
       totalSupply: Number(selectedSupply?.totalSupply || existing.totalSupply || existing.marketCapDivisor || 0),
       supplySource: String(selectedSupply?.source || existing.supplySource || ''),
+      launchpad: String(observedLaunchpad || existing.launchpad || ''),
+      launchMode: String(observedLaunchMode || existing.launchMode || ''),
       marketCapDivisor: Number(selectedSupply?.totalSupply || existing.marketCapDivisor || 0),
       needsCalibration,
       provisional: nextProvisionalTokenPrice || nextProvisionalNativePrice,
