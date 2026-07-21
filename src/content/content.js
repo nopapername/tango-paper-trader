@@ -749,12 +749,16 @@
         && Tango.Chains.normalizeAddress(chain.id, value) === normalizedAddress);
     const candidateIsTrusted = candidateIdentityMatches
       && (candidateSource === 'DEXSCREENER' || candidateSource.startsWith('GMGN'));
+    const candidateSyntheticTokenPrice = candidateIsTrusted && candidate?.syntheticTokenPrice === true;
+    const candidateProvisionalSupply = candidateSyntheticTokenPrice
+      && Number(candidate?.provisionalSupply) === 1_000_000_000 ? 1_000_000_000 : 0;
     const candidateSupplySource = String(candidate?.supplySource || candidate?.totalSupplySource || '');
     const candidateExactSupply = candidateIsTrusted && candidateSource.startsWith('GMGN')
       && ['GMGN_EXACT', 'GMGN_NETWORK_EXACT'].includes(candidateSupplySource)
       && Number.isFinite(Number(candidate?.totalSupply)) && Number(candidate.totalSupply) > 0;
     const boundCandidate = candidateIsTrusted ? {
       ...(candidate || {}), chain: chain.id, address: normalizedAddress,
+      priceUsd: candidateSyntheticTokenPrice ? 0 : Number(candidate?.priceUsd || 0),
       totalSupply: candidateExactSupply ? Number(candidate.totalSupply) : 0,
       totalSupplySource: candidateExactSupply ? 'GMGN_EXACT' : '',
       supplySource: candidateExactSupply ? 'GMGN_EXACT' : ''
@@ -762,6 +766,7 @@
     const merged = exact && boundCandidate
       ? Tango.GMGNQuotes.mergeObservation(exact, boundCandidate)
       : boundCandidate || exact;
+    const mergedHasFactualPrice = Number.isFinite(Number(merged?.priceUsd)) && Number(merged.priceUsd) > 0;
     const positionAddress = position?.tokenAddress || position?.address;
     const boundPosition = position?.chain === chain.id
       && Tango.Chains.validateAddress(chain.id, positionAddress)
@@ -773,8 +778,9 @@
       ...merged,
       marketCapUsd: Number(merged.marketCapUsd) > 0
         ? Number(merged.marketCapUsd) : Number(historicalLocal.marketCapUsd || 0),
-      syntheticTokenPrice: Number(merged.priceUsd) > 0
-        ? false : historicalLocal.syntheticTokenPrice === true,
+      provisionalSupply: !mergedHasFactualPrice && candidateProvisionalSupply,
+      syntheticTokenPrice: mergedHasFactualPrice
+        ? false : candidateSyntheticTokenPrice || historicalLocal.syntheticTokenPrice === true,
       syntheticNativePrice: Number(merged.nativePriceUsd) > 0
         ? false : historicalLocal.syntheticNativePrice === true
     } : historicalLocal;
@@ -814,7 +820,7 @@
       ? safeMarketCapUsd / supply.totalSupply
       : 0;
     const derivedPrice = Number.isFinite(calculatedPrice) && calculatedPrice > 0 ? calculatedPrice : 0;
-    const provisionalSupply = Number(local.provisionalSupply) === 1_000_000_000
+    const provisionalSupply = !supply && Number(local.provisionalSupply) === 1_000_000_000
       ? 1_000_000_000 : 0;
     const provisionalPrice = !safeObservedPrice && !derivedPrice
       && safeMarketCapUsd > 0 && provisionalSupply > 0
@@ -834,6 +840,7 @@
       ...local,
       chain: chain.id,
       address: normalizedAddress,
+      provisionalSupply,
       priceUsd,
       marketCapUsd: safeMarketCapUsd,
       liquidityUsd: Number.isFinite(Number(local.liquidityUsd)) && Number(local.liquidityUsd) > 0

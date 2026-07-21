@@ -913,6 +913,29 @@ test('resolver consumes a provisional 1B divisor without promoting it to trusted
   assert.equal(quote.supplySource, '');
 });
 
+test('cached exact supply wins over a provisional card candidate after cache merge', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  loaded.api.runtime.gmgnQuotes.set(`base:${ADDRESS_A}`, GMGNQuotes.mergeObservation(null, {
+    chain: 'base', address: ADDRESS_A, marketCapUsd: 200_000, totalSupply: 100_000_000_000,
+    totalSupplySource: 'GMGN_NETWORK_EXACT', observedAt: loaded.clock.now - 1_000, source: 'GMGN_NETWORK'
+  }));
+  const quote = loaded.api.resolvePaperTradeQuote(
+    { chain: 'base', address: ADDRESS_A, symbol: 'CACHED' },
+    {
+      chain: 'base', address: ADDRESS_A, marketCapUsd: 5_000,
+      priceUsd: 5_000 / 1_000_000_000, provisionalSupply: 1_000_000_000,
+      provisional: true, syntheticTokenPrice: true, observedAt: loaded.clock.now, source: 'GMGN_TRENCH'
+    }
+  );
+  assert.equal(quote.priceUsd, 5_000 / 100_000_000_000);
+  assert.equal(quote.totalSupply, 100_000_000_000);
+  assert.equal(quote.supplySource, 'GMGN_EXACT');
+  assert.equal(quote.syntheticTokenPrice, false);
+  assert.equal(quote.provisionalSupply, 0);
+  assert.equal(quote.provisional, false);
+});
+
 test('resolver preserves a launchpad rule for a market-cap-derived card price', () => {
   const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
   loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
