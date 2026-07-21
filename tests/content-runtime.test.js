@@ -418,6 +418,35 @@ test('OFF-to-ON settings refresh restores the detail route content lifecycle onc
   assert.equal(loaded.pageMessages.filter((message) => message.type === 'REQUEST_QUOTES').length, 1);
 });
 
+test('authoritative refresh reconciles an unchanged active GMGN route exactly once', async () => {
+  const writeGate = deferred();
+  const authoritativeSettings = { ...defaultSettings(), selectedChain: 'base' };
+  const loaded = loadContent({
+    href: `https://gmgn.ai/eth/token/${ADDRESS_A}`,
+    getAll: () => ({ state: defaultState(), settings: authoritativeSettings }),
+    patchSettings: () => writeGate.promise
+  });
+  Object.assign(loaded.api.runtime.selectedChainPersistence, {
+    desiredChain: 'eth', persistedChain: 'eth', dirty: false, opportunity: 1
+  });
+
+  await loaded.api.performRefresh();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'eth' }
+  ]);
+  assert.equal(loaded.api.runtime.selectedChainPersistence.persistedChain, 'base');
+
+  writeGate.resolve({ ...authoritativeSettings, selectedChain: 'eth' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'eth' }
+  ]);
+  assert.equal(loaded.api.runtime.selectedChainPersistence.persistedChain, 'eth');
+  assert.equal(loaded.api.runtime.settings.selectedChain, 'eth');
+});
+
 test('content preset edits patch only active-chain buys and global sells', async () => {
   const loaded = loadContent();
   loaded.api.runtime.presetEditing = 'all';
@@ -1058,6 +1087,34 @@ test('resolver does not promote a newer price and older market cap into a GMGN r
     chain: 'base', address: ADDRESS_A, marketCapUsd: 200_000,
     observedAt: loaded.clock.now - 1_000, source: 'GMGN_NETWORK'
   }));
+
+  const quote = loaded.api.resolvePaperTradeQuote(
+    {
+      chain: 'base', address: ADDRESS_A, symbol: 'CLANK', launchpad: 'Clanker',
+      metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+    },
+    {
+      chain: 'base', address: ADDRESS_A, priceUsd: 2,
+      observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }
+  );
+
+  assert.equal(quote.supplySource, 'LAUNCHPAD_RULE');
+  assert.equal(quote.totalSupply, 100_000_000_000);
+});
+
+test('resolver excludes an old position cap from a new factual price ratio', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  const oldObservedAt = loaded.clock.now - 1_000;
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  loaded.api.runtime.state.positions[`base:${ADDRESS_A}`] = {
+    chain: 'base', tokenAddress: ADDRESS_A, symbol: 'CLANK', name: 'Clank', quantity: 100,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 1,
+    lastPriceUsd: 1, lastMarketCapUsd: 200_000, lastNativePriceUsd: 2_000,
+    quoteObservedAt: oldObservedAt, valuationMode: 'PRICE',
+    totalSupply: 100_000_000_000, marketCapDivisor: 100_000_000_000,
+    supplySource: 'LAUNCHPAD_RULE', launchpad: 'Clanker', openedAt: 1
+  };
 
   const quote = loaded.api.resolvePaperTradeQuote(
     {

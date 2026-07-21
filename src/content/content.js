@@ -366,6 +366,10 @@
     const data = await Tango.Store.getAll();
     runtime.state = data.state;
     runtime.settings = data.settings;
+    const persistence = runtime.selectedChainPersistence;
+    persistence.persistedChain = runtime.settings.selectedChain;
+    persistence.dirty = persistence.desiredChain !== null
+      && persistence.desiredChain !== persistence.persistedChain;
     const becameEnabled = previousSettings?.enabled === false
       && runtime.settings.enabled === true
       && runtime.state.initialized === true;
@@ -378,9 +382,9 @@
     );
     if (!chain || !runtime.settings.enabled || !runtime.state.initialized || !runtime.settings.showListQuickBuy || quickBuyConfigChanged) Tango.GMGN.clearQuickBuy();
     if (!runtime.settings.enabled) runtime.current = null;
+    if (becameEnabled) ensureRouteTokenContext();
+    if (chain && runtime.settings.enabled) syncSelectedChainFromRoute();
     if (becameEnabled) {
-      ensureRouteTokenContext();
-      syncSelectedChainFromRoute(captureRoute());
       window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
       syncQuickBuyButtons();
       tickQuote();
@@ -812,11 +816,19 @@
       && Tango.Chains.normalizeAddress(chain.id, positionAddress) === normalizedAddress
       ? position : null;
     const historicalLocal = positionQuote(boundPosition) || {};
+    const mergedMarketCapUsd = Number(merged?.marketCapUsd);
+    const mergedHasFactualMarketCap = Number.isFinite(mergedMarketCapUsd) && mergedMarketCapUsd > 0;
+    const historicalMarketCapUsd = Number(historicalLocal.marketCapUsd);
+    const usesHistoricalMarketCap = Boolean(merged) && !mergedHasFactualMarketCap
+      && Number.isFinite(historicalMarketCapUsd) && historicalMarketCapUsd > 0;
     const local = merged ? {
       ...historicalLocal,
       ...merged,
-      marketCapUsd: Number(merged.marketCapUsd) > 0
-        ? Number(merged.marketCapUsd) : Number(historicalLocal.marketCapUsd || 0),
+      marketCapUsd: mergedHasFactualMarketCap ? mergedMarketCapUsd : Number(historicalLocal.marketCapUsd || 0),
+      ...(usesHistoricalMarketCap ? {
+        marketCapObservedAt: Number(historicalLocal.observedAt || 0),
+        marketCapSource: 'TANGO_POSITION_HISTORY'
+      } : {}),
       provisionalSupply: !mergedHasFactualPrice && candidateProvisionalSupply,
       syntheticTokenPrice: mergedHasFactualPrice
         ? false : candidateSyntheticTokenPrice || historicalLocal.syntheticTokenPrice === true,
