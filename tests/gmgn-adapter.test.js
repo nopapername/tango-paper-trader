@@ -39,10 +39,12 @@ function quickBuyHarness({
   };
   card.parentElement = column;
   let replacement = null;
+  let slotRect = { height: 24, width: 80 };
+  let nativeRect = { height: 24, width: 80 };
   const nativeControl = {
     isConnected: true, reparented: 0,
     textContent: '0.1 SOL',
-    getBoundingClientRect: () => ({ height: 24 }),
+    getBoundingClientRect: () => ({ ...nativeRect }),
     replaceWith(node) { this.isConnected = false; node.isConnected = true; replacement = node; },
     remove() { this.isConnected = false; }
   };
@@ -57,7 +59,7 @@ function quickBuyHarness({
     },
     closest: () => card,
     contains: (node) => node === card,
-    getBoundingClientRect: () => ({ height: 24, width: 80 }),
+    getBoundingClientRect: () => ({ ...slotRect }),
     appendChild(node) { node.isConnected = true; replacement = node === nativeControl ? null : node; return node; },
     querySelector(selector) {
       if (selector === '.tango-list-quick-buy') return replacement;
@@ -87,8 +89,10 @@ function quickBuyHarness({
     createElement: makeElement
   };
   return {
-    card, slot, document, nativeControl,
+    card, slot, document, nativeControl, classes,
     setVisibleSlots(slots) { visibleSlots = slots; },
+    setSlotRect(rect) { slotRect = { ...slotRect, ...rect }; },
+    setNativeRect(rect) { nativeRect = { ...nativeRect, ...rect }; },
     get replacement() { return replacement; }
   };
 }
@@ -759,6 +763,68 @@ test('quick-buy restoration does not reparent an original control already connec
     global.document = original.document;
     global.location = original.location;
     global.requestAnimationFrame = original.raf;
+  }
+});
+
+test('quick-buy synchronizes four GMGN sizes and reconciled native geometry without actions', () => {
+  const modulePath = require.resolve('../src/adapters/gmgn.js');
+  const original = {
+    document: global.document, location: global.location, raf: global.requestAnimationFrame,
+    ResizeObserver: global.ResizeObserver, gmgn: global.Tango.GMGN
+  };
+  let resizeCallback;
+  class FakeResizeObserver {
+    constructor(callback) { resizeCallback = callback; }
+    observe() {}
+    unobserve() {}
+  }
+  global.ResizeObserver = FakeResizeObserver;
+  delete require.cache[modulePath];
+  const freshGmgn = require(modulePath);
+  const harness = quickBuyHarness();
+  const orders = [];
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=sol', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(freshGmgn.discoverTokenCards((order) => orders.push(order)), 1);
+    const replacement = harness.replacement;
+    const actionId = harness.slot.dataset.tangoActionId;
+    assert.equal(typeof resizeCallback, 'function');
+
+    for (const { height, width, expanded, narrow } of [
+      { height: 24, width: 80, expanded: false, narrow: false },
+      { height: 32, width: 72, expanded: false, narrow: true },
+      { height: 40, width: 80, expanded: true, narrow: false },
+      { height: 48, width: 72, expanded: true, narrow: true }
+    ]) {
+      harness.setSlotRect({ height, width });
+      resizeCallback([{ target: harness.slot }]);
+      assert.equal(replacement.style.height, `${height}px`);
+      assert.equal(harness.classes.has('tango-quick-expanded'), expanded);
+      assert.equal(harness.classes.has('tango-quick-narrow'), narrow);
+      assert.equal(harness.slot.dataset.tangoActionId, actionId);
+    }
+    assert.equal(orders.length, 0);
+
+    harness.setSlotRect({ height: 24, width: 80 });
+    harness.setNativeRect({ height: 32, width: 72 });
+    harness.nativeControl.isConnected = true;
+    assert.equal(freshGmgn.discoverTokenCards((order) => orders.push(order)), 0);
+    assert.equal(harness.replacement, replacement);
+    assert.equal(replacement.style.height, '32px');
+    assert.equal(harness.classes.has('tango-quick-expanded'), false);
+    assert.equal(harness.classes.has('tango-quick-narrow'), true);
+    assert.equal(harness.nativeControl.isConnected, false);
+    assert.equal(harness.slot.dataset.tangoActionId, actionId);
+    assert.equal(orders.length, 0);
+  } finally {
+    delete require.cache[modulePath];
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+    global.ResizeObserver = original.ResizeObserver;
+    global.Tango.GMGN = original.gmgn;
   }
 });
 

@@ -5,7 +5,7 @@
   const trenchColumns = new WeakMap();
   let lastVerifiedDetail = null;
   const quickBuyResizeObserver = typeof global.ResizeObserver === 'function'
-    ? new global.ResizeObserver((entries) => entries.forEach((entry) => updateQuickBuySizeClass(entry.target)))
+    ? new global.ResizeObserver((entries) => entries.forEach((entry) => syncQuickBuyGeometry(entry.target)))
     : null;
 
   if (typeof window !== 'undefined') {
@@ -655,10 +655,18 @@
     };
   }
 
-  function updateQuickBuySizeClass(slot) {
-    const rect = slot.getBoundingClientRect();
-    slot.classList.toggle('tango-quick-expanded', rect.height >= 36);
-    slot.classList.toggle('tango-quick-narrow', rect.width <= 72);
+  function syncQuickBuyGeometry(slot, nativeControl = null) {
+    const replacement = slot?.__tangoReplacementQuickBuy
+      || slot?.querySelector?.('.tango-list-quick-buy');
+    if (!slot || !replacement) return;
+    const slotRect = slot.getBoundingClientRect();
+    const nativeRect = nativeControl?.getBoundingClientRect?.() || {};
+    const height = Number(nativeRect.height || slotRect.height || 0);
+    const width = Number(nativeRect.width || slotRect.width || 0);
+    if (height > 0) replacement.style.height = `${Math.max(22, Math.round(height))}px`;
+    replacement.style.width = '100%';
+    slot.classList.toggle('tango-quick-expanded', height >= 36);
+    slot.classList.toggle('tango-quick-narrow', width > 0 && width <= 72);
   }
 
   function selectQuickBuyAmount(columnValue, nativeText, previousAmount, defaultAmount) {
@@ -705,7 +713,7 @@
     const style = document.createElement('style');
     style.id = 'tango-trench-buy-style';
     style.textContent = `
-      .BuyButton-continer.tango-native-buy-overridden { isolation: isolate; min-width: 58px; position: relative !important; }
+      .BuyButton-continer.tango-native-buy-overridden { isolation: isolate; min-width: 0; position: relative !important; }
       .tango-list-quick-buy {
         align-items: center;
         appearance: none; background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 10%, transparent);
@@ -799,6 +807,7 @@
         slot.dataset.tangoTokenAddress === address && Number(slot.dataset.tangoAmountSol) === amountSol &&
         slot.dataset.tangoPaperLabel === paperLabel) {
         // GMGN can reconcile the original control back into the slot. Remove it again fail-closed.
+        syncQuickBuyGeometry(slot, nativeControl);
         if (nativeControl) nativeControl.remove();
         continue;
       }
@@ -816,8 +825,6 @@
       replacement.dataset.tangoActionId = actionId;
       replacement.title = `Tango Paper Buy ${amountSol} ${chainDefinition.nativeSymbol}`;
       replacement.setAttribute('aria-label', `Tango Paper Buy ${amountSol} ${chainDefinition.nativeSymbol}`);
-      const nativeRect = nativeControl.getBoundingClientRect();
-      replacement.style.height = `${Math.max(22, Math.round(nativeRect.height || 0))}px`;
       const hint = document.createElement('span');
       hint.className = 'tango-paper-hint';
       hint.textContent = paperLabel;
@@ -868,9 +875,10 @@
       slot.__tangoQuickBuyHandler = handleClick;
       quickBuyActions.set(actionId, handleClick);
       trackedQuickBuySlots.add(slot);
+      syncQuickBuyGeometry(slot, nativeControl);
       nativeControl.replaceWith(replacement);
       if (quickBuyResizeObserver) quickBuyResizeObserver.observe(slot);
-      else requestAnimationFrame(() => updateQuickBuySizeClass(slot));
+      else requestAnimationFrame(() => syncQuickBuyGeometry(slot));
       injected += 1;
     }
     return injected;
