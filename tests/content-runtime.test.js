@@ -1131,6 +1131,44 @@ test('resolver excludes an old position cap from a new factual price ratio', () 
   assert.equal(quote.totalSupply, 100_000_000_000);
 });
 
+test('position-only history cannot fabricate a GMGN ratio or trigger immediate calibration', () => {
+  const key = `base:${ADDRESS_A}`;
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  const token = {
+    chain: 'base', address: ADDRESS_A, symbol: 'CLANK', launchpad: 'Clanker',
+    metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+  };
+  const position = {
+    chain: 'base', tokenAddress: ADDRESS_A, symbol: 'CLANK', name: 'Clank', quantity: 100,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 1,
+    lastPriceUsd: 1, lastMarketCapUsd: 200_000, lastNativePriceUsd: 2_000,
+    quoteObservedAt: loaded.clock.now - 1, valuationMode: 'PRICE',
+    totalSupply: 100_000_000_000, marketCapDivisor: 100_000_000_000,
+    supplySource: 'LAUNCHPAD_RULE', launchpad: 'Clanker',
+    needsCalibration: true, provisional: false, openedAt: 1
+  };
+  loaded.api.runtime.current = { token, quote: {} };
+  loaded.api.runtime.state.positions[key] = position;
+
+  assert.equal(loaded.api.runtime.gmgnQuotes.size, 0);
+  const quote = loaded.api.resolvePaperTradeQuote(token, {}, { position });
+  const calibrationQueued = loaded.api.queueImmediateCurrentCalibration() !== null;
+
+  assert.deepEqual({
+    supplySource: quote.supplySource,
+    totalSupply: quote.totalSupply,
+    calibrationUpgrade: loaded.api.positionCalibrationUpgrade(position, quote),
+    calibrationQueued,
+    calibrationWrites: loaded.calls.updatePositionQuotes.length
+  }, {
+    supplySource: 'LAUNCHPAD_RULE',
+    totalSupply: 100_000_000_000,
+    calibrationUpgrade: false,
+    calibrationQueued: false,
+    calibrationWrites: 0
+  });
+});
+
 test('a newer DEX price keeps an older exact GMGN supply and its field provenance', () => {
   const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
   loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);

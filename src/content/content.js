@@ -707,7 +707,7 @@
       priceUsd: Number(position.lastPriceUsd || position.averageEntryPriceUsd || 0),
       marketCapUsd: Number(position.lastMarketCapUsd || 0),
       liquidityUsd: 0,
-      source: 'GMGN_LAST_KNOWN',
+      source: 'TANGO_POSITION_HISTORY',
       observedAt,
       valuationMode: 'PRICE',
       nativePriceUsd: Number(position.lastNativePriceUsd || 0),
