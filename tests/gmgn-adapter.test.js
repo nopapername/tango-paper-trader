@@ -11,15 +11,20 @@ const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
 const EVM_ADDRESS_2 = '0x2222222222222222222222222222222222222222';
 const PUMP_ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 
-function quickBuyHarness({ chain = 'sol', address = PUMP_ADDRESS, marketCap = '$10K' } = {}) {
+function quickBuyHarness({
+  chain = 'sol', address = PUMP_ADDRESS, marketCap = '$10K', launchpadHref = ''
+} = {}) {
   const href = chain === 'sol'
     ? `https://pump.fun/coin/${address}`
     : `https://gmgn.ai/${chain}/token/${address}`;
+  const launchpadLink = launchpadHref
+    ? { href: launchpadHref, getAttribute: () => launchpadHref }
+    : null;
   const card = {
     isConnected: true,
     innerText: `${address}\nTEST Test Token\nMC\n${marketCap}`,
     getAttribute: (name) => name === 'href' ? href : null,
-    querySelectorAll: () => [],
+    querySelectorAll: (selector) => selector === 'a[href]' && launchpadLink ? [launchpadLink] : [],
     firstElementChild: { querySelector: () => null }
   };
   const column = {
@@ -421,8 +426,20 @@ test('EVM card metadata normalizes address case', () => {
     firstElementChild: { querySelector: () => null }
   };
   assert.deepEqual(GMGN._verifiedCardMetadata(card, address, 'eth'), {
-    symbol: 'RIGHT', name: 'Right Token', logoUrl: ''
+    symbol: 'RIGHT', name: 'Right Token', logoUrl: '', launchpad: '', launchMode: ''
   });
+});
+
+test('card launchpad matches a differently cased EVM address link', () => {
+  const address = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
+  const card = {
+    querySelectorAll(selector) {
+      return selector === 'a[href]'
+        ? [{ href: 'https://four.meme/token/' + address.toLowerCase(), getAttribute: () => null }]
+        : [];
+    }
+  };
+  assert.equal(GMGN._cardLaunchpad(card, address, 'bsc'), 'Four.meme');
 });
 
 test('nested Solana card links require a case-sensitive visible address match', () => {
@@ -541,7 +558,7 @@ test('quick-buy does not reuse a cached market cap after the live card value dis
   }
 });
 
-test('quick-buy keeps synthetic market-cap valuation Solana-only while every EVM trench gets a safe button', async () => {
+test('quick-buy preserves trusted Pump market-cap valuation and gives supplyless EVM trenches a provisional valuation', async () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
   global.requestAnimationFrame = (callback) => callback();
   try {
@@ -567,8 +584,13 @@ test('quick-buy keeps synthetic market-cap valuation Solana-only while every EVM
       await evm.slot.__tangoQuickBuyHandler();
       assert.equal(evmOrders.length, 1, chain);
       assert.equal(evmOrders[0].quote.source, 'GMGN_TRENCH');
-      assert.equal(evmOrders[0].quote.priceUsd, 0);
+      assert.equal(evmOrders[0].quote.priceUsd, 0.00001);
       assert.equal(evmOrders[0].quote.marketCapUsd, 10_000);
+      assert.equal(evmOrders[0].quote.totalSupply, 0);
+      assert.equal(evmOrders[0].quote.supplySource, '');
+      assert.equal(evmOrders[0].quote.provisionalSupply, 1_000_000_000);
+      assert.equal(evmOrders[0].quote.syntheticTokenPrice, true);
+      assert.equal(evmOrders[0].quote.provisional, true);
       assert.ok(evmOrders[0].quote.observedAt > 0);
     }
   } finally {
@@ -578,7 +600,84 @@ test('quick-buy keeps synthetic market-cap valuation Solana-only while every EVM
   }
 });
 
-test('verified non-Pump Solana cards receive Tango quick-buy without a synthetic market-cap quote', async () => {
+test('quick-buy binds launchpad supply rules to the same GMGN card address', async () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const cases = [
+    ['bsc', 'https://four.meme/token/' + EVM_ADDRESS, 'Four.meme', 1_000_000_000],
+    ['bsc', 'https://flap.sh/bnb/' + EVM_ADDRESS, 'Flap', 1_000_000_000],
+    ['base', 'https://clanker.world/clanker/' + EVM_ADDRESS, 'Clanker', 100_000_000_000],
+    ['xlayer', 'https://bow.fun/token/' + EVM_ADDRESS, 'Bow.fun', 1_000_000_000]
+  ];
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    for (const [chain, launchpadHref, expectedLaunchpad, expectedSupply] of cases) {
+      const harness = quickBuyHarness({ chain, address: EVM_ADDRESS, launchpadHref });
+      const orders = [];
+      global.document = harness.document;
+      global.location = { href: `https://gmgn.ai/?chain=${chain}`, origin: 'https://gmgn.ai' };
+      assert.equal(GMGN.discoverTokenCards((order) => orders.push(order)), 1, expectedLaunchpad);
+      await harness.slot.__tangoQuickBuyHandler();
+      assert.equal(orders.length, 1, expectedLaunchpad);
+      const [order] = orders;
+      assert.equal(order.token.launchpad, expectedLaunchpad);
+      assert.equal(order.quote.totalSupply, expectedSupply);
+      assert.equal(order.quote.supplySource, 'LAUNCHPAD_RULE');
+      assert.equal(order.quote.priceUsd, order.quote.marketCapUsd / expectedSupply);
+    }
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+  }
+});
+
+test('quick-buy ignores a launchpad link exposing another card address', async () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const harness = quickBuyHarness({
+    chain: 'bsc', address: EVM_ADDRESS, launchpadHref: 'https://four.meme/token/' + EVM_ADDRESS_2
+  });
+  const orders = [];
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=bsc', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(GMGN.discoverTokenCards((order) => orders.push(order)), 1);
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders.length, 1);
+    assert.equal(orders[0].token.launchpad, '');
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+  }
+});
+
+test('quick-buy emits a provisional 1B valuation for an unknown platform card', async () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS, marketCap: '$5K' });
+  const orders = [];
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=bsc', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(GMGN.discoverTokenCards((order) => orders.push(order)), 1);
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders.length, 1);
+    const [order] = orders;
+    assert.equal(order.quote.priceUsd, 5_000 / 1_000_000_000);
+    assert.equal(order.quote.totalSupply, 0);
+    assert.equal(order.quote.supplySource, '');
+    assert.equal(order.quote.provisionalSupply, 1_000_000_000);
+    assert.equal(order.quote.syntheticTokenPrice, true);
+    assert.equal(order.quote.provisional, true);
+  } finally {
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+  }
+});
+
+test('verified non-Pump Solana cards receive Tango quick-buy with a provisional market-cap quote', async () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
   global.location = { href: 'https://gmgn.ai/?chain=sol', origin: 'https://gmgn.ai' };
   global.requestAnimationFrame = (callback) => callback();
@@ -590,9 +689,14 @@ test('verified non-Pump Solana cards receive Tango quick-buy without a synthetic
     assert.ok(nonPump.replacement);
     await nonPump.slot.__tangoQuickBuyHandler();
     assert.equal(nonPumpOrders.length, 1);
-    assert.equal(nonPumpOrders[0].quote.priceUsd, 0);
+    assert.equal(nonPumpOrders[0].quote.priceUsd, 0.00001);
     assert.notEqual(nonPumpOrders[0].quote.source, 'GMGN_TRENCH_MC');
     assert.notEqual(nonPumpOrders[0].quote.valuationMode, 'MARKET_CAP');
+    assert.equal(nonPumpOrders[0].quote.totalSupply, 0);
+    assert.equal(nonPumpOrders[0].quote.supplySource, '');
+    assert.equal(nonPumpOrders[0].quote.provisionalSupply, 1_000_000_000);
+    assert.equal(nonPumpOrders[0].quote.syntheticTokenPrice, true);
+    assert.equal(nonPumpOrders[0].quote.provisional, true);
 
     const missingMarketCap = quickBuyHarness({ marketCap: '' });
     global.document = missingMarketCap.document;

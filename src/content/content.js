@@ -782,6 +782,7 @@
     const safeMarketCapUsd = Number.isFinite(marketCapUsd) && marketCapUsd > 0 ? marketCapUsd : 0;
     const observedPrice = Number(local.priceUsd);
     const safeObservedPrice = local.syntheticTokenPrice !== true
+      && String(local.priceProvenance || '').toUpperCase() !== 'MARKET_CAP_DERIVED'
       && Number.isFinite(observedPrice) && observedPrice > 0 ? observedPrice : 0;
     const legacyPumpSupply = chain.id === 'sol' && /pump$/i.test(normalizedAddress)
       && boundPosition?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1'
@@ -813,11 +814,16 @@
       ? safeMarketCapUsd / supply.totalSupply
       : 0;
     const derivedPrice = Number.isFinite(calculatedPrice) && calculatedPrice > 0 ? calculatedPrice : 0;
+    const provisionalSupply = Number(local.provisionalSupply) === 1_000_000_000
+      ? 1_000_000_000 : 0;
+    const provisionalPrice = !safeObservedPrice && !derivedPrice
+      && safeMarketCapUsd > 0 && provisionalSupply > 0
+      ? safeMarketCapUsd / provisionalSupply : 0;
     const historicalValue = Number(boundPosition?.lastPriceUsd || boundPosition?.averageEntryPriceUsd || 0);
     const historicalPrice = boundPosition?.syntheticTokenPrice !== true
       && boundPosition?.provisionalTokenPrice !== true
       && Number.isFinite(historicalValue) && historicalValue > 0 ? historicalValue : 0;
-    const priceUsd = safeObservedPrice || derivedPrice || historicalPrice || 1;
+    const priceUsd = safeObservedPrice || derivedPrice || provisionalPrice || historicalPrice || 1;
     const native = lastKnownNativeObservation(chain.id, local, boundPosition);
     const nativePriceUsd = Number(native.price || 1);
     const now = Date.now();
@@ -841,7 +847,7 @@
       valuationMode: derivedPrice > 0 ? 'MARKET_CAP' : 'PRICE',
       priceProvenance: syntheticTokenPrice ? 'SYNTHETIC_PRICE'
         : derivedPrice > 0 ? 'MARKET_CAP_DERIVED' : 'OBSERVED_PRICE',
-      totalSupply: supply ? Number(supply.totalSupply) : undefined,
+      totalSupply: supply ? Number(supply.totalSupply) : 0,
       marketCapDivisor: supply ? Number(supply.totalSupply) : undefined,
       supplySource: supply?.source || '',
       supplyConfidence: supply?.confidence || '',

@@ -895,6 +895,42 @@ test('candidate direct supply with unknown provenance cannot become GMGN exact t
   assert.notEqual(result.position.marketCapDivisor, 7);
 });
 
+test('resolver consumes a provisional 1B divisor without promoting it to trusted supply', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/bsc/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('bsc', 600, loaded.clock.now);
+  const quote = loaded.api.resolvePaperTradeQuote(
+    { chain: 'bsc', address: ADDRESS_A, symbol: 'PROVISIONAL' },
+    {
+      chain: 'bsc', address: ADDRESS_A, marketCapUsd: 5_000,
+      provisionalSupply: 1_000_000_000, provisional: true, syntheticTokenPrice: true,
+      observedAt: loaded.clock.now, source: 'GMGN_TRENCH'
+    }
+  );
+  assert.equal(quote.priceUsd, 5_000 / 1_000_000_000);
+  assert.equal(quote.syntheticTokenPrice, true);
+  assert.equal(quote.provisional, true);
+  assert.equal(quote.totalSupply, 0);
+  assert.equal(quote.supplySource, '');
+});
+
+test('resolver preserves a launchpad rule for a market-cap-derived card price', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  const quote = loaded.api.resolvePaperTradeQuote(
+    { chain: 'base', address: ADDRESS_A, symbol: 'CLANK', launchpad: 'Clanker' },
+    {
+      chain: 'base', address: ADDRESS_A, marketCapUsd: 200_000,
+      priceUsd: 200_000 / 100_000_000_000,
+      totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+      priceProvenance: 'MARKET_CAP_DERIVED', observedAt: loaded.clock.now, source: 'GMGN_TRENCH'
+    }
+  );
+  assert.equal(quote.priceUsd, 200_000 / 100_000_000_000);
+  assert.equal(quote.totalSupply, 100_000_000_000);
+  assert.equal(quote.supplySource, 'LAUNCHPAD_RULE');
+  assert.equal(quote.priceProvenance, 'MARKET_CAP_DERIVED');
+});
+
 test('resolver quotes preserve valid GMGN exact, ratio, and verified launchpad-rule supply', () => {
   const cases = [];
 

@@ -16,6 +16,16 @@
   }
 
   const SUBSCRIPT_DIGITS = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
+  const CARD_LAUNCHPADS = Object.freeze([
+    { pattern: /(?:^|\.)four\.meme$/i, name: 'Four.meme' },
+    { pattern: /(?:^|\.)flap\.sh$/i, name: 'Flap' },
+    { pattern: /(?:^|\.)pump\.fun$/i, name: 'Pump.fun' },
+    { pattern: /(?:^|\.)zora\.co$/i, name: 'Zora' },
+    { pattern: /bankr/i, name: 'Bankr' },
+    { pattern: /clanker/i, name: 'Clanker' },
+    { pattern: /(?:^|\.)dyor/i, name: 'DYOR' },
+    { pattern: /(?:^|\.)bow\.fun$/i, name: 'Bow.fun' }
+  ]);
 
   function chainFromUrl(url = global.location?.href || '') {
     return Tango.Chains?.fromUrl?.(url)?.id || null;
@@ -541,7 +551,29 @@
     if (!chain || !Tango.Chains.validateAddress(chain.id, address)) return null;
     const identity = cardTokenIdentity(card, address, chain.id);
     if (!identity) return null;
-    return { ...identity, logoUrl: cardTokenLogo(card) };
+    return {
+      ...identity, logoUrl: cardTokenLogo(card),
+      launchpad: cardLaunchpad(card, address, chain.id), launchMode: ''
+    };
+  }
+
+  function cardLaunchpad(card, address, chain) {
+    const normalizedAddress = Tango.Chains.normalizeAddress(chain, address);
+    for (const link of card?.querySelectorAll?.('a[href]') || []) {
+      let parsed;
+      try { parsed = new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin); }
+      catch { continue; }
+      const match = CARD_LAUNCHPADS.find((entry) => entry.pattern.test(parsed.hostname));
+      if (!match) continue;
+      const exposed = [...parsed.pathname.split('/').filter(Boolean)].reverse()
+        .find((part) => {
+          try { return Tango.Chains.validateAddress(chain, decodeURIComponent(part)); }
+          catch { return false; }
+        });
+      if (exposed && Tango.Chains.normalizeAddress(chain, decodeURIComponent(exposed)) !== normalizedAddress) continue;
+      return match.name;
+    }
+    return '';
   }
 
   function cardTokenLogo(card) {
@@ -605,14 +637,20 @@
     const supply = Tango.Supply?.resolve?.({
       chain, launchpad: token.launchpad, launchMode: token.launchMode, marketCapUsd, priceUsd: 0
     }) || null;
-    const marketCapDerived = Boolean(supply) && marketCapUsd > 0;
+    const provisionalSupply = !supply && marketCapUsd > 0 ? 1_000_000_000 : 0;
+    const valuationSupply = Number(supply?.totalSupply || provisionalSupply || 0);
+    const priceUsd = valuationSupply > 0 ? marketCapUsd / valuationSupply : 0;
     return {
-      priceUsd: marketCapDerived ? marketCapUsd / supply.totalSupply : 0,
+      priceUsd,
       marketCapUsd, liquidityUsd: 0, nativePriceUsd: 0,
       totalSupply: Number(supply?.totalSupply || 0), supplySource: supply?.source || '',
-      valuationMode: marketCapDerived ? 'MARKET_CAP' : 'PRICE',
-      priceProvenance: marketCapDerived ? 'MARKET_CAP_DERIVED' : '',
-      ...(marketCapDerived ? { marketCapDivisor: supply.totalSupply } : {}),
+      provisionalSupply,
+      provisional: provisionalSupply > 0,
+      syntheticTokenPrice: provisionalSupply > 0,
+      valuationMode: supply ? 'MARKET_CAP' : 'PRICE',
+      priceProvenance: provisionalSupply > 0 ? 'SYNTHETIC_PRICE'
+        : (supply ? 'MARKET_CAP_DERIVED' : ''),
+      ...(supply ? { marketCapDivisor: supply.totalSupply } : {}),
       source: 'GMGN_TRENCH', observedAt: marketCapUsd > 0 ? Date.now() : 0
     };
   }
@@ -655,6 +693,7 @@
       found.set(normalized, {
         chain, address: normalized,
         symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
+        launchpad: metadata.launchpad, launchMode: metadata.launchMode,
         metadataVerified: true, metadataSource: 'GMGN_TRENCH'
       });
     }
@@ -873,7 +912,7 @@
     _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,
     _cardIdentityFromText: cardIdentityFromText, _addressHintMatches: addressHintMatches,
     _cardTokenLogo: cardTokenLogo, _cardTokenHref: cardTokenHref,
-    _verifiedCardMetadata: verifiedCardMetadata, _detailTokenIdentity: detailTokenIdentity,
+    _cardLaunchpad: cardLaunchpad, _verifiedCardMetadata: verifiedCardMetadata, _detailTokenIdentity: detailTokenIdentity,
     _findTokenDetailScope: findTokenDetailScope, _tokenLogo: tokenLogo,
     _resolveCurrentTokenRead: resolveCurrentTokenRead, _needsCurrentTokenRead: needsCurrentTokenRead,
     _selectQuickBuyAmount: selectQuickBuyAmount,
