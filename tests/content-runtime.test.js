@@ -56,6 +56,7 @@ function defaultSettings() {
   const chain = { buyPresets: [1], networkFeeNative: 0 };
   return {
     enabled: true, showListQuickBuy: true, language: 'en', displayCurrency: 'NATIVE', fastMode: false,
+    selectedChain: 'eth',
     confirmationEnabled: true, platformFeeBps: 0, slippageBps: 0, soundEnabled: false,
     barCollapsed: false, panelCollapsed: false, panelPosition: null,
     chains: Object.fromEntries(Chains.all().map(({ id }) => [id, { ...chain }])), sellPresets: [100]
@@ -147,6 +148,7 @@ function mergeSettingsPatch(settings, patch) {
 
 function loadContent({
   href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, readCurrentToken, sendMessage, patchSettings,
+  updatePositionQuote,
   requestAnimationFrame = () => 0, timer = setTimeout,
   MutationObserver = class { observe() {} }
 } = {}) {
@@ -155,7 +157,8 @@ function loadContent({
   const pageMessages = [];
   const calls = {
     buy: 0, buyOrders: [], sell: 0, sellOrders: [], metadataBatches: [],
-    closeAll: 0, closeAllOrders: [], patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: []
+    closeAll: 0, closeAllOrders: [], patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: [],
+    updatePositionQuotes: []
   };
   const clock = { now: 1_000_000 };
   class FakeDate extends Date {
@@ -284,7 +287,11 @@ function loadContent({
         calls.closeAllOrders.push({ chain, orders });
         return { state: context.__contentTest.runtime.state, trades: orders.map(() => ({})), failures: [] };
       },
-      async updatePositionQuote() { return defaultState(); },
+      async updatePositionQuote(token, quote) {
+        calls.updatePositionQuotes.push({ token, quote });
+        if (updatePositionQuote) return updatePositionQuote(token, quote, context.__contentTest.runtime.state);
+        return context.__contentTest.runtime.state;
+      },
       async updatePositionMetadata() { return defaultState(); },
       async updatePositionMetadataBatch(tokens) {
         calls.metadataBatches.push(tokens);
@@ -702,14 +709,15 @@ test('mutation observer batches targets and added nodes into one incremental dis
   loaded.context.Tango.GMGN.discoverTokenCards = (...args) => { discoveries.push(args[3]); return 0; };
   await loaded.api.start();
   discoveries.length = 0;
+  const baselineTimerCount = timers.length;
   const targetA = { nodeType: 1 };
   const addedA = { nodeType: 1 };
   const targetB = { nodeType: 1 };
   observerCallback([{ target: targetA, addedNodes: [addedA] }]);
   observerCallback([{ target: targetB, addedNodes: [] }]);
-  assert.equal(timers.length, 1);
+  assert.equal(timers.length, baselineTimerCount + 1);
   assert.equal(discoveries.length, 0);
-  timers[0]();
+  timers[baselineTimerCount]();
   assert.equal(discoveries.length, 1);
   assert.deepEqual(Array.from(discoveries[0]), [targetA, addedA, targetB]);
   assert.equal(loaded.api.runtime.pendingMutationRoots.size, 0);
@@ -1007,6 +1015,162 @@ test('SPA chain change immediately renders the new chain native balance on a tre
   await new Promise((resolve) => setImmediate(resolve));
 });
 
+test('startup persists the GMGN route chain as the extension selected chain', async () => {
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=base',
+    requestAnimationFrame: (callback) => { callback(); return 1; }
+  });
+
+  await loaded.api.start();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [{ selectedChain: 'base' }]);
+  assert.equal(loaded.api.runtime.settings.selectedChain, 'base');
+});
+
+test('SPA chain persistence ignores a stale completion from an earlier route', async () => {
+  const writes = new Map();
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=eth',
+    requestAnimationFrame: (callback) => { callback(); return 1; },
+    patchSettings(patch) {
+      const gate = deferred();
+      writes.set(patch.selectedChain, gate);
+      return gate.promise;
+    }
+  });
+
+  loaded.context.location.href = 'https://gmgn.ai/?chain=base';
+  loaded.api.handleRouteChange();
+  loaded.context.location.href = 'https://gmgn.ai/?chain=bsc';
+  loaded.api.handleRouteChange();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'base' },
+    { selectedChain: 'bsc' }
+  ]);
+
+  writes.get('bsc').resolve({ ...defaultSettings(), selectedChain: 'bsc' });
+  await new Promise((resolve) => setImmediate(resolve));
+  writes.get('base').resolve({ ...defaultSettings(), selectedChain: 'base' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.api.runtime.settings.selectedChain, 'bsc');
+});
+
+test('every valid detail route renders a placeholder panel without chart or market data', async () => {
+  for (const { id: chain } of Chains.all()) {
+    const address = chain === 'sol' ? SOL_ADDRESS : ADDRESS_A;
+    const loaded = loadContent({
+      href: `https://gmgn.ai/${chain}/token/${address}`,
+      readCurrentToken: async () => null,
+      requestAnimationFrame: (callback) => { callback(); return 1; }
+    });
+
+    await loaded.api.start();
+
+    assert.equal(loaded.api.runtime.current?.token.chain, chain, chain);
+    assert.equal(loaded.api.runtime.current?.token.address, address, chain);
+    assert.equal(loaded.api.runtime.current?.token.metadataVerified, false, chain);
+    assert.match(loaded.api.renderPanel(), /tango-panel/, chain);
+  }
+});
+
+test('trench and invalid token routes do not create placeholder detail contexts', async () => {
+  for (const href of [
+    'https://gmgn.ai/?chain=base',
+    'https://gmgn.ai/base/token/not-an-address'
+  ]) {
+    const loaded = loadContent({
+      href,
+      readCurrentToken: async () => null,
+      requestAnimationFrame: (callback) => { callback(); return 1; }
+    });
+
+    await loaded.api.start();
+
+    assert.equal(loaded.api.runtime.current, null, href);
+    assert.equal(loaded.api.renderPanel(), '', href);
+  }
+});
+
+test('an exact GMGN supply immediately calibrates the current provisional position inside the mark throttle', async () => {
+  const key = `base:${ADDRESS_A}`;
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    requestAnimationFrame: (callback) => { callback(); return 1; },
+    updatePositionQuote(_token, _quote, state) {
+      return {
+        ...state,
+        positions: { ...state.positions, [key]: { ...state.positions[key], quantity: 50 } }
+      };
+    }
+  });
+  loaded.api.runtime.current = {
+    token: { chain: 'base', address: ADDRESS_A, symbol: 'OLD', launchpad: 'Clanker' }, quote: {}
+  };
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'base', tokenAddress: ADDRESS_A, symbol: 'OLD', name: 'Old', quantity: 100,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 0.000002,
+    lastPriceUsd: 0.000002, lastMarketCapUsd: 200_000, lastNativePriceUsd: 2_000,
+    quoteObservedAt: loaded.clock.now - 1, totalSupply: 100_000_000_000,
+    marketCapDivisor: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    launchpad: 'Clanker', needsCalibration: true, provisional: true, openedAt: 1
+  };
+  loaded.api.runtime.lastQuoteWriteAt = loaded.clock.now;
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'base', address: ADDRESS_A, symbol: '', name: '',
+      priceUsd: 0, marketCapUsd: 0, totalSupply: 1_000_000_000,
+      totalSupplySource: 'GMGN_NETWORK_EXACT', observedAt: loaded.clock.now,
+      source: 'GMGN_NETWORK'
+    }]
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.totalSupply, 1_000_000_000);
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.supplySource, 'GMGN_EXACT');
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.priceUsd, 0.0002);
+  assert.equal(loaded.api.runtime.state.positions[key].quantity, 50);
+  assert.match(loaded.api.renderPanel(), /50 OLD/);
+});
+
+test('same-quality exact supply observations do not bypass the ordinary mark throttle', async () => {
+  const key = `base:${ADDRESS_A}`;
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    requestAnimationFrame: (callback) => { callback(); return 1; }
+  });
+  loaded.api.runtime.current = {
+    token: { chain: 'base', address: ADDRESS_A, symbol: 'EXACT', launchpad: 'Clanker' }, quote: {}
+  };
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'base', tokenAddress: ADDRESS_A, symbol: 'EXACT', name: 'Exact', quantity: 100,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 0.0002,
+    lastPriceUsd: 0.0002, lastMarketCapUsd: 200_000, lastNativePriceUsd: 2_000,
+    quoteObservedAt: loaded.clock.now - 1, totalSupply: 1_000_000_000,
+    marketCapDivisor: 1_000_000_000, supplySource: 'GMGN_EXACT',
+    launchpad: 'Clanker', needsCalibration: false, provisional: false, openedAt: 1
+  };
+  loaded.api.runtime.lastQuoteWriteAt = loaded.clock.now;
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'base', address: ADDRESS_A, symbol: 'EXACT', name: 'Exact',
+      priceUsd: 0.00021, marketCapUsd: 210_000, totalSupply: 1_000_000_000,
+      totalSupplySource: 'GMGN_NETWORK_EXACT', observedAt: loaded.clock.now,
+      source: 'GMGN_NETWORK'
+    }]
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+});
+
 test('an exact-chain GMGN network quote bootstraps every supported detail panel when DOM metadata is unavailable', () => {
   for (const { id: chain } of Chains.all()) {
     const address = chain === 'sol' ? SOL_ADDRESS : ADDRESS_A;
@@ -1070,7 +1234,7 @@ test('market-cap-only GMGN detail metadata can show the panel but remains non-ex
   ), /invalidQuote/);
 });
 
-test('SPA detail navigation requests a GMGN quote replay after clearing a pre-route network observation', async () => {
+test('SPA detail navigation establishes a placeholder and requests a GMGN quote replay', async () => {
   const loaded = loadContent({
     href: `https://gmgn.ai/eth/token/${ADDRESS_A}`,
     readCurrentToken: async () => null,
@@ -1089,7 +1253,9 @@ test('SPA detail navigation requests a GMGN quote replay after clearing a pre-ro
 
   loaded.api.handleRouteChange();
 
-  assert.equal(loaded.api.runtime.current, null);
+  assert.equal(loaded.api.runtime.current?.token.chain, 'eth');
+  assert.equal(loaded.api.runtime.current?.token.address, ADDRESS_B);
+  assert.equal(loaded.api.runtime.current?.token.metadataVerified, false);
   assert.equal(loaded.api.runtime.gmgnQuotes.size, 0);
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.pageMessages)), [{
     source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES'

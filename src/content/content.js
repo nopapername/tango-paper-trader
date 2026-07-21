@@ -13,7 +13,8 @@
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null,
-    routeEpoch: 0, routeIdentity: null, pendingMutationRoots: new Set()
+    routeEpoch: 0, routeIdentity: null, pendingMutationRoots: new Set(),
+    selectedChainSync: null, positionCalibrationPromises: new Map()
   };
 
   const host = document.createElement('div');
@@ -56,6 +57,30 @@
     if (!Tango.Chains.validateAddress(chain.id, rawAddress)) return null;
     return { chain: chain.id, address: Tango.Chains.normalizeAddress(chain.id, rawAddress) };
   }
+  function routeTokenPlaceholder(url = location.href) {
+    const routeToken = detailRouteToken(url);
+    if (!routeToken) return null;
+    const address = routeToken.address;
+    const symbol = `${address.slice(0, 6)}…${address.slice(-4)}`;
+    return {
+      token: {
+        chain: routeToken.chain, address, symbol, name: symbol, logoUrl: '',
+        metadataVerified: false, metadataSource: ''
+      },
+      quote: {}
+    };
+  }
+  function ensureRouteTokenContext() {
+    const placeholder = routeTokenPlaceholder();
+    if (!placeholder) return null;
+    const current = runtime.current;
+    if (current?.token?.chain === placeholder.token.chain
+      && Tango.Chains.validateAddress(placeholder.token.chain, current.token.address)
+      && Tango.Chains.normalizeAddress(placeholder.token.chain, current.token.address)
+        === placeholder.token.address) return current;
+    runtime.current = placeholder;
+    return runtime.current;
+  }
   function captureRoute() {
     const identity = currentRouteIdentity();
     if (runtime.routeIdentity === null) runtime.routeIdentity = identity;
@@ -69,6 +94,26 @@
   function advanceRouteEpoch() {
     runtime.routeEpoch += 1;
     runtime.routeIdentity = currentRouteIdentity();
+  }
+  function syncSelectedChainFromRoute(routeCapture = captureRoute()) {
+    const chain = activeChain();
+    if (!chain || !runtime.settings || runtime.settings.selectedChain === chain.id) return null;
+    const pending = runtime.selectedChainSync;
+    if (pending?.chain === chain.id && pending?.epoch === routeCapture.epoch) return pending.promise;
+    const expectedChain = chain.id;
+    const promise = Tango.Store.patchSettings({ selectedChain: expectedChain })
+      .then((saved) => {
+        if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== expectedChain) return runtime.settings;
+        if (saved?.selectedChain === expectedChain) runtime.settings = saved;
+        queueRender();
+        return runtime.settings;
+      })
+      .catch(() => runtime.settings)
+      .finally(() => {
+        if (runtime.selectedChainSync?.promise === promise) runtime.selectedChainSync = null;
+      });
+    runtime.selectedChainSync = { chain: expectedChain, epoch: routeCapture.epoch, promise };
+    return promise;
   }
   function activeAccount() {
     const chain = activeChain();
@@ -116,6 +161,7 @@
     runtime.gmgnQuotes.clear();
     runtime.quoteRequests.clear();
     runtime.quoteRetryAt.clear();
+    runtime.positionCalibrationPromises.clear();
     runtime.markerPayloads = new WeakMap();
     syncChartMarkers(true);
     Tango.GMGN.clearQuickBuy();
@@ -197,7 +243,10 @@
       const overflow = runtime.gmgnQuotes.size - 2000;
       [...runtime.gmgnQuotes.keys()].slice(0, overflow).forEach((key) => runtime.gmgnQuotes.delete(key));
     }
-    if (currentQuoteChanged) queueRender();
+    if (currentQuoteChanged) {
+      queueRender();
+      queueImmediateCurrentCalibration();
+    }
     if (metadataUpdates.length) Tango.Store.updatePositionMetadataBatch(metadataUpdates)
       .then((state) => { runtime.state = state; queueRender(); })
       .catch(() => null);
@@ -374,8 +423,15 @@
     }
     ensureNativePrice(runtime.current, routeCapture);
     ensureTokenQuote(runtime.current, routeCapture);
+    const position = currentPosition();
+    const paperQuote = position
+      ? resolvePaperTradeQuote(runtime.current?.token, runtime.current?.quote, { position }) : null;
+    const calibrationUpgrade = positionCalibrationUpgrade(position, paperQuote);
     const executable = executableQuote(runtime.current?.token, runtime.current?.quote);
-    if (routeCaptureIsCurrent(routeCapture) && executable && currentPosition()
+    if (routeCaptureIsCurrent(routeCapture) && position && calibrationUpgrade) {
+      await queueImmediateCurrentCalibration(routeCapture);
+      if (!routeCaptureIsCurrent(routeCapture)) return;
+    } else if (routeCaptureIsCurrent(routeCapture) && executable && position
       && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
       runtime.state = await Tango.Store.updatePositionQuote(runtime.current.token, executable);
       runtime.lastQuoteWriteAt = Date.now();
@@ -698,7 +754,13 @@
       && Tango.Chains.validateAddress(chain.id, positionAddress)
       && Tango.Chains.normalizeAddress(chain.id, positionAddress) === normalizedAddress
       ? position : null;
-    const local = merged || positionQuote(boundPosition) || {};
+    const historicalLocal = positionQuote(boundPosition) || {};
+    const local = merged ? {
+      ...historicalLocal,
+      ...merged,
+      marketCapUsd: Number(merged.marketCapUsd) > 0
+        ? Number(merged.marketCapUsd) : Number(historicalLocal.marketCapUsd || 0)
+    } : historicalLocal;
     const marketCapUsd = Number(local.marketCapUsd);
     const safeMarketCapUsd = Number.isFinite(marketCapUsd) && marketCapUsd > 0 ? marketCapUsd : 0;
     const observedPrice = Number(local.priceUsd);
@@ -768,6 +830,57 @@
       provisional: syntheticTokenPrice || syntheticNativePrice || fallbackSupply,
       paperFallback: true
     };
+  }
+
+  function supplyQuality(source) {
+    return ({
+      LEGACY_PUMP_RULE: 1,
+      LAUNCHPAD_RULE: 1,
+      GMGN_RATIO: 2,
+      GMGN_EXACT: 3,
+      GMGN_NETWORK_EXACT: 3
+    })[String(source || '').toUpperCase()] || 0;
+  }
+
+  function positionCalibrationUpgrade(position, quote) {
+    if (!position || !quote) return false;
+    if (supplyQuality(quote.supplySource) > supplyQuality(position.supplySource)) return true;
+    if (position.syntheticTokenPrice === true && quote.syntheticTokenPrice !== true) return true;
+    if (position.syntheticNativePrice === true && quote.syntheticNativePrice !== true) return true;
+    return (position.needsCalibration === true || position.provisional === true)
+      && position.provisional === true && quote.provisional !== true;
+  }
+
+  function queueImmediateCurrentCalibration(routeCapture = captureRoute()) {
+    if (!routeCaptureIsCurrent(routeCapture)) return null;
+    const chain = activeChain();
+    const context = runtime.current;
+    const position = currentPosition();
+    if (!chain || !context?.token || context.token.chain !== chain.id || !position) return null;
+    const quote = resolvePaperTradeQuote(context.token, context.quote, { position });
+    if (!positionCalibrationUpgrade(position, quote)) return null;
+    const key = Tango.Engine.positionKey(context.token.chain, context.token.address);
+    if (runtime.positionCalibrationPromises.has(key)) return runtime.positionCalibrationPromises.get(key);
+    const token = { ...context.token };
+    const request = Tango.Store.updatePositionQuote(token, quote)
+      .then((state) => {
+        if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== token.chain
+          || runtime.current?.token?.chain !== token.chain
+          || Tango.Chains.normalizeAddress(token.chain, runtime.current.token.address)
+            !== Tango.Chains.normalizeAddress(token.chain, token.address)) return runtime.state;
+        runtime.state = state;
+        runtime.lastQuoteWriteAt = Date.now();
+        queueRender();
+        return runtime.state;
+      })
+      .catch(() => runtime.state)
+      .finally(() => {
+        if (runtime.positionCalibrationPromises.get(key) === request) {
+          runtime.positionCalibrationPromises.delete(key);
+        }
+      });
+    runtime.positionCalibrationPromises.set(key, request);
+    return request;
   }
 
   function requireExecutableQuote(token, candidate) {
@@ -1579,7 +1692,9 @@
       clearChainContext();
       return;
     }
+    ensureRouteTokenContext();
     queueRender();
+    syncSelectedChainFromRoute(captureRoute());
     window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
     syncQuickBuyButtons();
     tickQuote();
@@ -1591,6 +1706,8 @@
     runtime.suppressConfirmForSession = Boolean(session?.suppressed);
     runtime.activeChainId = activeChain()?.id || null;
     await refresh();
+    ensureRouteTokenContext();
+    syncSelectedChainFromRoute(captureRoute());
     await tickQuote();
     runtime.quoteTimer = setInterval(tickQuote, 3000);
     runtime.markerTimer = setInterval(syncChartMarkers, 1000);
