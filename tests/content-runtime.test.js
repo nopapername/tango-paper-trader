@@ -1058,6 +1058,43 @@ test('SPA chain persistence ignores a stale completion from an earlier route', a
   assert.equal(loaded.api.runtime.settings.selectedChain, 'bsc');
 });
 
+test('serialized GMGN chain persistence ends on the current chain after an away-and-back race', async () => {
+  const baseGate = deferred();
+  let persisted = defaultSettings();
+  let queue = Promise.resolve();
+  const writes = [];
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=eth',
+    patchSettings(patch) {
+      const write = queue.then(async () => {
+        if (patch.selectedChain === 'base') await baseGate.promise;
+        persisted = mergeSettingsPatch(persisted, patch);
+        return persisted;
+      });
+      queue = write.catch(() => null);
+      writes.push(write);
+      return write;
+    }
+  });
+
+  loaded.context.location.href = 'https://gmgn.ai/?chain=base';
+  loaded.api.handleRouteChange();
+  loaded.context.location.href = 'https://gmgn.ai/?chain=eth';
+  loaded.api.handleRouteChange();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [
+    { selectedChain: 'base' },
+    { selectedChain: 'eth' }
+  ]);
+
+  baseGate.resolve();
+  await Promise.all(writes);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(persisted.selectedChain, 'eth');
+  assert.equal(loaded.api.runtime.settings.selectedChain, 'eth');
+});
+
 test('every valid detail route renders a placeholder panel without chart or market data', async () => {
   for (const { id: chain } of Chains.all()) {
     const address = chain === 'sol' ? SOL_ADDRESS : ADDRESS_A;
@@ -1169,6 +1206,85 @@ test('same-quality exact supply observations do not bypass the ordinary mark thr
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+});
+
+test('supply-only observations preserve synthetic price dimensions until real observations arrive', async () => {
+  const key = `base:${ADDRESS_A}`;
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    requestAnimationFrame: (callback) => { callback(); return 1; }
+  });
+  loaded.api.runtime.current = {
+    token: { chain: 'base', address: ADDRESS_A, symbol: 'SYN' }, quote: {}
+  };
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'base', tokenAddress: ADDRESS_A, symbol: 'SYN', name: 'Synthetic', quantity: 1,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 1,
+    lastPriceUsd: 1, lastMarketCapUsd: 0, lastNativePriceUsd: 1,
+    quoteObservedAt: loaded.clock.now - 1, totalSupply: 0, marketCapDivisor: 0, supplySource: '',
+    needsCalibration: true, provisional: true, syntheticTokenPrice: true, syntheticNativePrice: true,
+    provisionalTokenPrice: true, provisionalNativePrice: true, openedAt: 1
+  };
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'base', address: ADDRESS_A, totalSupply: 1_000_000_000,
+      totalSupplySource: 'GMGN_NETWORK_EXACT', observedAt: loaded.clock.now,
+      source: 'GMGN_NETWORK'
+    }]
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.syntheticTokenPrice, true);
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.syntheticNativePrice, true);
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.provisional, true);
+
+  loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+  loaded.clock.now += 1;
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'base', address: ADDRESS_A, priceUsd: 2, totalSupply: 1_000_000_000,
+      totalSupplySource: 'GMGN_NETWORK_EXACT', observedAt: loaded.clock.now,
+      source: 'GMGN_NETWORK'
+    }]
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 2);
+  assert.equal(loaded.calls.updatePositionQuotes[1].quote.syntheticTokenPrice, false);
+  assert.equal(loaded.calls.updatePositionQuotes[1].quote.syntheticNativePrice, false);
+});
+
+test('a passive native-price arrival immediately calibrates the current position without timer advancement', async () => {
+  const key = `base:${ADDRESS_A}`;
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    requestAnimationFrame: (callback) => { callback(); return 1; }
+  });
+  loaded.api.runtime.current = {
+    token: { chain: 'base', address: ADDRESS_A, symbol: 'NATIVE' },
+    quote: { chain: 'base', address: ADDRESS_A, priceUsd: 2, source: 'GMGN_NETWORK', observedAt: loaded.clock.now }
+  };
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'base', tokenAddress: ADDRESS_A, symbol: 'NATIVE', name: 'Native', quantity: 1,
+    costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 2,
+    lastPriceUsd: 2, lastMarketCapUsd: 0, lastNativePriceUsd: 1,
+    quoteObservedAt: loaded.clock.now - 1, totalSupply: 0, marketCapDivisor: 0, supplySource: '',
+    needsCalibration: true, provisional: true, syntheticTokenPrice: false, syntheticNativePrice: true,
+    provisionalTokenPrice: false, provisionalNativePrice: true, openedAt: 1
+  };
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES', prices: [{
+      symbol: 'ETH', priceUsd: 2_000, observedAt: loaded.clock.now
+    }]
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.nativePriceUsd, 2_000);
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.syntheticNativePrice, false);
 });
 
 test('an exact-chain GMGN network quote bootstraps every supported detail panel when DOM metadata is unavailable', () => {

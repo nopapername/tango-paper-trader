@@ -97,9 +97,10 @@
   }
   function syncSelectedChainFromRoute(routeCapture = captureRoute()) {
     const chain = activeChain();
-    if (!chain || !runtime.settings || runtime.settings.selectedChain === chain.id) return null;
+    if (!chain || !runtime.settings) return null;
     const pending = runtime.selectedChainSync;
     if (pending?.chain === chain.id && pending?.epoch === routeCapture.epoch) return pending.promise;
+    if (runtime.settings.selectedChain === chain.id && !pending) return null;
     const expectedChain = chain.id;
     const promise = Tango.Store.patchSettings({ selectedChain: expectedChain })
       .then((saved) => {
@@ -181,6 +182,7 @@
           .forEach((chain) => rememberNativePrice(chain.id, price.priceUsd, price.observedAt));
       }
       queueRender();
+      queueImmediateCurrentCalibration();
       return;
     }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
@@ -471,6 +473,7 @@
             runtime.current.quote.nativePriceObservedAt = runtime.nativePriceObservedAt.get(chain.id);
           }
           queueRender();
+          queueImmediateCurrentCalibration(routeCapture);
         }
       })
       .catch(() => null)
@@ -637,6 +640,11 @@
     if (!position) return null;
     const marketCapMode = Tango.Engine.usesMarketCapValuation?.(position) === true;
     const observedAt = Number(position.quoteObservedAt || position.updatedAt || position.openedAt || 0);
+    const syntheticTokenPrice = position.syntheticTokenPrice === true
+      || position.provisionalTokenPrice === true;
+    const syntheticNativePrice = position.syntheticNativePrice === true
+      || position.provisionalNativePrice === true;
+    const provisional = syntheticTokenPrice || syntheticNativePrice || position.provisional === true;
     if (marketCapMode) {
       return {
         priceUsd: 0,
@@ -648,7 +656,8 @@
         marketCapDivisor: Number(position.marketCapDivisor || 0),
         priceProvenance: position.lastPriceProvenance || 'MARKET_CAP_DERIVED',
         nativePriceUsd: Number(position.lastNativePriceUsd || 0),
-        nativePriceObservedAt: observedAt
+        nativePriceObservedAt: observedAt,
+        syntheticTokenPrice, syntheticNativePrice, provisional
       };
     }
     return {
@@ -659,7 +668,8 @@
       observedAt,
       valuationMode: 'PRICE',
       nativePriceUsd: Number(position.lastNativePriceUsd || 0),
-      nativePriceObservedAt: observedAt
+      nativePriceObservedAt: observedAt,
+      syntheticTokenPrice, syntheticNativePrice, provisional
     };
   }
 
@@ -669,21 +679,24 @@
     const observations = [
       {
         price: Number(runtime.nativePrices.get(chainId) || 0),
-        observedAt: Number(runtime.nativePriceObservedAt.get(chainId) || 0)
+        observedAt: Number(runtime.nativePriceObservedAt.get(chainId) || 0), synthetic: false
       },
       {
         price: Number(candidate?.nativePriceUsd || 0),
-        observedAt: Number(candidate?.nativePriceObservedAt || candidate?.observedAt || 0)
+        observedAt: Number(candidate?.nativePriceObservedAt || candidate?.observedAt || 0),
+        synthetic: candidate?.syntheticNativePrice === true
       },
       {
         price: Number(position?.lastNativePriceUsd || 0),
-        observedAt: Number(position?.quoteObservedAt || position?.updatedAt || position?.openedAt || 0)
+        observedAt: Number(position?.quoteObservedAt || position?.updatedAt || position?.openedAt || 0),
+        synthetic: position?.syntheticNativePrice === true || position?.provisionalNativePrice === true
       },
       {
         price: Number(chainPosition?.lastNativePriceUsd || 0),
-        observedAt: Number(chainPosition?.quoteObservedAt || chainPosition?.updatedAt || chainPosition?.openedAt || 0)
+        observedAt: Number(chainPosition?.quoteObservedAt || chainPosition?.updatedAt || chainPosition?.openedAt || 0),
+        synthetic: chainPosition?.syntheticNativePrice === true || chainPosition?.provisionalNativePrice === true
       }
-    ].filter(({ price }) => Number.isFinite(price) && price > 0)
+    ].filter(({ price, synthetic }) => !synthetic && Number.isFinite(price) && price > 0)
       .sort((left, right) => right.observedAt - left.observedAt);
     return observations[0] || { price: 0, observedAt: 0 };
   }
@@ -759,12 +772,17 @@
       ...historicalLocal,
       ...merged,
       marketCapUsd: Number(merged.marketCapUsd) > 0
-        ? Number(merged.marketCapUsd) : Number(historicalLocal.marketCapUsd || 0)
+        ? Number(merged.marketCapUsd) : Number(historicalLocal.marketCapUsd || 0),
+      syntheticTokenPrice: Number(merged.priceUsd) > 0
+        ? false : historicalLocal.syntheticTokenPrice === true,
+      syntheticNativePrice: Number(merged.nativePriceUsd) > 0
+        ? false : historicalLocal.syntheticNativePrice === true
     } : historicalLocal;
     const marketCapUsd = Number(local.marketCapUsd);
     const safeMarketCapUsd = Number.isFinite(marketCapUsd) && marketCapUsd > 0 ? marketCapUsd : 0;
     const observedPrice = Number(local.priceUsd);
-    const safeObservedPrice = Number.isFinite(observedPrice) && observedPrice > 0 ? observedPrice : 0;
+    const safeObservedPrice = local.syntheticTokenPrice !== true
+      && Number.isFinite(observedPrice) && observedPrice > 0 ? observedPrice : 0;
     const legacyPumpSupply = chain.id === 'sol' && /pump$/i.test(normalizedAddress)
       && boundPosition?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1'
       && boundPosition?.valuationMode === 'MARKET_CAP'
@@ -796,7 +814,9 @@
       : 0;
     const derivedPrice = Number.isFinite(calculatedPrice) && calculatedPrice > 0 ? calculatedPrice : 0;
     const historicalValue = Number(boundPosition?.lastPriceUsd || boundPosition?.averageEntryPriceUsd || 0);
-    const historicalPrice = Number.isFinite(historicalValue) && historicalValue > 0 ? historicalValue : 0;
+    const historicalPrice = boundPosition?.syntheticTokenPrice !== true
+      && boundPosition?.provisionalTokenPrice !== true
+      && Number.isFinite(historicalValue) && historicalValue > 0 ? historicalValue : 0;
     const priceUsd = safeObservedPrice || derivedPrice || historicalPrice || 1;
     const native = lastKnownNativeObservation(chain.id, local, boundPosition);
     const nativePriceUsd = Number(native.price || 1);
