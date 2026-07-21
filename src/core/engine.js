@@ -663,10 +663,11 @@
     const percent = Number(order.percent || 0);
     if (order.quantity == null && !finiteBetween(percent, Number.EPSILON, 100)) throw new Error('invalidAmount');
     const existingQuantity = checkedArithmetic(existing.quantity, 'positive');
+    const fullClose = order.quantity == null && percent === 100;
     const requestedQuantity = order.quantity == null
-      ? checkedArithmetic(existingQuantity * percent / 100, 'positive')
+      ? (fullClose ? existingQuantity : checkedArithmetic(existingQuantity * percent / 100, 'positive'))
       : Number(order.quantity);
-    const quantity = Math.min(existingQuantity, requestedQuantity);
+    const quantity = fullClose ? existingQuantity : Math.min(existingQuantity, requestedQuantity);
     if (!finiteBetween(requestedQuantity, Number.EPSILON, Number.MAX_VALUE)
       || !finiteBetween(quantity, Number.EPSILON, Number.MAX_VALUE)) throw new Error('invalidAmount');
 
@@ -693,19 +694,24 @@
     const netBeforeFloor = checkedArithmetic(grossProceedsNative - platformFeeNative - networkFeeNative);
     const netProceedsNative = checkedArithmetic(Math.max(0, netBeforeFloor), 'nonnegative');
     const existingCostBasisNative = checkedArithmetic(existing.costBasisNative, 'nonnegative');
-    const remainingQuantity = checkedArithmetic(Math.max(0, existingQuantity - quantity), 'nonnegative');
+    const remainingQuantity = fullClose
+      ? 0 : checkedArithmetic(Math.max(0, existingQuantity - quantity), 'nonnegative');
     const partialPositionWithCost = existingCostBasisNative > 0 && remainingQuantity > 0;
-    const costShareNative = checkedArithmetic(
-      existingCostBasisNative * quantity / existingQuantity,
-      existingCostBasisNative > 0 ? 'positive' : 'nonnegative'
-    );
+    const costShareNative = fullClose
+      ? existingCostBasisNative
+      : checkedArithmetic(
+        existingCostBasisNative * quantity / existingQuantity,
+        existingCostBasisNative > 0 ? 'positive' : 'nonnegative'
+      );
     if (partialPositionWithCost && costShareNative >= existingCostBasisNative) {
       throw new Error('invalidArithmetic');
     }
-    const remainingCost = checkedArithmetic(
-      Math.max(0, existingCostBasisNative - costShareNative),
-      partialPositionWithCost ? 'positive' : 'nonnegative'
-    );
+    const remainingCost = fullClose
+      ? 0
+      : checkedArithmetic(
+        Math.max(0, existingCostBasisNative - costShareNative),
+        partialPositionWithCost ? 'positive' : 'nonnegative'
+      );
     const realizedPnlNative = checkedArithmetic(netProceedsNative - costShareNative);
     const realizedPnlUsd = checkedArithmetic(realizedPnlNative * nativePriceUsd);
     const quoteMarketCapUsd = checkedArithmetic(order.quote.marketCapUsd ?? 0, 'nonnegative');
@@ -776,7 +782,7 @@
     nextState.accounts[chain].cashBalanceNative = roundedNextCashBalanceNative;
     nextState.accounts[chain].realizedPnlNative = roundedNextAccountRealizedPnlNative;
     nextState.accounts[chain].updatedAt = now;
-    if (remainingQuantity <= 1e-12) delete nextState.positions[key];
+    if (fullClose || remainingQuantity <= 1e-12) delete nextState.positions[key];
     else {
       nextState.positions[key] = {
         ...existing, quantity: roundedRemainingQuantity, costBasisNative: roundedRemainingCost,

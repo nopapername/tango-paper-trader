@@ -885,6 +885,33 @@ test('full sell removes a position and updates per-chain daily realized pnl', ()
   assert.ok(Object.values(sold.state.dailyRealizedByChain.sol).some((value) => value.native !== 0));
 });
 
+test('calibrated fractional BSC position closes exactly at 100%', () => {
+  const bscToken = { chain: 'bsc', address: EVM_ADDRESS, symbol: 'BNBY' };
+  const bscSettings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { bsc: { networkFeeNative: 0 } }
+  });
+  const freshBscQuote = {
+    priceUsd: 2, nativePriceUsd: 600, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  };
+  const bought = Engine.executeBuy(state(), {
+    token: bscToken, quote: freshBscQuote, amountNative: 1
+  }, bscSettings, 1_000).state;
+  const key = Engine.positionKey('bsc', bscToken.address);
+  bought.positions[key].quantity = 123_456_789.12345679;
+  bought.positions[key].costBasisNative = 1;
+
+  const sold = Engine.executeSell(bought, {
+    token: bscToken,
+    quote: { ...freshBscQuote, observedAt: 2_000, nativePriceObservedAt: 2_000 },
+    percent: 100
+  }, bscSettings, 2_000);
+
+  assert.equal(sold.state.positions[key], undefined);
+  assert.equal(sold.trade.quantity, 123_456_789.12345679);
+  assert.equal(Number.isFinite(sold.trade.realizedPnlNative), true);
+});
+
 test('the same EVM address remains isolated across chain accounts', () => {
   const address = '0x1111111111111111111111111111111111111111';
   let next = State.createInitialState({ now: 1 }); next.initialized = true;
