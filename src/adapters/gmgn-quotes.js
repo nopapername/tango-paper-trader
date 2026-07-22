@@ -293,6 +293,9 @@
     return [...found.values()];
   }
 
-  Tango.GMGNQuotes = { extract, extractNativePrices, mergeObservation };
+  Tango.GMGNQuotes = {
+    extract, extractNativePrices, mergeObservation,
+    isFactualPriceObservation: factualPriceObservation
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.GMGNQuotes;
 })(globalThis);

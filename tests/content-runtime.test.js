@@ -988,6 +988,39 @@ test('paper resolver rejects contaminated live observations before falling back 
   }
 });
 
+test('direct candidates cannot launder provisional or fallback prices as factual observations', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/eth/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('eth', 2_000, loaded.clock.now);
+  const token = { chain: 'eth', address: ADDRESS_A, symbol: 'TARGET' };
+  const contaminated = [
+    { source: 'GMGN_NETWORK', provisionalTokenPrice: true },
+    { source: 'GMGN_NETWORK', priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP' }
+  ];
+
+  const contaminatedResults = contaminated.map((provenance) => {
+    const quote = loaded.api.resolvePaperTradeQuote(token, {
+      chain: 'eth', address: ADDRESS_A, priceUsd: 9,
+      observedAt: loaded.clock.now, ...provenance
+    });
+    return { priceUsd: quote.priceUsd, source: quote.source, priceProvenance: quote.priceProvenance };
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(contaminatedResults)), contaminated.map(() => ({
+    priceUsd: 3_200 / 1_000_000_000,
+    source: 'TANGO_FALLBACK',
+    priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP'
+  })));
+
+  for (const source of ['GMGN_NETWORK', 'DEXSCREENER']) {
+    const quote = loaded.api.resolvePaperTradeQuote(token, {
+      chain: 'eth', address: ADDRESS_A, priceUsd: 9,
+      observedAt: loaded.clock.now, source, priceProvenance: 'OBSERVED_PRICE'
+    });
+    assert.equal(quote.priceUsd, 9, source);
+    assert.equal(quote.source, source, source);
+    assert.equal(quote.priceProvenance, 'OBSERVED_PRICE', source);
+  }
+});
+
 test('page-message quote caching rejects untrusted and synthetic-derived observations', () => {
   const cases = [
     { source: 'PAGE_TEXT' },

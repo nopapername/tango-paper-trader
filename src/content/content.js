@@ -545,9 +545,9 @@
   }
 
   function acceptedTokenObservation(candidate, token, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
-    const source = String(candidate?.source || '').toUpperCase();
-    const acceptedSource = source === 'DEXSCREENER' || source.startsWith('GMGN');
-    const hasValue = Number(candidate?.priceUsd || 0) > 0 || trustedMarketCapObservation(candidate, token);
+    const acceptedSource = Boolean(factualObservationSource(candidate?.source));
+    const hasValue = (Tango.GMGNQuotes.isFactualPriceObservation(candidate)
+      && Number(candidate?.priceUsd || 0) > 0) || trustedMarketCapObservation(candidate, token);
     const observedAt = Number(candidate?.observedAt || 0);
     return acceptedSource && hasValue && observedAt > 0 && Date.now() - observedAt <= maxAgeMs;
   }
@@ -574,10 +574,7 @@
       || !freshObservationTime(candidate?.observedAt, maxAgeMs)) return false;
     if (['priceUsd', 'marketCapUsd', 'liquidityUsd', 'totalSupply'].some((field) =>
       candidate?.[field] != null && (!Number.isFinite(Number(candidate[field])) || Number(candidate[field]) < 0))) return false;
-    const provenance = String(candidate?.priceProvenance || '').toUpperCase();
-    if (candidate?.syntheticTokenPrice === true || candidate?.provisionalTokenPrice === true
-      || provenance.includes('SYNTHETIC') || provenance.includes('DERIVED')
-      || provenance.includes('FALLBACK')) return false;
+    if (!Tango.GMGNQuotes.isFactualPriceObservation(candidate)) return false;
     for (const [valueField, timeField, sourceField] of [
       ['priceUsd', 'priceObservedAt', 'priceSource'],
       ['marketCapUsd', 'marketCapObservedAt', 'marketCapSource'],
@@ -837,6 +834,8 @@
       && Date.now() - candidateObservedAt <= Number(Tango.QUOTE_STALE_MS || 15_000);
     const candidateIsTrusted = candidateIdentityMatches && candidateFresh
       && Boolean(factualObservationSource(candidateSource));
+    const candidateHasFactualPrice = candidateIsTrusted
+      && Tango.GMGNQuotes.isFactualPriceObservation(candidate);
     const candidateSyntheticTokenPrice = candidateIsTrusted && candidate?.syntheticTokenPrice === true;
     const candidateProvisionalSupply = candidateSyntheticTokenPrice
       && Number(candidate?.provisionalSupply) === 1_000_000_000 ? 1_000_000_000 : 0;
@@ -846,7 +845,7 @@
       && Number.isFinite(Number(candidate?.totalSupply)) && Number(candidate.totalSupply) > 0;
     const boundCandidate = candidateIsTrusted ? {
       ...(candidate || {}), chain: chain.id, address: normalizedAddress,
-      priceUsd: candidateSyntheticTokenPrice ? 0 : Number(candidate?.priceUsd || 0),
+      priceUsd: candidateHasFactualPrice ? Number(candidate?.priceUsd || 0) : 0,
       totalSupply: candidateExactSupply ? Number(candidate.totalSupply) : 0,
       totalSupplySource: candidateExactSupply ? 'GMGN_EXACT' : '',
       supplySource: candidateExactSupply ? 'GMGN_EXACT' : ''
@@ -857,7 +856,8 @@
     const merged = freshExact && boundCandidate
       ? Tango.GMGNQuotes.mergeObservation(freshExact, boundCandidate)
       : boundCandidate || freshExact;
-    const mergedHasFactualPrice = Number.isFinite(Number(merged?.priceUsd)) && Number(merged.priceUsd) > 0;
+    const mergedHasFactualPrice = Tango.GMGNQuotes.isFactualPriceObservation(merged)
+      && Number.isFinite(Number(merged?.priceUsd)) && Number(merged.priceUsd) > 0;
     const positionAddress = position?.tokenAddress || position?.address;
     const boundPosition = position?.chain === chain.id
       && Tango.Chains.validateAddress(chain.id, positionAddress)
@@ -880,16 +880,14 @@
       provisionalSupply: !mergedHasFactualPrice && candidateProvisionalSupply,
       syntheticTokenPrice: mergedHasFactualPrice
         ? false : candidateSyntheticTokenPrice || historicalLocal.syntheticTokenPrice === true,
+      provisionalTokenPrice: mergedHasFactualPrice ? false : historicalLocal.provisionalTokenPrice === true,
       syntheticNativePrice: Number(merged.nativePriceUsd) > 0
         ? false : historicalLocal.syntheticNativePrice === true
     } : historicalLocal;
     const marketCapUsd = Number(local.marketCapUsd);
     const safeMarketCapUsd = Number.isFinite(marketCapUsd) && marketCapUsd > 0 ? marketCapUsd : 0;
     const observedPrice = Number(local.priceUsd);
-    const observedPriceProvenance = String(local.priceProvenance || '').toUpperCase();
-    const safeObservedPrice = local.syntheticTokenPrice !== true
-      && !observedPriceProvenance.includes('DERIVED')
-      && !observedPriceProvenance.includes('SYNTHETIC')
+    const safeObservedPrice = Tango.GMGNQuotes.isFactualPriceObservation(local)
       && Number.isFinite(observedPrice) && observedPrice > 0 ? observedPrice : 0;
     const legacyPumpSupply = chain.id === 'sol' && /pump$/i.test(normalizedAddress)
       && boundPosition?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1'
