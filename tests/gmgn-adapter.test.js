@@ -400,6 +400,64 @@ test('a transient empty detail read preserves the verified context for the same 
   assert.equal(GMGN._resolveCurrentTokenRead(current, null, 'https://gmgn.ai/?chain=sol'), null);
 });
 
+test('periodic reads keep richer exact-route metadata and quote fields over an address-only placeholder', () => {
+  const url = `https://gmgn.ai/base/token/${EVM_ADDRESS}`;
+  const previous = {
+    token: {
+      chain: 'base', address: EVM_ADDRESS, symbol: 'RICH', name: 'Rich Token', logoUrl: 'rich.png',
+      launchpad: 'Clanker', launchMode: 'MIGRATED', metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+    },
+    quote: { priceUsd: 2, marketCapUsd: 200_000, observedAt: 1_000, source: 'GMGN_NETWORK' }
+  };
+  const placeholder = {
+    token: {
+      chain: 'base', address: EVM_ADDRESS, symbol: 'ROUTE', name: 'ROUTE', logoUrl: '',
+      metadataVerified: false, metadataSource: ''
+    },
+    quote: {}
+  };
+
+  assert.deepEqual(GMGN.resolveCurrentTokenRead(previous, placeholder, url), previous);
+});
+
+test('verified exact-route detail metadata upgrades identity without discarding the richer quote', () => {
+  const url = `https://gmgn.ai/base/token/${EVM_ADDRESS}`;
+  const previous = {
+    token: {
+      chain: 'base', address: EVM_ADDRESS, symbol: 'OLD', name: 'Old Token', logoUrl: 'old.png',
+      metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    },
+    quote: { priceUsd: 2, marketCapUsd: 200_000, observedAt: 1_000, source: 'GMGN_NETWORK' }
+  };
+  const detail = {
+    token: {
+      chain: 'base', address: EVM_ADDRESS, symbol: 'DETAIL', name: 'Detail Token', logoUrl: 'detail.png',
+      launchpad: 'Clanker', launchMode: 'MIGRATED', metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+    },
+    quote: {}
+  };
+
+  assert.deepEqual(GMGN.resolveCurrentTokenRead(previous, detail, url), {
+    token: detail.token,
+    quote: previous.quote
+  });
+});
+
+test('current-token reads reject a verified context for the wrong route identity', () => {
+  const wrongAddress = {
+    token: { chain: 'base', address: EVM_ADDRESS_2, symbol: 'WRONG', metadataVerified: true, metadataSource: 'GMGN_DETAIL' },
+    quote: { priceUsd: 9, observedAt: 1_000, source: 'GMGN' }
+  };
+  const wrongChain = {
+    token: { chain: 'eth', address: EVM_ADDRESS, symbol: 'WRONG', metadataVerified: true, metadataSource: 'GMGN_DETAIL' },
+    quote: { priceUsd: 9, observedAt: 1_000, source: 'GMGN' }
+  };
+  const url = `https://gmgn.ai/base/token/${EVM_ADDRESS}`;
+
+  assert.equal(GMGN.resolveCurrentTokenRead(null, wrongAddress, url), null);
+  assert.equal(GMGN.resolveCurrentTokenRead(null, wrongChain, url), null);
+});
+
 test('Solana detail identity remains case-sensitive while EVM identity normalizes case', () => {
   const solana = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
   assert.equal(GMGN._addressHintMatches(solana.toLowerCase(), solana, 'sol'), false);
@@ -1242,7 +1300,7 @@ test('detail quote reads price, market cap, and exact total supply from one veri
   }
 });
 
-test('a confirmed detail header without factual quote fields returns the minimal route placeholder', async () => {
+test('a confirmed detail header retains exact identity metadata without factual quote fields', async () => {
   const original = { document: global.document, location: global.location };
   const detail = detailDocument({
     chain: 'base', address: EVM_ADDRESS, priceUsd: 0, marketCapUsd: 0, liquidityUsd: 0
@@ -1251,13 +1309,14 @@ test('a confirmed detail header without factual quote fields returns the minimal
   global.document = detail.document;
   global.location = { href: `https://gmgn.ai/base/token/${EVM_ADDRESS}`, origin: 'https://gmgn.ai' };
   try {
-    assert.deepEqual(await GMGN.readCurrentToken(), {
-      token: {
-        chain: 'base', address: EVM_ADDRESS, symbol: '0x1111…1111', name: '0x1111…1111', logoUrl: '',
-        metadataVerified: false, metadataSource: ''
-      },
-      quote: {}
+    const current = await GMGN.readCurrentToken();
+    assert.deepEqual(current.token, {
+      chain: 'base', address: EVM_ADDRESS, symbol: 'TEST', name: 'TEST', logoUrl: '',
+      launchpad: '', launchMode: '', metadataVerified: true, metadataSource: 'GMGN_DETAIL'
     });
+    assert.equal(current.quote.priceUsd, 0);
+    assert.equal(current.quote.marketCapUsd, 0);
+    assert.equal(current.quote.observedAt, 0);
   } finally {
     GMGN._clearTrenchSnapshots();
     global.document = original.document;

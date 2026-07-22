@@ -15,22 +15,25 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function stateFixture() {
+function stateFixture(balanceByChain = {}) {
   return {
     initialized: true,
     accounts: Object.fromEntries(Chains.all().map((chain) => [chain.id, {
-      initialBalanceNative: 10, cashBalanceNative: 10, realizedPnlNative: 0
+      initialBalanceNative: balanceByChain[chain.id] ?? 10,
+      cashBalanceNative: balanceByChain[chain.id] ?? 10,
+      realizedPnlNative: 0
     }])),
     positions: {}, trades: [],
     dailyRealizedByChain: Object.fromEntries(Chains.all().map((chain) => [chain.id, {}]))
   };
 }
 
-function settingsFixture() {
+function settingsFixture(balanceByChain = {}) {
   return {
     selectedChain: 'eth', language: 'en', enabled: true, displayCurrency: 'NATIVE',
     chains: Object.fromEntries(Chains.all().map((chain) => [chain.id, {
-      buyPresets: [1], networkFeeNative: 0.001, initialBalanceNative: 10
+      buyPresets: [1], networkFeeNative: 0.001,
+      initialBalanceNative: balanceByChain[chain.id] ?? 10
     }]))
   };
 }
@@ -43,7 +46,10 @@ function mergeSettingsPatch(settings, patch) {
   return { ...settings, ...patch, chains };
 }
 
-async function loadPopup({ failFirstGetAll = false, failAction = '', initialized = true } = {}) {
+async function loadPopup({
+  failFirstGetAll = false, failAction = '', initialized = true,
+  accountBalances = {}, settingBalances = {}, confirmResult = true
+} = {}) {
   const elements = new Map();
   let document;
   let markup = '';
@@ -77,13 +83,16 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
     get innerHTML() { return markup; },
     set innerHTML(value) { markup = String(value); elements.clear(); }
   };
-  let persistedState = stateFixture();
+  let persistedState = stateFixture(accountBalances);
   persistedState.initialized = initialized;
-  let persistedSettings = settingsFixture();
+  let persistedSettings = settingsFixture(settingBalances);
   let getAllCalls = 0;
   const confirmations = [];
   const openedTabs = [];
-  const calls = { saves: [], fullSaves: [], initialize: 0, resetChain: 0, resetChainArgs: [], resetAll: 0 };
+  const calls = {
+    saves: [], fullSaves: [], initialize: 0,
+    resetChain: 0, resetChainArgs: [], resetAll: 0, resetAllWithBalance: []
+  };
   const Tango = {
     Chains,
     I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key },
@@ -135,6 +144,29 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
         calls.resetAll += 1;
         if (failAction === 'reset-all' && calls.resetAll === 1) throw new Error('write failed');
         return persistedState;
+      },
+      async resetAllWithBalance(balanceNative, language) {
+        calls.resetAllWithBalance.push([balanceNative, language]);
+        if (failAction === 'reset-all-with-balance' && calls.resetAllWithBalance.length === 1) {
+          throw new Error('write failed');
+        }
+        persistedState = {
+          ...persistedState,
+          accounts: Object.fromEntries(Chains.all().map((chain) => [chain.id, {
+            ...persistedState.accounts[chain.id],
+            initialBalanceNative: balanceNative,
+            cashBalanceNative: balanceNative,
+            realizedPnlNative: 0
+          }]))
+        };
+        persistedSettings = {
+          ...persistedSettings,
+          language,
+          chains: Object.fromEntries(Chains.all().map((chain) => [chain.id, {
+            ...persistedSettings.chains[chain.id], initialBalanceNative: balanceNative
+          }]))
+        };
+        return { state: persistedState, settings: persistedSettings };
       }
     }
   };
@@ -145,7 +177,7 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
   const context = {
     Promise, Object, Number, String, Array, Map, Set, Math, Date, JSON, console, Tango, document,
     setTimeout: () => 0,
-    confirm: (message) => { confirmations.push(message); return true; },
+    confirm: (message) => { confirmations.push(message); return confirmResult; },
     chrome: {
       runtime: {
         getURL(value) { return `chrome-extension://test/${value}`; },
@@ -161,7 +193,8 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
   await new Promise((resolve) => setImmediate(resolve));
   return {
     app, calls, confirmations, element, openedTabs, startupError,
-    get persistedSettings() { return persistedSettings; }
+    get persistedSettings() { return persistedSettings; },
+    get persistedState() { return persistedState; }
   };
 }
 
@@ -186,29 +219,27 @@ test('Popup routes an uninitialized account to onboarding without writing fixed 
   assert.deepEqual(popup.openedTabs, ['chrome-extension://test/dashboard.html?onboarding=1']);
 });
 
-test('Popup reset actions contain rejected writes and restore authoritative account UI', async () => {
-  for (const [failAction, selector, callField] of [
-    ['reset-chain', '#reset-chain-button', 'resetChain'],
-    ['reset-all', '#reset-all-button', 'resetAll']
-  ]) {
-    const popup = await loadPopup({ failAction });
-    const rejection = await popup.element(selector).click().then(() => null, (error) => error);
+test('Popup common-capital reset contains a rejected atomic write and restores authoritative UI', async () => {
+  const popup = await loadPopup({ failAction: 'reset-all-with-balance' });
+  popup.element('#common-capital-balance').value = '12';
+  const rejection = await popup.element('#save-common-capital').click().then(() => null, (error) => error);
 
-    assert.equal(rejection, null, failAction);
-    assert.equal(popup.calls[callField], 1, failAction);
-    assert.match(popup.app.innerHTML, /id="popup-chain"/);
-    assert.match(popup.app.innerHTML, /settingsSaveFailed/);
-  }
+  assert.equal(rejection, null);
+  assert.deepEqual(popup.calls.resetAllWithBalance, [[12, 'en']]);
+  assert.match(popup.app.innerHTML, /id="popup-chain"/);
+  assert.match(popup.app.innerHTML, /settingsSaveFailed/);
 });
 
 test('Popup clears rejected-write feedback after a successful retry', async () => {
-  const popup = await loadPopup({ failAction: 'reset-chain' });
-  await popup.element('#reset-chain-button').click();
+  const popup = await loadPopup({ failAction: 'reset-all-with-balance' });
+  popup.element('#common-capital-balance').value = '12';
+  await popup.element('#save-common-capital').click();
   assert.match(popup.app.innerHTML, /settingsSaveFailed/);
 
-  await popup.element('#reset-chain-button').click();
+  popup.element('#common-capital-balance').value = '12';
+  await popup.element('#save-common-capital').click();
 
-  assert.equal(popup.calls.resetChain, 2);
+  assert.equal(popup.calls.resetAllWithBalance.length, 2);
   assert.doesNotMatch(popup.app.innerHTML, /settingsSaveFailed/);
 });
 
@@ -276,6 +307,7 @@ test('Popup account language persists only the owned language field', async () =
   popup.calls.saves[0].gate.resolve();
   await saving;
   assert.equal(popup.persistedSettings.language, 'zh-CN');
+  assert.deepEqual(popup.calls.resetAllWithBalance, []);
 });
 
 test('Popup rolls back a failed latest chain selection to the last successful queued chain', async () => {
@@ -301,22 +333,22 @@ test('Popup rolls back a failed latest chain selection to the last successful qu
   assert.match(popup.app.innerHTML, /settingsSaveFailed/);
 });
 
-test('Popup waits for a pending BSC selection before resetting the selected chain', async () => {
+test('Popup waits for pending settings before atomically changing common capital', async () => {
   const popup = await loadPopup();
   const selector = popup.element('#popup-chain');
-  const reset = popup.element('#reset-chain-button');
   selector.value = 'bsc';
 
   const changing = selector.emit('change');
+  const reset = popup.element('#save-common-capital');
+  popup.element('#common-capital-balance').value = '12';
   const resetting = reset.click();
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(popup.calls.resetChain, 0);
+  assert.equal(popup.calls.resetAllWithBalance.length, 0);
   popup.calls.saves[0].gate.resolve();
   await Promise.all([changing, resetting]);
-  assert.equal(popup.calls.resetChain, 1);
-  assert.equal(popup.calls.resetChainArgs[0][0], 'bsc');
-  assert.notEqual(popup.calls.resetChainArgs[0][0], 'eth');
+  assert.deepEqual(popup.calls.resetAllWithBalance, [[12, 'en']]);
+  assert.equal(popup.persistedSettings.selectedChain, 'bsc');
 });
 
 test('Popup waits for a pending BSC selection before opening GMGN', async () => {
@@ -335,31 +367,60 @@ test('Popup waits for a pending BSC selection before opening GMGN', async () => 
   assert.deepEqual(popup.openedTabs, [Chains.trenchUrl('bsc')]);
 });
 
-test('Popup rejected selection cancels its scoped action, rolls back, and remains usable', async () => {
+test('Popup rejected selection does not block a later common-capital reset', async () => {
   const popup = await loadPopup();
   const selector = popup.element('#popup-chain');
-  const staleReset = popup.element('#reset-chain-button');
   selector.value = 'bsc';
 
   const changing = selector.emit('change');
-  const pendingReset = staleReset.click();
   await new Promise((resolve) => setImmediate(resolve));
   popup.calls.saves[0].gate.reject(new Error('write failed'));
-  await Promise.all([changing, pendingReset]);
+  await changing;
 
-  assert.equal(popup.calls.resetChain, 0);
   assert.equal(popup.element('#popup-chain').value, 'eth');
-  await popup.element('#reset-chain-button').click();
-  assert.equal(popup.calls.resetChain, 1);
-  assert.equal(popup.calls.resetChainArgs[0][0], 'eth');
+  popup.element('#common-capital-balance').value = '12';
+  await popup.element('#save-common-capital').click();
+  assert.deepEqual(popup.calls.resetAllWithBalance, [[12, 'en']]);
 });
 
-test('Popup confirmations keep selected-chain and permanent all-six-chain resets separate', async () => {
+test('Popup changes equal common capital through one confirmed all-chain reset', async () => {
   const popup = await loadPopup();
-  await popup.element('#reset-chain-button').click();
-  await popup.element('#reset-all-button').click();
+  assert.equal(popup.element('#common-capital-balance').value, '10');
+  popup.element('#common-capital-balance').value = '12.5';
+  await popup.element('#save-common-capital').click();
 
-  assert.deepEqual(popup.confirmations, ['resetSelectedChainConfirm', 'resetAllChainsConfirm']);
-  assert.equal(popup.calls.resetChain, 1);
-  assert.equal(popup.calls.resetAll, 1);
+  assert.deepEqual(popup.confirmations, ['commonCapitalResetConfirm']);
+  assert.deepEqual(popup.calls.resetAllWithBalance, [[12.5, 'en']]);
+  assert.equal(popup.calls.resetChain, 0);
+  for (const chain of Chains.all()) {
+    assert.equal(popup.persistedState.accounts[chain.id].initialBalanceNative, 12.5);
+    assert.equal(popup.persistedSettings.chains[chain.id].initialBalanceNative, 12.5);
+  }
+});
+
+test('Popup repairs divergent legacy principals even when the displayed amount is unchanged', async () => {
+  const popup = await loadPopup({
+    settingBalances: { bsc: 25 },
+    accountBalances: { xlayer: 30 }
+  });
+  assert.equal(popup.element('#common-capital-balance').value, '10');
+
+  await popup.element('#save-common-capital').click();
+
+  assert.deepEqual(popup.confirmations, ['commonCapitalResetConfirm']);
+  assert.deepEqual(popup.calls.resetAllWithBalance, [[10, 'en']]);
+  for (const chain of Chains.all()) {
+    assert.equal(popup.persistedState.accounts[chain.id].initialBalanceNative, 10);
+    assert.equal(popup.persistedSettings.chains[chain.id].initialBalanceNative, 10);
+  }
+});
+
+test('Popup cancellation leaves divergent legacy principals untouched and performs no write', async () => {
+  const popup = await loadPopup({ settingBalances: { bsc: 25 }, confirmResult: false });
+
+  await popup.element('#save-common-capital').click();
+
+  assert.deepEqual(popup.confirmations, ['commonCapitalResetConfirm']);
+  assert.deepEqual(popup.calls.resetAllWithBalance, []);
+  assert.equal(popup.persistedSettings.chains.bsc.initialBalanceNative, 25);
 });

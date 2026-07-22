@@ -44,6 +44,114 @@ const paperSettings = State.normalizeSettings({
   }
 });
 
+test('field-level factual observation ages cannot be laundered by a fresh envelope timestamp', () => {
+  const now = 1_000 + Tango.QUOTE_STALE_MS + 1;
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const snapshot = structuredClone(initial);
+  const stalePrice = {
+    chain: 'eth', address: ethToken.address,
+    priceUsd: 2, marketCapUsd: 2_000,
+    nativePriceUsd: 2_000,
+    observedAt: now, priceObservedAt: 1_000, marketCapObservedAt: now,
+    nativePriceObservedAt: now,
+    source: 'GMGN_NETWORK', valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+  };
+  const staleMarketCap = {
+    chain: 'base', address: baseToken.address,
+    priceUsd: 0, marketCapUsd: 200_000,
+    totalSupply: 100_000_000_000, supplySource: 'GMGN_EXACT',
+    nativePriceUsd: 2_000,
+    observedAt: now, priceObservedAt: 0, marketCapObservedAt: 1_000,
+    nativePriceObservedAt: now,
+    source: 'GMGN_NETWORK', valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+
+  assert.throws(
+    () => Engine.executeBuy(initial, { token: ethToken, quote: stalePrice, amountNative: 1 }, paperSettings, now),
+    /staleQuote/
+  );
+  assert.throws(
+    () => Engine.executeBuy(initial, { token: baseToken, quote: staleMarketCap, amountNative: 1 }, paperSettings, now),
+    /staleQuote/
+  );
+  assert.deepEqual(initial, snapshot);
+});
+
+test('real engine six-chain matrix keeps quick/detail buys and 25/50/exact-100 sells isolated and finite', () => {
+  const addresses = {
+    sol: 'So11111111111111111111111111111111111111112',
+    eth: '0x1111111111111111111111111111111111111111',
+    bsc: '0x2222222222222222222222222222222222222222',
+    base: '0x3333333333333333333333333333333333333333',
+    robinhood: '0x4444444444444444444444444444444444444444',
+    xlayer: '0x5555555555555555555555555555555555555555'
+  };
+  const nativePrices = { sol: 100, eth: 2_000, bsc: 600, base: 2_000, robinhood: 2_000, xlayer: 50 };
+  const initialBalances = Object.fromEntries(global.Tango.Chains.all().map((chain) => [chain.id, 10]));
+  const matrixSettings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0,
+    chains: Object.fromEntries(global.Tango.Chains.all().map((chain) => [chain.id, { networkFeeNative: 0 }]))
+  });
+
+  for (const chain of global.Tango.Chains.all()) {
+    const token = {
+      chain: chain.id, address: addresses[chain.id], symbol: `${chain.id.toUpperCase()}-PAPER`,
+      metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    };
+    const quote = (observedAt) => ({
+      chain: chain.id, address: token.address,
+      priceUsd: 3_200 / 1_000_000_000, marketCapUsd: 3_200,
+      totalSupply: 1_000_000_000, supplySource: 'UNKNOWN_FALLBACK',
+      nativePriceUsd: nativePrices[chain.id], observedAt, nativePriceObservedAt: observedAt,
+      source: 'TANGO_FALLBACK', valuationMode: 'PRICE',
+      priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+      syntheticTokenPrice: true, provisional: true, paperFallback: true
+    });
+    let current = State.createInitialState({ now: 1, initialBalances });
+    current.initialized = true;
+    const untouchedAccounts = Object.fromEntries(
+      global.Tango.Chains.all().filter((item) => item.id !== chain.id)
+        .map((item) => [item.id, structuredClone(current.accounts[item.id])])
+    );
+
+    const quick = Engine.executeBuy(current, {
+      token, quote: quote(1_000), amountNative: 1, sourceUrl: global.Tango.Chains.trenchUrl(chain.id)
+    }, matrixSettings, 1_000);
+    const detail = Engine.executeBuy(quick.state, {
+      token, quote: quote(2_000), amountNative: 1, sourceUrl: global.Tango.Chains.tokenUrl(chain.id, token.address)
+    }, matrixSettings, 2_000);
+    const quarter = Engine.executeSell(detail.state, {
+      token, quote: quote(3_000), percent: 25
+    }, matrixSettings, 3_000);
+    const half = Engine.executeSell(quarter.state, {
+      token, quote: quote(4_000), percent: 50
+    }, matrixSettings, 4_000);
+    const persistedRemainder = half.position.quantity;
+    const closed = Engine.executeSell(half.state, {
+      token, quote: quote(5_000), percent: 100
+    }, matrixSettings, 5_000);
+
+    assert.ok(Number.isFinite(quick.position.quantity), chain.id);
+    assert.ok(Number.isFinite(detail.position.quantity), chain.id);
+    assert.equal(closed.trade.quantity, persistedRemainder, chain.id);
+    assert.equal(closed.position, null, chain.id);
+    assert.equal(closed.trade.nativeSymbol, chain.nativeSymbol, chain.id);
+    assert.ok(closed.state.trades.every((trade) => (
+      trade.chain === chain.id
+      && trade.tokenAddress === global.Tango.Chains.normalizeAddress(chain.id, token.address)
+      && Number.isFinite(trade.quantity)
+      && Number.isFinite(trade.realizedPnlNative)
+    )), chain.id);
+    assert.deepEqual(
+      Object.fromEntries(Object.keys(untouchedAccounts).map((id) => [id, closed.state.accounts[id]])),
+      untouchedAccounts,
+      chain.id
+    );
+    assert.deepEqual(Object.keys(closed.state.positions), [], chain.id);
+  }
+});
+
 test('fallback BNB execution has finite quantity and a full close uses the persisted quantity exactly', () => {
   const bscToken = { chain: 'bsc', address: EVM_ADDRESS, symbol: 'BNB-FALLBACK' };
   const bscSettings = State.normalizeSettings({

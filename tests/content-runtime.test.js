@@ -2615,6 +2615,103 @@ test('a confirmation callback captured on one token cannot execute after same-ch
   assert.equal(loaded.calls.buy, 0);
 });
 
+test('delayed confirmation preserves factual observation times and the real engine rejects the stale order', async () => {
+  const loaded = loadContent();
+  const observedAt = loaded.clock.now;
+  const context = quoteContext();
+  context.quote = {
+    ...context.quote,
+    priceObservedAt: observedAt,
+    marketCapObservedAt: observedAt,
+    nativePriceObservedAt: observedAt,
+    priceProvenance: 'OBSERVED_PRICE'
+  };
+  loaded.api.rememberNativePrice('eth', 3_000, observedAt);
+  const executionSettings = RealState.normalizeSettings(defaultSettings());
+  let attemptedOrder = null;
+  let commits = 0;
+  loaded.context.Tango.Store.executeBuy = async (order) => {
+    attemptedOrder = order;
+    const result = RealEngine.executeBuy(loaded.api.runtime.state, order, executionSettings, loaded.clock.now);
+    commits += 1;
+    return result;
+  };
+
+  await loaded.api.buy(1, context);
+  const confirm = loaded.api.runtime.modal.action;
+  loaded.clock.now += loaded.context.Tango.QUOTE_STALE_MS + 1;
+  await confirm();
+
+  assert.equal(attemptedOrder.quote.observedAt, observedAt);
+  assert.equal(attemptedOrder.quote.priceObservedAt, observedAt);
+  assert.equal(attemptedOrder.quote.marketCapObservedAt, observedAt);
+  assert.equal(attemptedOrder.quote.nativePriceObservedAt, observedAt);
+  assert.equal(commits, 0);
+  assert.equal(loaded.api.runtime.state.trades.length, 0);
+  assert.equal(loaded.api.runtime.toast.type, 'error');
+  assert.equal(loaded.api.runtime.toast.message, 'staleQuote');
+});
+
+test('provisional execution timestamps do not overwrite a factual market-cap observation', () => {
+  const loaded = loadContent();
+  const factualMarketCapObservedAt = loaded.clock.now - 500;
+  const candidate = {
+    chain: 'eth', address: ADDRESS_A,
+    priceUsd: 3_200 / 1_000_000_000, marketCapUsd: 3_200,
+    nativePriceUsd: 1,
+    observedAt: loaded.clock.now - 400,
+    priceObservedAt: loaded.clock.now - 400,
+    marketCapObservedAt: factualMarketCapObservedAt,
+    nativePriceObservedAt: loaded.clock.now - 300,
+    source: 'TANGO_FALLBACK', valuationMode: 'PRICE',
+    priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+    syntheticTokenPrice: true, syntheticNativePrice: true, provisional: true
+  };
+
+  const executable = loaded.api.paperExecutableQuote({
+    chain: 'eth', address: ADDRESS_A, symbol: 'FALLBACK'
+  }, candidate);
+
+  assert.equal(executable.observedAt, loaded.clock.now);
+  assert.equal(executable.priceObservedAt, loaded.clock.now);
+  assert.equal(executable.marketCapObservedAt, factualMarketCapObservedAt);
+  assert.equal(executable.nativePriceObservedAt, loaded.clock.now);
+  assert.equal(executable.originalObservedAt, candidate.observedAt);
+  assert.equal(executable.nativeOriginalObservedAt, candidate.nativePriceObservedAt);
+});
+
+test('delayed confirmation may timestamp a fully deterministic fallback while retaining its audit provenance', async () => {
+  const loaded = loadContent();
+  loaded.api.runtime.current = {
+    token: {
+      chain: 'eth', address: ADDRESS_A, symbol: 'FALLBACK',
+      metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    },
+    quote: {}
+  };
+  const executionSettings = RealState.normalizeSettings(defaultSettings());
+  let committedOrder = null;
+  loaded.context.Tango.Store.executeBuy = async (order) => {
+    committedOrder = order;
+    return RealEngine.executeBuy(loaded.api.runtime.state, order, executionSettings, loaded.clock.now);
+  };
+
+  await loaded.api.buy(1);
+  const confirm = loaded.api.runtime.modal.action;
+  loaded.clock.now += loaded.context.Tango.QUOTE_STALE_MS + 1;
+  const executionAt = loaded.clock.now;
+  await confirm();
+
+  assert.equal(committedOrder.quote.observedAt, executionAt);
+  assert.equal(committedOrder.quote.nativePriceObservedAt, executionAt);
+  assert.equal(committedOrder.quote.originalObservedAt, 0);
+  assert.equal(committedOrder.quote.nativeOriginalObservedAt, 0);
+  assert.equal(committedOrder.quote.syntheticTokenPrice, true);
+  assert.equal(committedOrder.quote.syntheticNativePrice, true);
+  assert.equal(committedOrder.quote.priceProvenance, 'FALLBACK_INITIAL_MARKET_CAP');
+  assert.equal(loaded.api.runtime.state.trades.length, 1);
+});
+
 test('quick-buy commits before same-chain navigation and background native refresh cannot duplicate it', async () => {
   const nativeGate = deferred();
   const loaded = loadContent({

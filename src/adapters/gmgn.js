@@ -325,13 +325,43 @@
   }
 
   function resolveCurrentTokenRead(previous, next, url = global.location?.href || '') {
-    if (next) return next;
     if (!isTokenDetailPage(url)) return null;
     const chain = chainFromUrl(url);
     const address = Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(url));
-    const previousAddress = previous?.token?.chain === chain && Tango.Chains.validateAddress(chain, previous?.token?.address)
-      ? Tango.Chains.normalizeAddress(chain, previous.token.address) : '';
-    return address && previousAddress === address ? previous : null;
+    const matchesRoute = (context) => context?.token?.chain === chain
+      && Tango.Chains.validateAddress(chain, context?.token?.address)
+      && Tango.Chains.normalizeAddress(chain, context.token.address) === address;
+    const previousMatches = matchesRoute(previous);
+    if (next && !matchesRoute(next)) return previousMatches ? previous : null;
+    if (!next) return previousMatches ? previous : null;
+    if (!previousMatches) return next;
+
+    const metadataQuality = (token) => {
+      if (token?.metadataVerified !== true) return 0;
+      return ({
+        GMGN_TRENCH: 2,
+        GMGN_NETWORK: 3,
+        GMGN_DETAIL: 4
+      })[String(token.metadataSource || '').toUpperCase()] || 1;
+    };
+    const previousMetadataQuality = metadataQuality(previous.token);
+    const nextMetadataQuality = metadataQuality(next.token);
+    const nextHasQuote = Number(next.quote?.priceUsd) > 0 || Number(next.quote?.marketCapUsd) > 0;
+    if (nextMetadataQuality <= previousMetadataQuality && !nextHasQuote) return previous;
+
+    const token = nextMetadataQuality >= previousMetadataQuality
+      ? {
+        ...previous.token,
+        ...Object.fromEntries(Object.entries(next.token || {}).filter(([field, value]) => (
+          ['chain', 'address', 'metadataVerified', 'metadataSource'].includes(field)
+          || (value != null && String(value).trim() !== '')
+        )))
+      }
+      : previous.token;
+    return {
+      token,
+      quote: nextHasQuote ? next.quote : previous.quote
+    };
   }
 
   function needsCurrentTokenRead(current, url = global.location?.href || '') {
@@ -514,7 +544,7 @@
       && !confirmed.chainBound && lastVerifiedDetail.fingerprint === fingerprint) return placeholder;
     detail = confirmed;
     const quote = detailQuote(detail, chain, address);
-    if (!quote || !(Number(quote.priceUsd) > 0 || Number(quote.marketCapUsd) > 0)) return placeholder;
+    if (!quote) return placeholder;
     const result = {
       token: {
         chain, address, symbol: identity.symbol, name: identity.name, logoUrl: tokenLogo(detail.header),

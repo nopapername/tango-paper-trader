@@ -19,6 +19,20 @@
   const selectedChainLabel = () => language() === 'zh-CN' ? '已选链' : 'Selected chain';
   const allChainsLabel = () => language() === 'zh-CN' ? '全部链' : 'All chains';
   const globalUsdLabel = () => language() === 'zh-CN' ? '全部链 USD 汇总' : 'All-chain USD summary';
+  const validCommonCapital = (value) => Number.isFinite(Number(value))
+    && Number(value) > Number.EPSILON && Number(value) <= 1e15;
+  function commonCapitalSnapshot() {
+    const values = Tango.Chains.all().flatMap((chain) => [
+      Number(settings?.chains?.[chain.id]?.initialBalanceNative),
+      Number(state?.accounts?.[chain.id]?.initialBalanceNative)
+    ]);
+    const value = values.find(validCommonCapital) || 10;
+    return {
+      value,
+      consistent: values.length === Tango.Chains.all().length * 2
+        && values.every((candidate) => validCommonCapital(candidate) && candidate === value)
+    };
+  }
   function model() {
     return Tango.PopupModel.build(state, settings, visibleSelectedChain, nativePrices);
   }
@@ -155,7 +169,7 @@
     } else {
       const chainModel = model();
       const summary = chainModel.summary;
-      const selectedBalance = settings.chains?.[chainModel.chain.id]?.initialBalanceNative || 10;
+      const commonCapital = commonCapitalSnapshot();
       app.innerHTML = `<div class="popup">
         <div class="brand-row"><div class="brand"><span class="dot"></span>TANGO <span class="badge">${t('paper')}</span></div>${switchMarkup}</div>
         <label class="chain-selector"><span>${selectedChainLabel()}</span><select id="popup-chain">${chainModel.chainOptions.map((chain) => `<option value="${chain.id}" ${chain.id === chainModel.chain.id ? 'selected' : ''}>${esc(chain.name)} (${esc(chain.nativeSymbol)})</option>`).join('')}</select></label>
@@ -172,8 +186,9 @@
         </div>${chainModel.globalUsd.complete ? '' : `<p class="partial-data">${t('partialUsdData')}</p>`}</section>` : `<div class="disabled-note">${t('disabled')}</div>`}
         <details class="account-settings"><summary>${t('accountSettings')}</summary>
           <label class="field"><span>${t('language')}</span><select id="account-language"><option value="zh-CN" ${language() === 'zh-CN' ? 'selected' : ''}>${t('chinese')}</option><option value="en" ${language() === 'en' ? 'selected' : ''}>${t('english')}</option></select></label>
-          <label class="field"><span>${t('startingBalance')} · ${esc(chainModel.nativeSymbol)}</span><input class="input" id="reset-balance" type="number" min="0.01" step="0.01" value="${esc(selectedBalance)}"></label>
-          <button class="button secondary reset-balance" id="reset-chain-button">${selectedChainLabel()} · ${esc(chainModel.chain.name)} · ${t('resetWithBalance')}</button>
+          <label class="field"><span>${t('commonCapital')}</span><input class="input" id="common-capital-balance" type="number" min="0.01" max="1000000000000000" step="any" value="${esc(commonCapital.value)}"></label>
+          <button class="button secondary reset-balance" id="save-common-capital">${allChainsLabel()} · ${t('resetWithBalance')}</button>
+          <small class="reset-note">${t('independentChains')}</small>
           <small class="reset-note">${t('calendarClearedOnReset')}</small>
           <small class="reset-note">${t('resetWarning')}</small>
           <button class="button secondary" id="reset-all-button">${allChainsLabel()} · ${t('resetAccount')}</button>
@@ -198,17 +213,21 @@
     document.querySelector('#open-onboarding')?.addEventListener('click', () => {
       global.chrome.tabs.create({ url: global.chrome.runtime.getURL('dashboard.html?onboarding=1') });
     });
-    document.querySelector('#reset-chain-button')?.addEventListener('click', async () => {
-      const chainId = visibleSelectedChain;
-      const chainModel = await selectedModel(chainId);
-      if (!chainModel) return;
-      const balance = Number(document.querySelector('#reset-balance')?.value);
-      if (!(balance > 0) || !global.confirm(t('resetSelectedChainConfirm'))) return;
-      const executionModel = await selectedModel(chainId);
-      if (!executionModel) return;
+    document.querySelector('#save-common-capital')?.addEventListener('click', async () => {
+      const balance = Number(document.querySelector('#common-capital-balance')?.value);
+      if (!validCommonCapital(balance)) return;
+      await settingsWrite;
+      try { await reload(); } catch { /* runStoreWrite will surface a failed mutation */ }
+      const currentCapital = commonCapitalSnapshot();
+      if (currentCapital.consistent && currentCapital.value === balance) return;
+      if (!global.confirm(t('commonCapitalResetConfirm'))) return;
       await runStoreWrite(
-        () => Tango.Store.resetChain(executionModel.chain.id, balance),
-        async () => { await reload(); render(); }
+        () => Tango.Store.resetAllWithBalance(balance, language()),
+        async (result) => {
+          if (result?.state && result?.settings) ({ state, settings } = result);
+          else await reload();
+          render();
+        }
       );
     });
     document.querySelector('#reset-all-button')?.addEventListener('click', async () => {

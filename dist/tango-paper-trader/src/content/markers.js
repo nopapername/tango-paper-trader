@@ -7,10 +7,17 @@
     if (!chainDefinition || !Tango.Chains.validateAddress(chainDefinition.id, current.token.address)) return { markers: [] };
     const chain = chainDefinition.id;
     const address = Tango.Chains.normalizeAddress(chain, current.token.address);
-    const derivedPrice = (value) => String(value?.priceProvenance || '').startsWith('MARKET_CAP')
-      || value?.priceProvenance === 'MIXED_DERIVED'
-      || value?.valuationMode === 'MARKET_CAP';
-    const currentPrice = derivedPrice(current.quote) ? 0 : Number(current.quote.priceUsd || 0);
+    const nonFactualPrice = (value, explicitProvenance = value?.priceProvenance) => {
+      const provenance = String(explicitProvenance || '').toUpperCase();
+      return provenance.startsWith('MARKET_CAP')
+        || provenance === 'MIXED_DERIVED'
+        || provenance === 'SYNTHETIC_PRICE'
+        || provenance.startsWith('FALLBACK_')
+        || value?.syntheticTokenPrice === true
+        || value?.provisionalTokenPrice === true
+        || value?.valuationMode === 'MARKET_CAP';
+    };
+    const currentPrice = nonFactualPrice(current.quote) ? 0 : Number(current.quote.priceUsd || 0);
     const currentMarketCap = Number(current.quote.marketCapUsd || 0);
     let firstBuy = null;
     const sellTrades = [];
@@ -36,7 +43,8 @@
       price: priceAtMarketCap(
         entryMarketCap,
         position?.averageEntryPriceUsd || firstBuy?.observedPriceUsd,
-        derivedPrice(position) || derivedPrice(firstBuy) || String(position?.averageEntryPriceProvenance || '').includes('DERIVED')
+        nonFactualPrice(position, position?.averageEntryPriceProvenance)
+          || nonFactualPrice(firstBuy)
       ),
       label: labels.entry, closeLabel: labels.hide
     });
@@ -44,7 +52,7 @@
       markers.push({
         id: `sell:${chain}:${address}:${trade.id || `${trade.executedAt}:${trade.marketCapUsd}`}`,
         side: 'SELL', marketCap: Number(trade.marketCapUsd),
-        price: priceAtMarketCap(trade.marketCapUsd, trade.observedPriceUsd, derivedPrice(trade)),
+        price: priceAtMarketCap(trade.marketCapUsd, trade.observedPriceUsd, nonFactualPrice(trade)),
         label: labels.exit, closeLabel: labels.hide
       });
     });

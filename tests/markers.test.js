@@ -5,6 +5,10 @@ const path = require('node:path');
 
 global.Tango = {};
 require('../src/core/chains.js');
+require('../src/core/supply.js');
+require('../src/shared/constants.js');
+const State = require('../src/core/state.js');
+const Engine = require('../src/core/engine.js');
 const { buildPayload } = require('../src/content/markers.js');
 const chartSource = fs.readFileSync(path.resolve(__dirname, '../src/content/chart-main.js'), 'utf8');
 
@@ -152,6 +156,49 @@ test('synthetic market-cap prices stay off the price axis until a real ratio ref
 test('chart cache identity includes chain as well as token address', () => {
   assert.match(chartSource, /markerState\?\.chain !== nextState\?\.chain/);
   assert.match(chartSource, /markerState\?\.tokenAddress !== nextState\?\.tokenAddress/);
+});
+
+test('actual engine fallback provenance reprices markers from a factual live ratio with verified 100B supply', () => {
+  const baseAddress = '0x1111111111111111111111111111111111111111';
+  const token = {
+    chain: 'base', address: baseAddress, symbol: 'FALLBACK',
+    metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+  };
+  const settings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { base: { networkFeeNative: 0 } }
+  });
+  const state = State.createInitialState({ now: 1, initialBalances: { base: 10 } });
+  state.initialized = true;
+  const fallback = {
+    chain: 'base', address: baseAddress,
+    priceUsd: 3_200 / 1_000_000_000, marketCapUsd: 3_200,
+    totalSupply: 1_000_000_000, supplySource: 'UNKNOWN_FALLBACK',
+    nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000,
+    source: 'TANGO_FALLBACK', valuationMode: 'PRICE',
+    priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+    syntheticTokenPrice: true, provisional: true, paperFallback: true
+  };
+  const bought = Engine.executeBuy(state, { token, quote: fallback, amountNative: 1 }, settings, 1_000);
+  assert.equal(bought.position.averageEntryPriceProvenance, 'SYNTHETIC_PRICE');
+  assert.equal(bought.trade.priceProvenance, 'SYNTHETIC_PRICE');
+
+  const factual = {
+    token,
+    quote: {
+      priceUsd: 0.002, marketCapUsd: 200_000_000,
+      totalSupply: 100_000_000_000, supplySource: 'GMGN_EXACT',
+      priceProvenance: 'OBSERVED_PRICE', source: 'GMGN_NETWORK'
+    }
+  };
+  const payload = buildPayload({
+    current: factual, position: bought.position, trades: bought.state.trades, labels
+  });
+  const factualPriceAtEntryMarketCap = 0.002 * bought.position.averageEntryMarketCap / 200_000_000;
+
+  assert.equal(payload.currentPrice, 0.002);
+  assert.equal(payload.markers[0].marketCap, 3_200);
+  assert.equal(payload.markers[0].price, factualPriceAtEntryMarketCap);
+  assert.notEqual(payload.markers[0].price, bought.position.averageEntryPriceUsd);
 });
 
 test('an empty marker payload clears overlay and every cached chart placement', () => {

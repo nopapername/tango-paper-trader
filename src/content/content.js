@@ -830,12 +830,29 @@
       return null;
     }
     const now = Date.now();
+    const provenance = String(candidate?.priceProvenance || '').toUpperCase();
+    const provisionalTokenPrice = candidate?.syntheticTokenPrice === true
+      || candidate?.provisionalTokenPrice === true
+      || provenance === 'SYNTHETIC_PRICE'
+      || provenance.startsWith('FALLBACK_')
+      || String(candidate?.source || '').toUpperCase() === 'TANGO_FALLBACK';
+    const provisionalNativePrice = candidate?.syntheticNativePrice === true
+      || candidate?.provisionalNativePrice === true;
+    const originalObservedAt = Number(candidate?.originalObservedAt ?? candidate?.observedAt ?? 0);
+    const nativeOriginalObservedAt = Number(
+      candidate?.nativeOriginalObservedAt ?? candidate?.nativePriceObservedAt ?? 0
+    );
     return {
       ...(candidate || {}),
       chain: chain.id,
       address: Tango.Chains.normalizeAddress(chain.id, token.address || token.tokenAddress),
-      observedAt: now,
-      nativePriceObservedAt: now,
+      observedAt: provisionalTokenPrice ? now : candidate?.observedAt,
+      ...(candidate?.priceObservedAt != null ? {
+        priceObservedAt: provisionalTokenPrice ? now : candidate.priceObservedAt
+      } : {}),
+      nativePriceObservedAt: provisionalNativePrice ? now : candidate?.nativePriceObservedAt,
+      ...(provisionalTokenPrice ? { originalObservedAt } : {}),
+      ...(provisionalNativePrice ? { nativeOriginalObservedAt } : {}),
       paperFallback: true
     };
   }

@@ -383,6 +383,19 @@
       && !resolvedQuoteSupply;
     const fallbackSupplyDimension = quote?.valuationMode === 'MARKET_CAP'
       && ['LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE'].includes(String(resolvedQuoteSupply?.source || ''));
+    const provenance = String(quote?.priceProvenance || '').toUpperCase();
+    const syntheticTokenPrice = quote?.syntheticTokenPrice === true
+      || quote?.provisionalTokenPrice === true
+      || provenance === 'SYNTHETIC_PRICE'
+      || provenance.startsWith('FALLBACK_');
+    const usesFactualMarketCap = quote?.valuationMode === 'MARKET_CAP'
+      && positiveFinite(quote?.marketCapUsd) && !syntheticTokenPrice;
+    const usesFactualPrice = !usesFactualMarketCap
+      && positiveFinite(quote?.priceUsd) && !syntheticTokenPrice;
+    const factualObservedAt = usesFactualMarketCap
+      ? (quote?.marketCapObservedAt ?? observedAt)
+      : usesFactualPrice ? (quote?.priceObservedAt ?? observedAt) : observedAt;
+    const observationTimes = [observedAt, nativePriceObservedAt, factualObservedAt];
     const missingCalibrationDimension = quote?.provisional === true
       && quote?.syntheticTokenPrice !== true
       && quote?.syntheticNativePrice !== true
@@ -395,13 +408,14 @@
       || missingCalibrationDimension
       || (quote.marketCapDivisor != null && !finiteBetween(quote.marketCapDivisor, Number.EPSILON, Number.MAX_VALUE))
       || !Number.isSafeInteger(clock) || clock < 0
-      || typeof observedAt !== 'number' || !Number.isSafeInteger(observedAt) || observedAt <= 0
-      || typeof nativePriceObservedAt !== 'number'
-      || !Number.isSafeInteger(nativePriceObservedAt) || nativePriceObservedAt <= 0
+      || observationTimes.some((value) => (
+        typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0
+      ))
       || !finiteBetween(maxAge, 1, MAX_QUOTE_AGE_MS)
-      || observedAt - clock > MAX_FUTURE_SKEW_MS
-      || nativePriceObservedAt - clock > MAX_FUTURE_SKEW_MS) return { ok: false, reason: 'invalidQuote' };
-    if (clock - observedAt > maxAge || clock - nativePriceObservedAt > maxAge) {
+      || observationTimes.some((value) => value - clock > MAX_FUTURE_SKEW_MS)) {
+      return { ok: false, reason: 'invalidQuote' };
+    }
+    if (observationTimes.some((value) => clock - value > maxAge)) {
       return { ok: false, reason: 'staleQuote' };
     }
     return { ok: true };
