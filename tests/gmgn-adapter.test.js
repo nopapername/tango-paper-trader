@@ -55,13 +55,19 @@ function quickBuyHarness({
   };
   card.parentElement = column;
   let replacement = null;
+  let elsewhereReplacement = null;
   let slotRect = { height: 24, width: 80 };
   let nativeRect = { height: 24, width: 80 };
   const nativeControl = {
-    isConnected: true, reparented: 0, restored: 0, realHandlerCalls: 0,
+    isConnected: true, connectedElsewhere: false, reparented: 0, restored: 0, realHandlerCalls: 0,
     textContent: '0.1 SOL',
     getBoundingClientRect: () => ({ ...nativeRect }),
-    replaceWith(node) { this.isConnected = false; node.isConnected = true; replacement = node; },
+    replaceWith(node) {
+      this.isConnected = false;
+      node.isConnected = true;
+      if (this.connectedElsewhere) elsewhereReplacement = node;
+      else replacement = node;
+    },
     remove() { this.isConnected = false; }
   };
   const classes = new Set();
@@ -80,7 +86,9 @@ function quickBuyHarness({
     appendChild(node) { node.isConnected = true; replacement = node === nativeControl ? null : node; return node; },
     querySelector(selector) {
       if (selector === '.tango-list-quick-buy') return replacement;
-      if (selector === '[data-testid="quickbuy"]') return nativeControl.isConnected ? nativeControl : null;
+      if (selector === '[data-testid="quickbuy"]') {
+        return nativeControl.isConnected && !nativeControl.connectedElsewhere ? nativeControl : null;
+      }
       return null;
     },
     querySelectorAll(selector) {
@@ -114,11 +122,14 @@ function quickBuyHarness({
   };
   return {
     card, slot, document, nativeControl, classes,
+    connectNativeElsewhere() { nativeControl.connectedElsewhere = true; nativeControl.isConnected = true; },
     setVisibleSlots(slots) { visibleSlots = slots; },
     setColumnAmount(value) { columnAmount = String(value); },
     setSlotRect(rect) { slotRect = { ...slotRect, ...rect }; },
     setNativeRect(rect) { nativeRect = { ...nativeRect, ...rect }; },
-    get replacement() { return replacement; }
+    get replacement() { return replacement; },
+    get elsewhereReplacement() { return elsewhereReplacement; },
+    get paperControlCount() { return replacement?.isConnected ? 1 : 0; }
   };
 }
 
@@ -900,6 +911,46 @@ test('amount-driven paper rebind preserves and restores the current native contr
     assert.equal(harness.nativeControl.restored, 1);
     assert.equal(harness.nativeControl.reparented, 0);
     assert.equal(harness.replacement, null);
+  } finally {
+    delete require.cache[modulePath];
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+    global.Tango.GMGN = original.gmgn;
+  }
+});
+
+test('amount-driven rebind leaves a connected stale native control elsewhere and paper in the live slot', () => {
+  const modulePath = require.resolve('../src/adapters/gmgn.js');
+  const original = {
+    document: global.document, location: global.location, raf: global.requestAnimationFrame,
+    gmgn: global.Tango.GMGN
+  };
+  delete require.cache[modulePath];
+  const freshGmgn = require(modulePath);
+  const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(freshGmgn.discoverTokenCards(() => {}), 1);
+    const firstPaperControl = harness.replacement;
+    harness.connectNativeElsewhere();
+    harness.setColumnAmount('0.25');
+
+    assert.equal(freshGmgn.discoverTokenCards(() => {}), 1);
+    assert.equal(firstPaperControl.isConnected, false);
+    assert.equal(harness.nativeControl.isConnected, true);
+    assert.equal(harness.elsewhereReplacement, null);
+    assert.equal(harness.paperControlCount, 1);
+    assert.equal(harness.slot.dataset.tangoAmountSol, '0.25');
+
+    freshGmgn.clearQuickBuy();
+
+    assert.equal(harness.paperControlCount, 0);
+    assert.equal(harness.nativeControl.isConnected, true);
+    assert.equal(harness.nativeControl.restored, 0);
+    assert.equal(harness.nativeControl.reparented, 0);
   } finally {
     delete require.cache[modulePath];
     global.document = original.document;

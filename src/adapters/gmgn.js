@@ -885,7 +885,9 @@
         removeDuplicatePaperControls(slot, existingBinding.replacement);
         continue;
       }
-      const preservedNativeControl = existingBinding && quickBuyBindingMatches(slot, existingBinding, chain)
+      const preservedNativeControl = existingBinding?.nativeControl
+        && !existingBinding.nativeControl.isConnected
+        && quickBuyBindingMatches(slot, existingBinding, chain)
         ? existingBinding.nativeControl : null;
       if (existingBinding) restoreQuickBuySlot(slot, false);
       if (!nativeControl) nativeControl = preservedNativeControl || slot.querySelector('[data-testid="quickbuy"]');
