@@ -6,17 +6,15 @@ Tango Paper Trader is a bilingual, local-first Chrome extension for paper tradin
 
 - GMGN token-detail trading overlay for all six registered chains
 - An independent native-asset paper account for each chain: SOL on Solana, ETH on Ethereum, ETH on Base, BNB on BNB Chain, ETH on Robinhood Chain, and OKB on X Layer
-- Each new chain account is initialized exactly once with 10 units of that chain's native asset; migrations preserve the existing Solana account and initialize only previously absent chain accounts
-- First-run setup selects the language; each chain starts with 10 native units, and principal can be changed later through a selected-chain reset
+- First-run onboarding lets the user choose language and one common paper-capital amount, defaulting to 10
+- All six independent chain accounts receive that chosen numeric amount in their own native asset; the amount is shared numerically, not converted into a shared USD balance
 - First install opens the onboarding dashboard once; extension updates do not reopen onboarding
-- Each account begins with the same numeric native capital: 10 native units on each of the six independent chains (the units are native assets, not a shared USD balance)
 - Master enable/disable switch that removes all GMGN overlays and quick-buy replacements
 - Trading and chain-scoped portfolio operations are current-chain-only: balance, PnL, positions, history, calendar, CSV export, and close actions stay on the selected chain
 - Only the active chain supplies the balance, positions, history, and header asset; chain changes do not merge portfolios or show another chain's native asset as the active balance
 - JSON import and export form a full six-chain backup
-- The all-chain reset is explicit and permanent, while the selected-chain reset preserves every other chain
-- The all-chain reset requires confirmation and resets every chain; use the selected-chain reset when only one paper account should be reinitialized
-- Buy presets, network fee, and reset principal are per-chain
+- Changing common capital requires explicit confirmation and atomically resets every chain: balances, positions, trades, PnL/analytics, and calibrations are cleared while preserving other settings
+- Buy presets and network fee are per-chain; common capital is shared across all six independent chain accounts
 - Sell presets, slippage, platform fee, confirmation, fast mode, sound, language, theme, enabled state, and selected chain are global
 - A read-only all-chain USD asset and paper-PnL summary in the Popup and Dashboard; it reports incomplete native-price coverage rather than enabling cross-chain actions
 - Always-visible current-chain paper balance and PnL bar

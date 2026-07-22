@@ -28,31 +28,35 @@ function smokeTable() {
   };
 }
 
-test('README separates current-chain operations from full backup and reset scopes', () => {
+test('README separates current-chain operations from full backup and common-capital reset scopes', () => {
   assert.doesNotMatch(readme, /Current-chain-only[^\n]*(?:settings|exports|resets)/i);
   assert.match(readme, /Trading and chain-scoped portfolio operations are current-chain-only/);
   assert.match(readme, /JSON import and export form a full six-chain backup/);
-  assert.match(readme, /The all-chain reset is explicit and permanent, while the selected-chain reset preserves every other chain/);
+  assert.match(readme, /changing common capital requires explicit confirmation and atomically resets every chain/i);
+  assert.match(readme, /balances, positions, trades, PnL\/analytics, and calibrations/i);
+  assert.match(readme, /preserving other settings/i);
 });
 
 test('README identifies per-chain and global settings', () => {
-  assert.match(readme, /Buy presets, network fee, and reset principal are per-chain/);
+  assert.match(readme, /Buy presets and network fee are per-chain/);
+  assert.match(readme, /common capital is shared across all six independent chain accounts/i);
   assert.match(readme, /Sell presets, slippage, platform fee, confirmation, fast mode, sound, language, theme, enabled state, and selected chain are global/);
 });
 
-test('README describes first-run principal as fixed per chain rather than user-entered', () => {
-  assert.doesNotMatch(readme, /First-run language and paper balance setup/i);
-  assert.match(readme, /First-run setup selects the language; each chain starts with 10 native units/i);
-  assert.match(readme, /principal can be changed later through a selected-chain reset/i);
+test('README describes user-chosen first-run common capital rather than a fixed or selected-chain principal', () => {
+  assert.doesNotMatch(readme, /principal can be changed later through a selected-chain reset/i);
+  assert.doesNotMatch(readme, /same numeric native capital: 10 native units/i);
+  assert.match(readme, /First-run onboarding lets the user choose language and one common paper-capital amount, defaulting to 10/i);
+  assert.match(readme, /All six independent chain accounts receive that chosen numeric amount in their own native asset/i);
 });
 
 test('release documentation covers resilient paper-trading behavior and its paper-only boundary', () => {
   assert.match(readme, /first install opens the onboarding dashboard once; extension updates do not reopen onboarding/i);
-  assert.match(readme, /same numeric native capital: 10 native units on each of the six independent chains/i);
+  assert.match(readme, /common paper-capital amount, defaulting to 10/i);
   assert.match(readme, /only the active chain supplies the balance, positions, history, and header asset/i);
   assert.match(readme, /GMGN live data takes precedence.*K-line.*market-cap/i);
   assert.match(readme, /fallback opens at \$3,200 market cap with a provisional 1B supply divisor/i);
-  assert.match(readme, /all-chain reset requires confirmation and resets every chain/i);
+  assert.match(readme, /changing common capital requires explicit confirmation and atomically resets every chain/i);
   assert.match(readme, /no wallet connection, signature, approval, swap, transaction broadcast, RPC broadcast, or real funds/i);
 
   assert.match(smoke, /four GMGN sizes in each of the two trench columns/i);
@@ -66,6 +70,11 @@ test('release documentation covers resilient paper-trading behavior and its pape
   assert.match(smoke, /disabl.*clear.*marker/i);
   assert.match(smoke, /Do not click GMGN.*real.*buy.*sell.*wallet.*approval.*sign/i);
   assert.match(smoke, /Load unpacked.*dist\/tango-paper-trader/i);
+  assert.match(smoke, /default.*10/i);
+  assert.match(smoke, /non-default common capital of 12\.5/i);
+  assert.match(smoke, /all six.*12\.5.*own native asset/i);
+  assert.match(smoke, /confirmed common-capital reset.*balances, positions, trades, PnL\/analytics, and calibrations/i);
+  assert.doesNotMatch(smoke, /selected-chain reset leaves the other five unchanged/i);
   assert.match(buildScript, /docs[\\/]multichain-smoke-test\.md/, 'unpacked release must include only the paper-only smoke checklist');
 });
 
