@@ -44,7 +44,7 @@
     function mutate(command) {
       return serialized(async () => {
         const { state, settings } = await readSnapshot({
-          persistMigration: !['RESET_CHAIN', 'IMPORT'].includes(command?.type)
+          persistMigration: !['RESET_CHAIN', 'RESET_ALL_WITH_BALANCE', 'IMPORT'].includes(command?.type)
         });
         if (command?.type === 'INITIALIZE') {
           const nextSettings = Tango.State.normalizeSettings({ ...settings, language: command.language });
@@ -111,6 +111,46 @@
             [Tango.SETTINGS_KEY]: importedSettings
           });
           return { state: importedState, settings: importedSettings };
+        }
+        if (command?.type === 'RESET_ALL_WITH_BALANCE') {
+          const balanceNative = command.balanceNative;
+          if (typeof balanceNative !== 'number' || !Number.isFinite(balanceNative)
+            || balanceNative <= Number.EPSILON || balanceNative > 1e15) {
+            throw new Error('invalidResetPrincipal');
+          }
+          const patch = command.settingsPatch === undefined ? {} : command.settingsPatch;
+          if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('invalidSettings');
+          const { chains: chainPatches, ...topLevelPatch } = patch;
+          const patchedChains = { ...settings.chains };
+          if (chainPatches !== undefined) {
+            if (!chainPatches || typeof chainPatches !== 'object' || Array.isArray(chainPatches)) {
+              throw new Error('invalidSettings');
+            }
+            const canonicalChainIds = new Set(Tango.Chains.all().map((chain) => chain.id));
+            for (const [chainId, chainPatch] of Object.entries(chainPatches)) {
+              if (!canonicalChainIds.has(chainId) || !chainPatch
+                || typeof chainPatch !== 'object' || Array.isArray(chainPatch)) {
+                throw new Error('invalidSettings');
+              }
+              patchedChains[chainId] = { ...patchedChains[chainId], ...chainPatch };
+            }
+          }
+          const nextSettings = Tango.State.normalizeSettings({
+            ...settings,
+            ...topLevelPatch,
+            ...(command.language === undefined ? {} : { language: command.language }),
+            chains: Object.fromEntries(Tango.Chains.all().map((chain) => [chain.id, {
+              ...patchedChains[chain.id],
+              initialBalanceNative: balanceNative
+            }]))
+          }, { strict: true, requireAllChains: true });
+          const nextState = Tango.State.resetAll(nextSettings, now());
+          nextState.stateRevision = Number(state.stateRevision || 0) + 1;
+          await writeRaw({
+            [Tango.STORAGE_KEY]: nextState,
+            [Tango.SETTINGS_KEY]: nextSettings
+          });
+          return { state: nextState, settings: nextSettings };
         }
         let result;
         if (command?.type === 'EXECUTE_BUY') {

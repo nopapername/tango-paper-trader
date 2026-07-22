@@ -107,6 +107,32 @@ test('chain reset leaves other chain accounts intact and reset all recreates all
   assert.equal(allReset.accounts.bsc.cashBalanceNative, 10);
 });
 
+test('resetAllWithBalance exposes one common-capital coordinator mutation', async () => {
+  const messages = [];
+  const chrome = {
+    runtime: {
+      async sendMessage(message) {
+        messages.push(message);
+        return { ok: true, result: { state: { initialized: true }, settings: { language: 'zh-CN' } } };
+      }
+    },
+    storage: {
+      local: { get: async () => ({}), set: async () => undefined },
+      onChanged: { addListener() {} }
+    }
+  };
+  const { store } = loadStore({ chrome });
+
+  assert.equal(typeof store.resetAllWithBalance, 'function');
+  const result = await store.resetAllWithBalance(42, 'zh-CN');
+
+  assert.equal(result.state.initialized, true);
+  assert.equal(JSON.stringify(messages), JSON.stringify([{
+    type: 'TANGO_STORE_MUTATE',
+    command: { type: 'RESET_ALL_WITH_BALANCE', balanceNative: 42, language: 'zh-CN' }
+  }]));
+});
+
 test('storage clients expose intent mutations instead of requiring caller-owned state writes', async () => {
   const values = new Map();
   const { store } = loadStore({

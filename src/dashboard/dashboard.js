@@ -20,6 +20,7 @@
     tab: initialTab,
     month: new Date(),
     filters: { search: '', side: 'ALL', result: 'ALL', date: '' },
+    onboardingStatus: '',
     toast: '',
     loadError: ''
   };
@@ -155,10 +156,56 @@
   }
 
   function renderSetupRequired() {
+    const onboardingLanguage = Tango.I18n.resolveLanguage(runtime.settings?.language);
     app.innerHTML = `<div class="onboarding-page"><section class="onboarding card">
       <div class="brand" style="justify-content:center;padding:0"><span class="dot"></span>TANGO <span class="badge">${t('paper')}</span></div>
-      <h1>${t('setup')}</h1><p>${t('setupInPopup')}</p>
+      <h1>${t('setup')}</h1><p>${t('onboardingCommonCapital')}</p>
+      <p>${t('independentChains')}</p><p>${t('paperOnly')}</p><p>${t('settingsAvailableLater')}</p>
+      <label class="field onboarding-field"><span>${t('language')}</span><select class="select" id="onboarding-language" value="${esc(onboardingLanguage)}"><option value="zh-CN" ${onboardingLanguage === 'zh-CN' ? 'selected' : ''}>${t('chinese')}</option><option value="en" ${onboardingLanguage === 'en' ? 'selected' : ''}>${t('english')}</option></select></label>
+      <label class="field onboarding-field"><span>${t('commonCapital')}</span><input class="input custom-balance" id="onboarding-balance" type="number" min="0.01" max="1000000000000000" step="any" value="10"></label>
+      <button class="button primary onboarding-submit" id="complete-onboarding">${t('startPaperTrading')}</button>
+      ${runtime.onboardingStatus ? `<p class="onboarding-status">${esc(t(runtime.onboardingStatus))}</p>` : ''}
     </section></div>`;
+    app.querySelector('#complete-onboarding')?.addEventListener('click', completeOnboarding);
+  }
+
+  function validCommonCapital(value) {
+    return typeof value === 'number' && Number.isFinite(value)
+      && value > Number.EPSILON && value <= 1e15;
+  }
+
+  function verifiedCommonCapital(data, balanceNative) {
+    if (!data?.state?.initialized) return false;
+    return Tango.Chains.all().every((chain) => (
+      data.state.accounts?.[chain.id]?.initialBalanceNative === balanceNative
+      && data.state.accounts?.[chain.id]?.cashBalanceNative === balanceNative
+      && data.settings?.chains?.[chain.id]?.initialBalanceNative === balanceNative
+    ));
+  }
+
+  async function completeOnboarding() {
+    const balanceNative = Number(app.querySelector('#onboarding-balance')?.value);
+    const language = app.querySelector('#onboarding-language')?.value;
+    if (!validCommonCapital(balanceNative)) {
+      runtime.onboardingStatus = 'invalidCommonCapital';
+      render();
+      return;
+    }
+    try {
+      await Tango.Store.resetAllWithBalance(balanceNative, language);
+      const persisted = await Tango.Store.getAll();
+      if (!verifiedCommonCapital(persisted, balanceNative)) throw new Error('onboardingVerificationFailed');
+      runtime.state = persisted.state;
+      runtime.settings = persisted.settings;
+      runtime.onboardingStatus = '';
+      global.close();
+      if (!global.closed) {
+        app.innerHTML = `<div class="onboarding-page"><section class="onboarding card onboarding-complete"><h1>${t('onboardingComplete')}</h1><p>${t('onboardingCompleteHint')}</p></section></div>`;
+      }
+    } catch {
+      runtime.onboardingStatus = 'onboardingVerificationFailed';
+      render();
+    }
   }
 
   function renderTab(view) {
@@ -254,7 +301,7 @@
       <div class="field"><label>${t('displayCurrency')}</label><select class="select" id="setting-currency"><option value="NATIVE" ${settings.displayCurrency === 'NATIVE' || settings.displayCurrency === 'SOL' ? 'selected' : ''}>Native</option><option value="USD" ${settings.displayCurrency === 'USD' ? 'selected' : ''}>USD</option></select></div>
       <div class="field"><label>Theme</label><select class="select" id="setting-theme"><option value="dark" ${settings.theme === 'dark' || settings.theme === 'auto' ? 'selected' : ''}>Dark</option><option value="light" ${settings.theme === 'light' ? 'selected' : ''}>Light</option></select></div>
       <div class="field"><label>${label('Buy presets', '买入预设')} · ${esc(view.chain.nativeSymbol)}</label><input class="input" id="setting-buy-presets" value="${esc((chainSettings.buyPresets || []).join(', '))}"></div>
-      <div class="field"><label>${t('startingBalance')} · ${esc(view.chain.nativeSymbol)}</label><input class="input" id="setting-initial-balance" type="number" min="0.01" step="0.01" value="${esc(chainSettings.initialBalanceNative || 10)}"></div>
+      <div class="field common-capital-field"><label>${t('commonCapital')}</label><input class="input" id="setting-common-balance" type="number" min="0.01" max="1000000000000000" step="any" value="${esc(chainSettings.initialBalanceNative || 10)}"><small>${t('independentChains')}</small></div>
       <div class="field"><label>${t('networkFee')} · ${esc(view.chain.nativeSymbol)}</label><input class="input" id="setting-network-fee" type="number" min="0" step="0.0001" value="${esc(chainSettings.networkFeeNative || 0)}"></div>
       <div class="field"><label>${label('Sell presets', '卖出预设')} · %</label><input class="input" id="setting-sell-presets" value="${esc((settings.sellPresets || []).join(', '))}"></div>
       <div class="field"><label>${t('slippage')} (bps)</label><input class="input" id="setting-slippage" type="number" min="0" max="5000" value="${settings.slippageBps}"></div>
@@ -329,7 +376,7 @@
         theme: app.querySelector('#setting-theme').value,
         buyPresets: parsePresets(app.querySelector('#setting-buy-presets').value, view.chainSettings.buyPresets),
         networkFeeNative: Number(app.querySelector('#setting-network-fee').value),
-        initialBalanceNative: Number(app.querySelector('#setting-initial-balance').value),
+        commonBalanceNative: Number(app.querySelector('#setting-common-balance').value),
         sellPresets: parsePresets(app.querySelector('#setting-sell-presets').value, runtime.settings.sellPresets),
         slippageBps: Number(app.querySelector('#setting-slippage').value),
         platformFeeBps: Number(app.querySelector('#setting-platform-fee').value),
@@ -339,28 +386,50 @@
         soundEnabled: app.querySelector('#setting-sound').checked,
         showListQuickBuy: app.querySelector('#setting-list-buy').checked
       };
+      if (!validCommonCapital(form.commonBalanceNative)) {
+        showToast(t('invalidCommonCapital'));
+        return;
+      }
+      const commonCapitalChanged = Tango.Chains.all().some((chain) => (
+        Number(runtime.settings.chains?.[chain.id]?.initialBalanceNative) !== form.commonBalanceNative
+      ));
+      const settingsPatch = {
+        language: form.language,
+        displayCurrency: form.displayCurrency,
+        theme: form.theme,
+        sellPresets: form.sellPresets,
+        slippageBps: form.slippageBps,
+        platformFeeBps: form.platformFeeBps,
+        pnlBarPosition: form.pnlBarPosition,
+        fastMode: form.fastMode,
+        confirmationEnabled: form.confirmationEnabled,
+        soundEnabled: form.soundEnabled,
+        showListQuickBuy: form.showListQuickBuy,
+        chains: {
+          [chainId]: {
+            buyPresets: form.buyPresets,
+            networkFeeNative: form.networkFeeNative
+          }
+        }
+      };
+      if (commonCapitalChanged && !global.confirm(t('commonCapitalResetConfirm'))) return;
+      if (commonCapitalChanged) {
+        try {
+          await runtime.settingsWrite;
+          const reset = await Tango.Store.resetAllWithBalance(form.commonBalanceNative, form.language, settingsPatch);
+          runtime.state = reset.state;
+          runtime.settings = reset.settings;
+          showToast(t('confirm'));
+        } catch {
+          try { await load(); } catch { /* keep the last rendered snapshot */ }
+          showToast(t('settingsSaveFailed'));
+          return;
+        }
+        return;
+      }
       let saved;
       try {
-        saved = await queueSettingsMutation({
-          language: form.language,
-          displayCurrency: form.displayCurrency,
-          theme: form.theme,
-          sellPresets: form.sellPresets,
-          slippageBps: form.slippageBps,
-          platformFeeBps: form.platformFeeBps,
-          pnlBarPosition: form.pnlBarPosition,
-          fastMode: form.fastMode,
-          confirmationEnabled: form.confirmationEnabled,
-          soundEnabled: form.soundEnabled,
-          showListQuickBuy: form.showListQuickBuy,
-          chains: {
-            [chainId]: {
-              buyPresets: form.buyPresets,
-              networkFeeNative: form.networkFeeNative,
-              initialBalanceNative: form.initialBalanceNative
-            }
-          }
-        });
+        saved = await queueSettingsMutation(settingsPatch);
       } catch {
         showToast(t('settingsSaveFailed'));
         return;

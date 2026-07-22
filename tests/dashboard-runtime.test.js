@@ -37,7 +37,7 @@ function settingsFixture() {
     pnlBarPosition: 'bottom', fastMode: false, confirmationEnabled: true,
     soundEnabled: true, showListQuickBuy: true,
     chains: Object.fromEntries(Chains.all().map((chain) => [chain.id, {
-      buyPresets: [1], networkFeeNative: 0.001, initialBalanceNative: chain.id === 'bsc' ? 25 : 10
+      buyPresets: [1], networkFeeNative: 0.001, initialBalanceNative: 10
     }]))
   };
 }
@@ -52,7 +52,8 @@ function mergeSettingsPatch(settings, patch) {
 
 async function loadDashboard({
   deferThirdGetAll = false, failFirstGetAll = false, failAction = '',
-  dashboardLocation = { hash: '', search: '' }
+  dashboardLocation = { hash: '', search: '' }, initialized = true,
+  closeSucceeds = true, corruptResetReadback = false
 } = {}) {
   const appElements = new Map();
   let document;
@@ -100,10 +101,11 @@ async function loadDashboard({
   };
   const fileInput = createElement('#import-file');
   let persistedState = stateFixture();
+  persistedState.initialized = initialized;
   let persistedSettings = settingsFixture();
   const refreshedSettings = deferred();
   let getAllCalls = 0;
-  const calls = { getAll: 0, saves: [], fullSaves: [], resetChain: [], resetAll: 0, exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [] };
+  const calls = { getAll: 0, saves: [], fullSaves: [], resetChain: [], resetAll: 0, resetAllWithBalance: [], exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [], close: 0, sequence: [] };
   const anchors = [];
   const urls = new Map();
   let urlId = 0;
@@ -158,8 +160,14 @@ async function loadDashboard({
       getAll() {
         getAllCalls += 1;
         calls.getAll += 1;
+        calls.sequence.push('read');
         if (failFirstGetAll && getAllCalls === 1) return Promise.reject(new Error('storage unavailable'));
         if (deferThirdGetAll && getAllCalls === 3) return refreshedSettings.promise.then(() => ({ state: persistedState, settings: persistedSettings }));
+        if (corruptResetReadback && calls.resetAllWithBalance.length) {
+          const corrupt = structuredClone(persistedState);
+          corrupt.accounts.eth.cashBalanceNative += 1;
+          return Promise.resolve({ state: corrupt, settings: persistedSettings });
+        }
         return Promise.resolve({ state: persistedState, settings: persistedSettings });
       },
       patchSettings(patch) {
@@ -180,6 +188,29 @@ async function loadDashboard({
         calls.resetAll += 1;
         if (failAction === 'reset-all') throw new Error('write failed');
         return persistedState;
+      },
+      async resetAllWithBalance(balanceNative, language, settingsPatch) {
+        calls.sequence.push('reset');
+        calls.resetAllWithBalance.push([balanceNative, language, settingsPatch]);
+        if (failAction === 'reset-all-with-balance') throw new Error('write failed');
+        persistedState = stateFixture();
+        persistedState.initialized = true;
+        persistedState.positions = {};
+        persistedState.trades = [];
+        for (const chain of Chains.all()) {
+          persistedState.accounts[chain.id] = {
+            initialBalanceNative: balanceNative, cashBalanceNative: balanceNative, realizedPnlNative: 0
+          };
+        }
+        const patchedSettings = mergeSettingsPatch(persistedSettings, settingsPatch || {});
+        persistedSettings = {
+          ...patchedSettings,
+          ...(language === undefined ? {} : { language }),
+          chains: Object.fromEntries(Chains.all().map((chain) => [chain.id, {
+            ...patchedSettings.chains[chain.id], initialBalanceNative: balanceNative
+          }]))
+        };
+        return { state: persistedState, settings: persistedSettings };
       },
       async exportData() { calls.exportData += 1; return { product: 'Tango Paper Trader', state: persistedState, settings: persistedSettings }; },
       async importData() { return { state: persistedState, settings: persistedSettings }; },
@@ -206,6 +237,8 @@ async function loadDashboard({
       revokeObjectURL() {}
     },
     setTimeout: (fn, delay) => { if (Number(delay) < 1_000) fn(); return 0; },
+    closed: false,
+    close() { calls.close += 1; calls.sequence.push('close'); if (closeSucceeds) context.closed = true; },
     confirm(message) { calls.confirms.push(message); return confirmImpl(message); },
     navigator: {}, ClipboardItem: class {},
     chrome: {
@@ -223,7 +256,7 @@ async function loadDashboard({
   let initialLoadError = null;
   try { await context.__dashboardTest.load(); } catch (error) { initialLoadError = error; }
   return {
-    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings, document, initialLoadError,
+    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings, document, context, initialLoadError,
     setConfirm(callback) { confirmImpl = callback; },
     get persistedSettings() { return persistedSettings; },
     set persistedSettings(value) { persistedSettings = value; }
@@ -233,7 +266,7 @@ async function loadDashboard({
 function fillSettingsForm(dashboard) {
   const fields = {
     '#setting-language': 'en', '#setting-currency': 'NATIVE', '#setting-theme': 'dark',
-    '#setting-buy-presets': '2, 4', '#setting-initial-balance': '30', '#setting-network-fee': '0.005',
+    '#setting-buy-presets': '2, 4', '#setting-network-fee': '0.005',
     '#setting-sell-presets': '50, 100', '#setting-slippage': '75', '#setting-platform-fee': '125',
     '#setting-bar-position': 'top'
   };
@@ -381,7 +414,7 @@ test('selected-chain reset waits for the visible BSC selection to persist and ne
   dashboard.calls.saves[0].gate.resolve();
   await selection;
   await reset;
-  assert.deepEqual(dashboard.calls.resetChain, [['bsc', 25]]);
+  assert.deepEqual(dashboard.calls.resetChain, [['bsc', 10]]);
   assert.match(dashboard.calls.confirms[0], /BNB Chain/);
   assert.match(dashboard.calls.confirms[0], /other chains.*preserv/i);
 });
@@ -486,7 +519,7 @@ test('selected-chain and all-chain reset actions stay separate', async () => {
   dashboard.api.runtime.selectedChain = 'bsc';
   dashboard.api.runtime.settings.selectedChain = 'bsc';
   await dashboard.api.action('reset-chain');
-  assert.deepEqual(dashboard.calls.resetChain, [['bsc', 25]]);
+  assert.deepEqual(dashboard.calls.resetChain, [['bsc', 10]]);
   assert.equal(dashboard.calls.resetAll, 0);
   await dashboard.api.action('reset-all');
   assert.equal(dashboard.calls.resetAll, 1);
@@ -506,10 +539,131 @@ test('saving Dashboard settings changes chain controls only for the selected cha
   assert.equal(Object.hasOwn(patch.chains, 'eth'), false);
   assert.deepEqual(Array.from(patch.chains.bsc.buyPresets), [2, 4]);
   assert.equal(patch.chains.bsc.networkFeeNative, 0.005);
-  assert.equal(patch.chains.bsc.initialBalanceNative, 30);
+  assert.equal(Object.hasOwn(patch.chains.bsc, 'initialBalanceNative'), false);
   assert.deepEqual(Array.from(patch.sellPresets), [50, 100]);
   dashboard.calls.saves[0].gate.resolve();
   await save;
+});
+
+test('Dashboard onboarding defaults to 10 and commits one verified six-chain reset before closing', async () => {
+  const dashboard = await loadDashboard({
+    initialized: false,
+    dashboardLocation: { hash: '', search: '?onboarding=1' }
+  });
+
+  assert.match(dashboard.app.innerHTML, /onboardingCommonCapital/);
+  assert.match(dashboard.app.innerHTML, /paperOnly/);
+  assert.match(dashboard.app.innerHTML, /independentChains/);
+  assert.equal(dashboard.element('#onboarding-balance').value, '10');
+  assert.equal(dashboard.element('#onboarding-language').value, 'en');
+  dashboard.element('#onboarding-balance').value = '12.5';
+  dashboard.element('#onboarding-language').value = 'zh-CN';
+  await dashboard.element('#complete-onboarding').click();
+
+  assert.deepEqual(dashboard.calls.resetAllWithBalance, [[12.5, 'zh-CN', undefined]]);
+  assert.deepEqual(dashboard.calls.sequence.slice(-3), ['reset', 'read', 'close']);
+  assert.equal(dashboard.context.closed, true);
+  assert.equal(dashboard.calls.saves.length, 0);
+});
+
+test('Dashboard onboarding invalid or interrupted forms persist nothing', async () => {
+  const interrupted = await loadDashboard({ initialized: false });
+  const balance = interrupted.element('#onboarding-balance');
+  const language = interrupted.element('#onboarding-language');
+  assert.ok(balance, 'onboarding balance control is rendered');
+  assert.ok(language, 'onboarding language control is rendered');
+  balance.value = '99';
+  language.value = 'zh-CN';
+  assert.deepEqual(interrupted.calls.resetAllWithBalance, []);
+  assert.deepEqual(interrupted.calls.saves, []);
+
+  interrupted.element('#onboarding-balance').value = '0';
+  await interrupted.element('#complete-onboarding').click();
+  assert.deepEqual(interrupted.calls.resetAllWithBalance, []);
+  assert.match(interrupted.app.innerHTML, /invalidCommonCapital/);
+});
+
+test('Dashboard onboarding stays open when persisted read-back is not the requested six-chain balance', async () => {
+  const dashboard = await loadDashboard({ initialized: false, corruptResetReadback: true });
+  const complete = dashboard.element('#complete-onboarding');
+  assert.ok(complete, 'onboarding completion control is rendered');
+  await complete.click();
+
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.equal(dashboard.calls.close, 0);
+  assert.match(dashboard.app.innerHTML, /onboardingVerificationFailed/);
+});
+
+test('Dashboard onboarding shows completion when the browser cannot close the tab', async () => {
+  const dashboard = await loadDashboard({ initialized: false, closeSucceeds: false });
+  const complete = dashboard.element('#complete-onboarding');
+  assert.ok(complete, 'onboarding completion control is rendered');
+  await complete.click();
+
+  assert.equal(dashboard.calls.close, 1);
+  assert.match(dashboard.app.innerHTML, /onboardingComplete/);
+});
+
+test('changing common capital requires confirmation and resets every chain through one mutation', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.tab = 'settings';
+  dashboard.api.render();
+  fillSettingsForm(dashboard);
+  const commonCapital = dashboard.element('#setting-common-balance');
+  assert.ok(commonCapital, 'common-capital control is rendered');
+  commonCapital.value = '30';
+  dashboard.setConfirm(() => false);
+
+  await dashboard.api.action('save-settings');
+  assert.deepEqual(dashboard.calls.resetAllWithBalance, []);
+  assert.deepEqual(dashboard.calls.saves, []);
+
+  dashboard.setConfirm(() => true);
+  const saving = dashboard.api.action('save-settings');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.equal(dashboard.calls.resetAllWithBalance[0][0], 30);
+  assert.equal(dashboard.calls.resetAllWithBalance[0][1], 'en');
+  assert.equal(dashboard.calls.resetAllWithBalance[0][2].theme, 'dark');
+  assert.match(dashboard.calls.confirms.at(-1), /commonCapitalResetConfirm/);
+  await saving;
+  assert.deepEqual(dashboard.calls.saves, []);
+  for (const chain of Chains.all()) {
+    assert.equal(dashboard.persistedSettings.chains[chain.id].initialBalanceNative, 30, chain.id);
+  }
+});
+
+test('saving a displayed principal reconciles legacy unequal chain principals', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.settings.chains.bsc.initialBalanceNative = 25;
+  dashboard.persistedSettings.chains.bsc.initialBalanceNative = 25;
+  dashboard.api.runtime.tab = 'settings';
+  dashboard.api.render();
+  fillSettingsForm(dashboard);
+
+  await dashboard.api.action('save-settings');
+
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.equal(dashboard.calls.resetAllWithBalance[0][0], 10);
+  assert.equal(dashboard.calls.saves.length, 0);
+  for (const chain of Chains.all()) {
+    assert.equal(dashboard.persistedSettings.chains[chain.id].initialBalanceNative, 10, chain.id);
+  }
+});
+
+test('language-only Dashboard settings changes remain a normal scoped patch', async () => {
+  const dashboard = await loadDashboard();
+  dashboard.api.runtime.tab = 'settings';
+  dashboard.api.render();
+  fillSettingsForm(dashboard);
+  dashboard.element('#setting-language').value = 'zh-CN';
+
+  const saving = dashboard.api.action('save-settings');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(dashboard.calls.resetAllWithBalance, []);
+  assert.equal(dashboard.calls.saves[0].patch.language, 'zh-CN');
+  dashboard.calls.saves[0].gate.resolve();
+  await saving;
 });
 
 test('CSV exports selected-chain rows while JSON export keeps the full state', async () => {

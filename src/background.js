@@ -22,6 +22,13 @@ const NATIVE_PRICE_CACHE_MS = Number(globalThis.Tango?.QUOTE_STALE_MS || 15_000)
 const TOKEN_QUOTE_CACHE_MS = 15_000;
 const positiveFinite = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
 const nonnegativeFiniteOrZero = (value) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
+let onboardingOpened = false;
+
+chrome.runtime.onInstalled.addListener(async ({ reason } = {}) => {
+  if (reason !== 'install' || onboardingOpened) return;
+  onboardingOpened = true;
+  await chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html?onboarding=1') });
+});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'TANGO_STORE_GET_ALL') {

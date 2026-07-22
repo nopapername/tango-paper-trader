@@ -147,9 +147,8 @@
     if (!state.initialized) {
       app.innerHTML = `<div class="popup">
         <div class="brand-row"><div class="brand"><span class="dot"></span>TANGO <span class="badge">${t('paper')}</span></div>${switchMarkup}</div>
-        <section class="setup-card"><h2>${t('setup')}</h2><p>${t('setupHint')}</p>
-          <label class="field"><span>${t('language')}</span><select id="setup-language"><option value="zh-CN" ${language() === 'zh-CN' ? 'selected' : ''}>${t('chinese')}</option><option value="en" ${language() === 'en' ? 'selected' : ''}>${t('english')}</option></select></label>
-          <button class="button" id="initialize">${t('startPaperTrading')}</button>
+        <section class="setup-card"><h2>${t('setup')}</h2><p>${t('onboardingPopupHint')}</p>
+          <button class="button" id="open-onboarding">${t('startPaperTrading')}</button>
         </section>
         ${settings.enabled ? '' : `<div class="disabled-note">${t('disabled')}</div>`}
       </div>`;
@@ -190,26 +189,14 @@
     document.querySelector('#master-enabled')?.addEventListener('change', async (event) => {
       await persistSettings({ enabled: event.target.checked });
     });
-    document.querySelector('#setup-language')?.addEventListener('change', (event) => {
-      settings.language = event.target.value;
-      render();
-    });
     document.querySelector('#account-language')?.addEventListener('change', async (event) => {
       await persistSettings({ language: event.target.value });
     });
     document.querySelector('#popup-chain')?.addEventListener('change', async (event) => {
       await saveSelectedChain(event.target.value);
     });
-    document.querySelector('#initialize')?.addEventListener('click', async () => {
-      await runStoreWrite(
-        () => Tango.Store.initialize(10, settings.language),
-        async (data) => {
-          state = data.state;
-          settings = data.settings;
-          render();
-          refreshNativePrices();
-        }
-      );
+    document.querySelector('#open-onboarding')?.addEventListener('click', () => {
+      global.chrome.tabs.create({ url: global.chrome.runtime.getURL('dashboard.html?onboarding=1') });
     });
     document.querySelector('#reset-chain-button')?.addEventListener('click', async () => {
       const chainId = visibleSelectedChain;

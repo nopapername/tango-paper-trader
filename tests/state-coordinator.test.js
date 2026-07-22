@@ -576,6 +576,121 @@ test('invalid selected-chain reset principals never write and do not poison the 
   assert.equal(committed.settings.chains.eth.initialBalanceNative, beforeSettings.chains.eth.initialBalanceNative);
 });
 
+test('common-capital reset atomically recreates all six paper accounts and preserves non-account settings', async () => {
+  const settings = State.normalizeSettings({
+    selectedChain: 'base', language: 'en', theme: 'light', displayCurrency: 'USD',
+    fastMode: true, confirmationEnabled: false, soundEnabled: false, showListQuickBuy: false,
+    slippageBps: 123, platformFeeBps: 45,
+    chains: {
+      eth: { buyPresets: [0.25, 0.5], networkFeeNative: 0.002, initialBalanceNative: 20 },
+      bsc: { buyPresets: [1, 2], networkFeeNative: 0.003, initialBalanceNative: 30 }
+    }
+  });
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const bought = Engine.executeBuy(initial, {
+    token: { chain: 'eth', address: '0x7777777777777777777777777777777777777777' },
+    quote: { priceUsd: 2, nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000 },
+    amountNative: 1
+  }, State.normalizeSettings({ ...settings, slippageBps: 0, platformFeeBps: 0, chains: {
+    ...settings.chains, eth: { ...settings.chains.eth, networkFeeNative: 0 }
+  } }), 1_000).state;
+  bought.dailyRealizedByChain.eth['2026-07-22'] = { native: 3, usd: 6_000 };
+  bought.calibrations = [{
+    id: 'calibration-1', chain: 'eth', tokenAddress: '0x7777777777777777777777777777777777777777',
+    reason: 'PRICE', fromPriceUsd: 1, toPriceUsd: 2, fromNativePriceUsd: 2_000,
+    toNativePriceUsd: 2_000, fromSupply: 0, toSupply: 0, quantityBefore: 1,
+    quantityAfter: 1, costBasisNative: 1, createdAt: 1_000
+  }];
+  const persistence = memoryPersistence(bought, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000
+  });
+
+  const committed = await coordinator.mutate({
+    type: 'RESET_ALL_WITH_BALANCE', balanceNative: 42, language: 'zh-CN'
+  });
+
+  assert.equal(persistence.writes.length, 1);
+  assert.deepEqual(Object.keys(persistence.writes[0]).sort(), [
+    global.Tango.SETTINGS_KEY,
+    global.Tango.STORAGE_KEY
+  ].sort());
+  assert.equal(committed.state.initialized, true);
+  assert.equal(committed.state.stateRevision, bought.stateRevision + 1);
+  assert.deepEqual(committed.state.positions, {});
+  assert.deepEqual(committed.state.trades, []);
+  assert.deepEqual(committed.state.calibrations, []);
+  for (const chain of global.Tango.Chains.all()) {
+    assert.equal(committed.state.accounts[chain.id].initialBalanceNative, 42, chain.id);
+    assert.equal(committed.state.accounts[chain.id].cashBalanceNative, 42, chain.id);
+    assert.equal(committed.state.accounts[chain.id].realizedPnlNative, 0, chain.id);
+    assert.deepEqual(committed.state.dailyRealizedByChain[chain.id], {}, chain.id);
+    assert.equal(committed.settings.chains[chain.id].initialBalanceNative, 42, chain.id);
+    assert.deepEqual(committed.settings.chains[chain.id].buyPresets, settings.chains[chain.id].buyPresets, chain.id);
+    assert.equal(committed.settings.chains[chain.id].networkFeeNative, settings.chains[chain.id].networkFeeNative, chain.id);
+  }
+  for (const field of [...GLOBAL_BOOLEAN_FIELDS, ...GLOBAL_ENUM_FIELDS, 'slippageBps', 'platformFeeBps']) {
+    assert.equal(committed.settings[field], field === 'language' ? 'zh-CN' : settings[field], field);
+  }
+});
+
+test('invalid common-capital reset inputs write nothing and do not poison the coordinator queue', async () => {
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  initial.accounts.eth.cashBalanceNative = 4;
+  const settings = State.normalizeSettings({ language: 'en', theme: 'light' });
+  const persistence = memoryPersistence(initial, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000
+  });
+
+  for (const balanceNative of [0, -1, NaN, Infinity, Number.EPSILON, 1e15 + 1, '10', null]) {
+    await assert.rejects(
+      coordinator.mutate({ type: 'RESET_ALL_WITH_BALANCE', balanceNative }),
+      /invalidResetPrincipal/
+    );
+    assert.equal(persistence.writes.length, 0, String(balanceNative));
+  }
+  const rejected = coordinator.mutate({ type: 'RESET_ALL_WITH_BALANCE', balanceNative: Infinity });
+  const accepted = coordinator.mutate({ type: 'RESET_ALL_WITH_BALANCE', balanceNative: 25 });
+  await assert.rejects(rejected, /invalidResetPrincipal/);
+  const committed = await accepted;
+  assert.equal(persistence.writes.length, 1);
+  assert.equal(committed.state.accounts.eth.cashBalanceNative, 25);
+  assert.equal(committed.settings.language, 'en');
+});
+
+test('common-capital reset applies submitted settings in the same atomic write', async () => {
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const settings = State.normalizeSettings({ theme: 'dark', displayCurrency: 'NATIVE' });
+  const persistence = memoryPersistence(initial, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000
+  });
+
+  const committed = await coordinator.mutate({
+    type: 'RESET_ALL_WITH_BALANCE', balanceNative: 30,
+    settingsPatch: { theme: 'light', displayCurrency: 'USD', chains: { eth: { networkFeeNative: 0.123 } } }
+  });
+
+  assert.equal(persistence.writes.length, 1);
+  assert.equal(committed.settings.theme, 'light');
+  assert.equal(committed.settings.displayCurrency, 'USD');
+  assert.equal(committed.settings.chains.eth.networkFeeNative, 0.123);
+  assert.equal(committed.settings.chains.bsc.networkFeeNative, settings.chains.bsc.networkFeeNative);
+  for (const chain of global.Tango.Chains.all()) {
+    assert.equal(committed.settings.chains[chain.id].initialBalanceNative, 30, chain.id);
+  }
+});
+
 test('imports normalize before one queued atomic state-and-settings write', async () => {
   const initial = State.createInitialState({ now: 1 });
   initial.initialized = true;

@@ -148,6 +148,7 @@ async function loadPopup({ failFirstGetAll = false, failAction = '', initialized
     confirm: (message) => { confirmations.push(message); return true; },
     chrome: {
       runtime: {
+        getURL(value) { return `chrome-extension://test/${value}`; },
         async sendMessage() { return { ok: true, price: 100, observedAt: 1 }; },
         openOptionsPage() {}
       },
@@ -175,14 +176,14 @@ test('Popup startup storage failure renders a retry that recovers', async () => 
   assert.match(popup.app.innerHTML, /id="popup-chain"/);
 });
 
-test('Popup initialization contains a rejected write, reloads authoritative setup state, and shows recovery feedback', async () => {
-  const popup = await loadPopup({ failAction: 'initialize', initialized: false });
-  const rejection = await popup.element('#initialize').click().then(() => null, (error) => error);
+test('Popup routes an uninitialized account to onboarding without writing fixed defaults', async () => {
+  const popup = await loadPopup({ initialized: false });
 
-  assert.equal(rejection, null);
-  assert.equal(popup.calls.initialize, 1);
-  assert.match(popup.app.innerHTML, /id="initialize"/);
-  assert.match(popup.app.innerHTML, /settingsSaveFailed/);
+  assert.match(popup.app.innerHTML, /id="open-onboarding"/);
+  await popup.element('#open-onboarding').click();
+
+  assert.equal(popup.calls.initialize, 0);
+  assert.deepEqual(popup.openedTabs, ['chrome-extension://test/dashboard.html?onboarding=1']);
 });
 
 test('Popup reset actions contain rejected writes and restore authoritative account UI', async () => {

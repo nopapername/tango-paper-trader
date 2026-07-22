@@ -80,6 +80,12 @@ tr:last-child td { border-bottom: 0; }
 .onboarding-page { align-items: center; display: flex; justify-content: center; min-height: 100vh; padding: 30px; }
 .onboarding { max-width: 520px; padding: 32px; text-align: center; width: 100%; }
 .onboarding h1 { margin: 13px 0 6px; }.onboarding p { color: var(--muted); }
+.onboarding-field { margin: 14px auto 0; max-width: 360px; text-align: left; }
+.onboarding-field .input,.onboarding-field .select { min-width: 0; width: 100%; }
+.onboarding-submit { margin-top: 18px; width: 100%; }
+.onboarding-status { color: var(--red) !important; font-size: 12px; }
+.onboarding-complete { max-width: 560px; }
+.common-capital-field small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .balance-options { display: grid; gap: 8px; grid-template-columns: repeat(3,1fr); margin: 22px 0 10px; }
 .balance-options button.selected { background: rgba(155,124,255,.2); border-color: var(--brand); }
 .language-options { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; margin-bottom: 14px; }
@@ -88,4 +94,4 @@ tr:last-child td { border-bottom: 0; }
 @media(max-width:1000px){.stats{grid-template-columns:repeat(2,1fr)}.app{grid-template-columns:190px minmax(0,1fr)}.chain-account-grid{grid-template-columns:repeat(2,minmax(160px,1fr))}}
 @media(max-width:900px){.topbar{align-items:flex-start;gap:14px}.topbar-actions{flex-wrap:wrap;justify-content:flex-end}.chain-select{flex-wrap:wrap}.global-usd-summary{grid-template-columns:1fr 1fr}}
 @media(max-width:700px){.app{display:block}.sidebar{height:auto;position:static}.nav{grid-template-columns:repeat(5,1fr)}.nav button{text-align:center;padding:8px 3px}.sidebar-bottom{display:none}.main{padding:18px 12px}.topbar{display:block}.topbar-actions{justify-content:flex-start;margin-top:14px}.chain-select select{min-width:0;width:100%}.settings-grid{grid-template-columns:1fr}.stats,.global-usd-summary,.chain-account-grid{grid-template-columns:1fr 1fr}}
-@media(max-width:480px){.stats,.global-usd-summary,.chain-account-grid{grid-template-columns:1fr}.filters{flex-wrap:wrap}.input{min-width:0;width:100%}}
+@media(max-width:480px){.stats,.global-usd-summary,.chain-account-grid{grid-template-columns:1fr}.filters{flex-wrap:wrap}.input{min-width:0;width:100%}.onboarding-page{padding:14px}.onboarding{padding:22px 16px}}

@@ -79,6 +79,10 @@
     return (await runMutation({ type: 'RESET_ALL' })).state;
   }
 
+  async function resetAllWithBalance(balanceNative, language, settingsPatch) {
+    return runMutation({ type: 'RESET_ALL_WITH_BALANCE', balanceNative, language, settingsPatch });
+  }
+
   async function exportData() {
     const data = await getAll();
     return { product: 'Tango Paper Trader', version: Tango.VERSION, exportedAt: Date.now(), ...data };
@@ -111,7 +115,7 @@
   }
 
   Tango.Store = {
-    getAll, saveState, saveSettings, patchSettings, initialize, resetChain, resetAll, reset: resetAll,
+    getAll, saveState, saveSettings, patchSettings, initialize, resetChain, resetAll, resetAllWithBalance, reset: resetAll,
     exportData, importData, executeBuy, executeSell, executeCloseAll,
     updatePositionQuote, updatePositionMetadata, updatePositionMetadataBatch, subscribe
   };
