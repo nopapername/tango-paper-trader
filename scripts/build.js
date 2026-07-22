@@ -13,4 +13,9 @@ for (const entry of include) {
   if (!fs.existsSync(source)) continue;
   fs.cpSync(source, path.join(output, entry), { recursive: true });
 }
+const smokeChecklist = 'docs/multichain-smoke-test.md';
+const smokeSource = path.join(root, smokeChecklist);
+const smokeOutput = path.join(output, smokeChecklist);
+fs.mkdirSync(path.dirname(smokeOutput), { recursive: true });
+fs.cpSync(smokeSource, smokeOutput);
 console.log(`Built unpacked extension at ${output}`);
