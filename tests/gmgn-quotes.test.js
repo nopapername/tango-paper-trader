@@ -193,6 +193,28 @@ test('cross-source merges keep the winning valuation field source', () => {
   assert.equal(merged.totalSupplyObservationSource, 'GMGN_NETWORK');
 });
 
+test('merging rejects untrusted or synthetic-derived prices and preserves factual provenance', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const factual = Quotes.mergeObservation(null, {
+    chain: 'base', address, priceUsd: 2, observedAt: 100,
+    source: 'GMGN_NETWORK', priceProvenance: 'OBSERVED_PRICE'
+  });
+
+  assert.equal(factual.priceProvenance, 'OBSERVED_PRICE');
+  for (const poison of [
+    { source: 'PAGE_TEXT' },
+    { source: 'GMGN_NETWORK', syntheticTokenPrice: true, priceProvenance: 'SYNTHETIC_PRICE' },
+    { source: 'GMGN_NETWORK', priceProvenance: 'MARKET_CAP_DERIVED' }
+  ]) {
+    const merged = Quotes.mergeObservation(factual, {
+      chain: 'base', address, priceUsd: 9, observedAt: 200, ...poison
+    });
+    assert.equal(merged.priceUsd, 2, poison.source);
+    assert.equal(merged.priceSource, 'GMGN_NETWORK', poison.source);
+    assert.equal(merged.priceProvenance, 'OBSERVED_PRICE', poison.source);
+  }
+});
+
 test('older response fields cannot overwrite newer price, supply, or metadata', () => {
   const address = '0x1111111111111111111111111111111111111111';
   const newer = {

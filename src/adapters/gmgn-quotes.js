@@ -40,6 +40,20 @@
     return String(value).trim().slice(0, maxLength);
   }
 
+  function factualObservationSource(value) {
+    const source = metadataText(value, 64).toUpperCase();
+    if (!source || source.includes('SYNTHETIC') || source.includes('DERIVED')
+      || source.includes('FALLBACK')) return '';
+    return source === 'DEXSCREENER' || source === 'GMGN' || source.startsWith('GMGN_') ? source : '';
+  }
+
+  function factualPriceObservation(value) {
+    const provenance = metadataText(value?.priceProvenance, 64).toUpperCase();
+    return value?.syntheticTokenPrice !== true && value?.provisionalTokenPrice !== true
+      && !provenance.includes('SYNTHETIC') && !provenance.includes('DERIVED')
+      && !provenance.includes('FALLBACK');
+  }
+
   function validObservationTime(value) {
     return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
       && value - Date.now() <= MAX_FUTURE_SKEW_MS;
@@ -51,10 +65,14 @@
     const previousTimeValue = previous?.[timeField]
       || (Number.isFinite(previousValue) && previousValue > 0 ? previous?.observedAt : 0) || 0;
     const nextTimeValue = next?.[timeField] || fallbackTime || 0;
-    const previousValid = Number.isFinite(previousValue) && previousValue > 0
-      && validObservationTime(previousTimeValue);
-    const nextValid = Number.isFinite(nextValue) && nextValue > 0
-      && validObservationTime(nextTimeValue);
+    const previousSource = factualObservationSource(previous?.[sourceField] || previous?.source);
+    const nextSource = factualObservationSource(next?.[sourceField] || next?.source);
+    const previousValid = Number.isFinite(previousValue) && previousValue > 0 && previousSource
+      && validObservationTime(previousTimeValue)
+      && (valueField !== 'priceUsd' || factualPriceObservation(previous));
+    const nextValid = Number.isFinite(nextValue) && nextValue > 0 && nextSource
+      && validObservationTime(nextTimeValue)
+      && (valueField !== 'priceUsd' || factualPriceObservation(next));
     const previousTime = previousValid ? previousTimeValue : 0;
     const nextTime = nextValid ? nextTimeValue : 0;
     const useNext = nextValid && (!previousValid || nextTime >= previousTime);
@@ -63,8 +81,9 @@
     return {
       value,
       observedAt: useNext ? nextTime : previousTime,
-      source: value > 0 ? metadataText(selected?.[sourceField] || selected?.source, 64) : '',
-      fromNext: useNext
+      source: value > 0 ? (useNext ? nextSource : previousSource) : '',
+      fromNext: useNext,
+      selected
     };
   }
 
@@ -76,8 +95,10 @@
       ? previous?.[timeField] || previous?.metadataObservedAt || previous?.observedAt || 0 : 0;
     const nextTimeValue = nextValue
       ? next?.[timeField] || next?.metadataObservedAt || fallbackTime || 0 : 0;
-    const previousValid = Boolean(previousValue) && validObservationTime(previousTimeValue);
-    const nextValid = Boolean(nextValue) && validObservationTime(nextTimeValue);
+    const previousSource = factualObservationSource(previous?.[sourceField] || previous?.source);
+    const nextSource = factualObservationSource(next?.[sourceField] || next?.source);
+    const previousValid = Boolean(previousValue) && previousSource && validObservationTime(previousTimeValue);
+    const nextValid = Boolean(nextValue) && nextSource && validObservationTime(nextTimeValue);
     const previousTime = previousValid ? previousTimeValue : 0;
     const nextTime = nextValid ? nextTimeValue : 0;
     const useNext = nextValid && (!previousValid || nextTime >= previousTime);
@@ -86,7 +107,7 @@
     return {
       value,
       observedAt: useNext ? nextTime : previousTime,
-      source: value ? metadataText(selected?.[sourceField] || selected?.source, 64) : ''
+      source: value ? (useNext ? nextSource : previousSource) : ''
     };
   }
 
@@ -137,6 +158,8 @@
         ? (totalSupply.fromNext ? metadataText(next.totalSupplySource, 64) : metadataText(previous?.totalSupplySource, 64)) || 'GMGN_NETWORK_EXACT'
         : '',
       totalSupplyObservationSource: totalSupply.source,
+      ...(price.value > 0 && metadataText(price.selected?.priceProvenance, 64)
+        ? { priceProvenance: metadataText(price.selected.priceProvenance, 64) } : {}),
       symbol: symbol.value,
       name: name.value,
       logoUrl: logoUrl.value,

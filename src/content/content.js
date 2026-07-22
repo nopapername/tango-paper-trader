@@ -228,9 +228,10 @@
     (event.data.quotes || []).forEach((quote) => {
       if (quote?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, quote?.address)) return;
       const address = Tango.Chains.normalizeAddress(chain.id, quote.address);
+      if (!trustedCachedObservation(quote, chain.id, address, Number(Tango.QUOTE_STALE_MS || 15_000), false)) return;
       const cacheKey = gmgnQuoteKey(chain.id, address);
       const cachedQuote = Tango.GMGNQuotes.mergeObservation(runtime.gmgnQuotes.get(cacheKey), quote);
-      if (!cachedQuote) return;
+      if (!trustedCachedObservation(cachedQuote, chain.id, address, Number(Tango.QUOTE_STALE_MS || 15_000), false)) return;
       runtime.gmgnQuotes.set(cacheKey, cachedQuote);
       if (!runtime.current && routeToken?.chain === chain.id && routeToken.address === address
         && detailBootstrapObservation(cachedQuote)) {
@@ -551,6 +552,45 @@
     return acceptedSource && hasValue && observedAt > 0 && Date.now() - observedAt <= maxAgeMs;
   }
 
+  function factualObservationSource(value, allowDex = true) {
+    const source = String(value || '').trim().toUpperCase();
+    if (!source || source.includes('SYNTHETIC') || source.includes('DERIVED')
+      || source.includes('FALLBACK')) return '';
+    if (allowDex && source === 'DEXSCREENER') return source;
+    return source === 'GMGN' || source.startsWith('GMGN_') ? source : '';
+  }
+
+  function freshObservationTime(value, maxAgeMs) {
+    const observedAt = Number(value || 0);
+    return Number.isSafeInteger(observedAt) && observedAt > 0
+      && observedAt - Date.now() <= 5_000 && Date.now() - observedAt <= maxAgeMs;
+  }
+
+  function trustedCachedObservation(candidate, chain, address, maxAgeMs, allowDex = true) {
+    const candidateAddress = candidate?.address || candidate?.tokenAddress;
+    if (candidate?.chain !== chain || !Tango.Chains.validateAddress(chain, candidateAddress)
+      || Tango.Chains.normalizeAddress(chain, candidateAddress) !== address
+      || !factualObservationSource(candidate?.source, allowDex)
+      || !freshObservationTime(candidate?.observedAt, maxAgeMs)) return false;
+    if (['priceUsd', 'marketCapUsd', 'liquidityUsd', 'totalSupply'].some((field) =>
+      candidate?.[field] != null && (!Number.isFinite(Number(candidate[field])) || Number(candidate[field]) < 0))) return false;
+    const provenance = String(candidate?.priceProvenance || '').toUpperCase();
+    if (candidate?.syntheticTokenPrice === true || candidate?.provisionalTokenPrice === true
+      || provenance.includes('SYNTHETIC') || provenance.includes('DERIVED')
+      || provenance.includes('FALLBACK')) return false;
+    for (const [valueField, timeField, sourceField] of [
+      ['priceUsd', 'priceObservedAt', 'priceSource'],
+      ['marketCapUsd', 'marketCapObservedAt', 'marketCapSource'],
+      ['liquidityUsd', 'liquidityObservedAt', 'liquiditySource'],
+      ['totalSupply', 'totalSupplyObservedAt', 'totalSupplyObservationSource']
+    ]) {
+      if (Number(candidate?.[valueField] || 0) > 0
+        && (!factualObservationSource(candidate?.[sourceField] || candidate?.source, allowDex)
+          || !freshObservationTime(candidate?.[timeField] || candidate?.observedAt, maxAgeMs))) return false;
+    }
+    return true;
+  }
+
   function detailBootstrapObservation(candidate, maxAgeMs = 30_000) {
     const observedAt = Number(candidate?.observedAt || 0);
     const age = Date.now() - observedAt;
@@ -796,7 +836,7 @@
       && candidateObservedAt - Date.now() <= 5_000
       && Date.now() - candidateObservedAt <= Number(Tango.QUOTE_STALE_MS || 15_000);
     const candidateIsTrusted = candidateIdentityMatches && candidateFresh
-      && (candidateSource === 'DEXSCREENER' || candidateSource.startsWith('GMGN'));
+      && Boolean(factualObservationSource(candidateSource));
     const candidateSyntheticTokenPrice = candidateIsTrusted && candidate?.syntheticTokenPrice === true;
     const candidateProvisionalSupply = candidateSyntheticTokenPrice
       && Number(candidate?.provisionalSupply) === 1_000_000_000 ? 1_000_000_000 : 0;
@@ -811,9 +851,9 @@
       totalSupplySource: candidateExactSupply ? 'GMGN_EXACT' : '',
       supplySource: candidateExactSupply ? 'GMGN_EXACT' : ''
     } : null;
-    const freshExact = exact && Number.isSafeInteger(Number(exact.observedAt))
-      && Date.now() - Number(exact.observedAt) <= Number(Tango.QUOTE_STALE_MS || 15_000)
-      ? exact : null;
+    const freshExact = trustedCachedObservation(
+      exact, chain.id, normalizedAddress, Number(Tango.QUOTE_STALE_MS || 15_000)
+    ) ? exact : null;
     const merged = freshExact && boundCandidate
       ? Tango.GMGNQuotes.mergeObservation(freshExact, boundCandidate)
       : boundCandidate || freshExact;
@@ -867,8 +907,22 @@
     const positionExactSupply = boundPosition?.supplySource === 'GMGN_EXACT'
       && Number.isFinite(Number(boundPosition?.totalSupply)) && Number(boundPosition.totalSupply) > 0
       ? Number(boundPosition.totalSupply) : 0;
-    const resolvedLaunchpad = token.launchpad || local.launchpad || boundPosition?.launchpad || '';
-    const resolvedLaunchMode = token.launchMode || local.launchMode || boundPosition?.launchMode || '';
+    const trustedMetadataSources = ['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'];
+    const tokenMetadataVerified = token?.metadataVerified === true
+      && trustedMetadataSources.includes(String(token?.metadataSource || '').toUpperCase());
+    const localLaunchpadSource = String(local.launchpadSource || local.source || '').toUpperCase();
+    const localMetadataVerified = trustedMetadataSources.includes(localLaunchpadSource)
+      && (Boolean(freshExact) || (candidate?.chain === chain.id && candidateAddresses.length > 0));
+    const positionRuleSupply = Number(Tango.Supply.ruleSupply(
+      chain.id, boundPosition?.launchpad, boundPosition?.launchMode
+    ));
+    const positionLaunchpadVerified = boundPosition?.supplySource === 'LAUNCHPAD_RULE'
+      && Number(boundPosition?.totalSupply) === positionRuleSupply && positionRuleSupply > 0;
+    const launchContext = tokenMetadataVerified ? token
+      : localMetadataVerified ? local
+        : positionLaunchpadVerified ? boundPosition : {};
+    const resolvedLaunchpad = launchContext?.launchpad || '';
+    const resolvedLaunchMode = launchContext?.launchMode || '';
     const supply = Tango.Supply.resolve({
       chain: chain.id,
       totalSupply: localExactSupply || positionExactSupply || legacyPumpSupply,

@@ -81,6 +81,30 @@ test('fallback BNB execution has finite quantity and a full close uses the persi
   assert.equal(remaining.trade.quantity, half.position.quantity);
 });
 
+test('unverified caller launchpad metadata cannot select a registry supply rule', () => {
+  const unverified = {
+    chain: 'base', address: EVM_ADDRESS, symbol: 'CLAIM', launchpad: 'Clanker',
+    metadataVerified: false, metadataSource: 'GMGN_TRENCH'
+  };
+  const result = Engine.executeBuy(state(), {
+    token: unverified,
+    quote: {
+      chain: 'base', address: EVM_ADDRESS,
+      priceUsd: 3_200 / 1_000_000_000, marketCapUsd: 3_200,
+      totalSupply: 1_000_000_000, supplySource: 'UNKNOWN_FALLBACK',
+      launchpad: 'Clanker', nativePriceUsd: 2_000,
+      observedAt: 1_000, nativePriceObservedAt: 1_000,
+      source: 'TANGO_FALLBACK', priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+      syntheticTokenPrice: true, provisional: true
+    },
+    amountNative: 1
+  }, paperSettings, 1_000);
+
+  assert.notEqual(result.position.supplySource, 'LAUNCHPAD_RULE');
+  assert.notEqual(result.position.totalSupply, 100_000_000_000);
+  assert.equal(result.position.launchpad, '');
+});
+
 test('a trustworthy live price changes a fallback position mark without rewriting execution quantity or cost', () => {
   const fallback = {
     priceUsd: 3_200 / 1_000_000_000, marketCapUsd: 3_200, totalSupply: 1_000_000_000,

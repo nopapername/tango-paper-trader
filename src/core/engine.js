@@ -62,12 +62,22 @@
   }
 
   function callerTokenSupplyContext(token, chain, tokenAddress) {
+    const metadataSource = trustedMetadataSource(token);
     return {
       chain,
       tokenAddress,
       address: tokenAddress,
-      launchpad: token?.launchpad,
-      launchMode: token?.launchMode
+      launchpad: metadataSource ? token?.launchpad : '',
+      launchMode: metadataSource ? token?.launchMode : ''
+    };
+  }
+
+  function verifiedLaunchContext(context, token) {
+    if (!trustedMetadataSource(token)) return context;
+    return {
+      ...context,
+      launchpad: token?.launchpad || context?.launchpad || '',
+      launchMode: token?.launchMode || context?.launchMode || ''
     };
   }
 
@@ -276,8 +286,8 @@
       supplySource: trustedDeclaredSource ? declaredSource : (legacyPump ? 'LEGACY_PUMP_RULE' : ''),
       marketCapDivisor: quote?.marketCapDivisor,
       marketCapProvenance: legacyPump ? MARKET_CAP_PROVENANCE : undefined,
-      launchpad: quote?.launchpad || context?.launchpad,
-      launchMode: quote?.launchMode || context?.launchMode,
+      launchpad: context?.launchpad,
+      launchMode: context?.launchMode,
       tokenAddress: context?.tokenAddress || context?.address,
       address: context?.address || context?.tokenAddress
     });
@@ -420,8 +430,8 @@
     return {
       totalSupply: Number(supply?.totalSupply || 0),
       supplySource: String(supply?.source || ''),
-      launchpad: String(context?.launchpad || quote?.launchpad || ''),
-      launchMode: String(context?.launchMode || quote?.launchMode || '')
+      launchpad: String(context?.launchpad || ''),
+      launchMode: String(context?.launchMode || '')
     };
   }
 
@@ -453,20 +463,18 @@
   function calibratePositionResult(state, token, quote, now = Date.now()) {
     const key = positionKey(token?.chain, token?.address);
     const existing = state.positions?.[key];
+    const validationContext = verifiedLaunchContext(existing, token);
     if (!existing || !positiveFinite(existing.quantity)
       || !Number.isSafeInteger(Number(now)) || Number(now) < 0
-      || !validateQuote(quote, Number(now), Tango.QUOTE_STALE_MS, existing).ok) {
+      || !validateQuote(quote, Number(now), Tango.QUOTE_STALE_MS, existing, validationContext).ok) {
       return { status: 'NOOP', state };
     }
 
     const newPriceUsd = effectiveQuotePrice(quote, existing, existing);
     const newNativePriceUsd = Number(quote.nativePriceUsd || existing.lastNativePriceUsd);
     const oldSupply = trustedSupply(existing);
-    const verifiedMetadata = trustedMetadataSource(token);
-    const observedLaunchpad = verifiedMetadata
-      ? token.launchpad || existing.launchpad : existing.launchpad;
-    const observedLaunchMode = verifiedMetadata
-      ? token.launchMode || existing.launchMode : existing.launchMode;
+    const observedLaunchpad = validationContext.launchpad;
+    const observedLaunchMode = validationContext.launchMode;
     const observedSupply = quoteSupply(quote, {
       ...existing, launchpad: observedLaunchpad, launchMode: observedLaunchMode
     });
@@ -487,7 +495,9 @@
     const reason = calibrationReason(priceCorrection, nativeCorrection, supplyCorrection);
     if (!reason) return { status: 'NOOP', state };
 
-    const selectedSupply = preferredSupply(quote, existing);
+    const selectedSupply = preferredSupply(quote, {
+      ...existing, launchpad: observedLaunchpad, launchMode: observedLaunchMode
+    });
     if (![newPriceUsd, newNativePriceUsd].every(positiveFinite)) {
       return { status: 'FAILED', state, reason: 'calibrationFailed' };
     }
@@ -970,9 +980,12 @@
 
   function updatePositionQuote(state, token, quote, now = Date.now()) {
     const key = positionKey(token.chain, token.address);
+    const validationContext = verifiedLaunchContext(state.positions[key], token);
     if (!state.positions[key]
       || !Number.isSafeInteger(Number(now)) || Number(now) < 0
-      || !validateQuote(quote, Number(now), Tango.QUOTE_STALE_MS, state.positions[key]).ok) return state;
+      || !validateQuote(
+        quote, Number(now), Tango.QUOTE_STALE_MS, state.positions[key], validationContext
+      ).ok) return state;
     const calibration = calibratePositionResult(state, token, quote, now);
     if (calibration.status === 'FAILED') return state;
     const nextState = structuredCloneSafe(calibration.state);

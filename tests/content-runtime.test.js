@@ -95,7 +95,9 @@ test('Engine fallback without Supply accepts only contextually valid explicit tr
       expectedSource: 'GMGN_RATIO', expectedSupply: 100_000_000_000
     },
     {
-      name: 'launchpad rule', token: { ...base, launchpad: 'Clanker' },
+      name: 'launchpad rule', token: {
+        ...base, launchpad: 'Clanker', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+      },
       quote: { ...marketCapQuote, totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE' },
       expectedSource: 'LAUNCHPAD_RULE', expectedSupply: 100_000_000_000
     },
@@ -986,6 +988,74 @@ test('paper resolver rejects contaminated live observations before falling back 
   }
 });
 
+test('page-message quote caching rejects untrusted and synthetic-derived observations', () => {
+  const cases = [
+    { source: 'PAGE_TEXT' },
+    { source: 'TANGO_FALLBACK' },
+    { source: 'GMGN_NETWORK', syntheticTokenPrice: true, priceProvenance: 'SYNTHETIC_PRICE' },
+    { source: 'GMGN_NETWORK', priceProvenance: 'MARKET_CAP_DERIVED' }
+  ];
+
+  for (const poison of cases) {
+    const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+    loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+    loaded.api.dispatchPageMessage({
+      source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+        chain: 'base', address: ADDRESS_A, priceUsd: 9,
+        observedAt: loaded.clock.now, ...poison
+      }]
+    });
+
+    assert.equal(loaded.api.runtime.gmgnQuotes.size, 0, poison.source);
+    const quote = loaded.api.resolvePaperTradeQuote(
+      { chain: 'base', address: ADDRESS_A, symbol: 'TARGET' }, {}
+    );
+    assert.equal(quote.priceUsd, 3_200 / 1_000_000_000, poison.source);
+    assert.equal(quote.source, 'TANGO_FALLBACK', poison.source);
+  }
+});
+
+test('resolver refuses contaminated raw cache entries before they become authoritative', () => {
+  const cases = [
+    { source: 'PAGE_TEXT' },
+    { source: 'TANGO_FALLBACK' },
+    { source: 'GMGN_NETWORK', syntheticTokenPrice: true, priceProvenance: 'SYNTHETIC_PRICE' },
+    { source: 'GMGN_NETWORK', priceProvenance: 'MARKET_CAP_DERIVED' }
+  ];
+
+  for (const poison of cases) {
+    const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+    loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+    loaded.api.runtime.gmgnQuotes.set(`base:${ADDRESS_A}`, {
+      chain: 'base', address: ADDRESS_A, priceUsd: 9,
+      observedAt: loaded.clock.now, ...poison
+    });
+
+    const quote = loaded.api.resolvePaperTradeQuote(
+      { chain: 'base', address: ADDRESS_A, symbol: 'TARGET' }, {}
+    );
+    assert.equal(quote.priceUsd, 3_200 / 1_000_000_000, poison.source);
+    assert.equal(quote.source, 'TANGO_FALLBACK', poison.source);
+  }
+});
+
+test('unverified launchpad labels cannot select a registry fallback valuation', () => {
+  for (const launchpad of ['Clanker', 'Bankr']) {
+    const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
+    loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
+    const quote = loaded.api.resolvePaperTradeQuote({
+      chain: 'base', address: ADDRESS_A, symbol: 'UNVERIFIED', launchpad,
+      metadataVerified: false, metadataSource: 'GMGN_TRENCH'
+    }, {});
+
+    assert.equal(quote.priceUsd, 3_200 / 1_000_000_000, launchpad);
+    assert.equal(quote.marketCapUsd, 3_200, launchpad);
+    assert.equal(quote.totalSupply, 1_000_000_000, launchpad);
+    assert.equal(quote.supplySource, 'UNKNOWN_FALLBACK', launchpad);
+    assert.equal(quote.valuationSource, 'UNKNOWN_INITIAL_MARKET_CAP', launchpad);
+  }
+});
+
 test('candidate direct supply with unknown provenance cannot become GMGN exact through the resolver or Engine', () => {
   const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
   loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
@@ -1053,7 +1123,10 @@ test('resolver preserves a launchpad rule for a market-cap-derived card price', 
   const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
   loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
   const quote = loaded.api.resolvePaperTradeQuote(
-    { chain: 'base', address: ADDRESS_A, symbol: 'CLANK', launchpad: 'Clanker' },
+    {
+      chain: 'base', address: ADDRESS_A, symbol: 'CLANK', launchpad: 'Clanker',
+      metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    },
     {
       chain: 'base', address: ADDRESS_A, marketCapUsd: 200_000,
       priceUsd: 200_000 / 100_000_000_000,
