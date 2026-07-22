@@ -1128,18 +1128,25 @@
 
   async function handleQuickBuy(context) {
     if (!runtime.settings?.enabled) return;
+    const clickContext = {
+      ...(context || {}),
+      token: context?.token ? { ...context.token } : context?.token,
+      quote: context?.quote ? { ...context.quote } : context?.quote
+    };
     const routeCapture = captureRoute();
     const chain = activeChain();
-    if (!chain || context?.token?.chain !== chain.id) return showToast(t('unsupportedChain'), 'error');
-    const amountNative = Number(context.amountNative ?? context.amountSol);
-    const lockKey = `${gmgnQuoteKey(chain.id, context.token.address)}:${amountNative}`;
+    if (!chain || clickContext.token?.chain !== chain.id) return showToast(t('unsupportedChain'), 'error');
+    const amountNative = Number(clickContext.amountNative ?? clickContext.amountSol);
+    const lockKey = clickContext.actionId
+      ? `action:${clickContext.actionId}`
+      : `${gmgnQuoteKey(chain.id, clickContext.token.address)}:${amountNative}`;
     const lastHandledAt = Number(runtime.quickBuyLocks.get(lockKey) || 0);
     if (Date.now() - lastHandledAt < 1000) return;
     runtime.quickBuyLocks.set(lockKey, Date.now());
     if (runtime.quickBuyLocks.size > 100) {
       [...runtime.quickBuyLocks.entries()].filter(([, at]) => Date.now() - at > 5000).forEach(([key]) => runtime.quickBuyLocks.delete(key));
     }
-    await buy(amountNative, context, routeCapture);
+    await buy(amountNative, clickContext, routeCapture);
   }
 
   async function buy(amountNative, context = runtime.current, routeCapture = captureRoute()) {
@@ -1907,8 +1914,14 @@
         handleRouteChange();
       }
       for (const record of records) {
-        if (record.target?.nodeType === 1) runtime.pendingMutationRoots.add(record.target);
+        const targetTag = String(record.target?.tagName || '').toUpperCase();
+        if (record.target?.nodeType === 1 && targetTag !== 'BODY' && targetTag !== 'HTML') {
+          runtime.pendingMutationRoots.add(record.target);
+        }
         for (const node of record.addedNodes || []) {
+          if (node?.nodeType === 1) runtime.pendingMutationRoots.add(node);
+        }
+        for (const node of record.removedNodes || []) {
           if (node?.nodeType === 1) runtime.pendingMutationRoots.add(node);
         }
       }

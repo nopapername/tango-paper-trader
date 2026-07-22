@@ -790,7 +790,7 @@ test('local quick-buy feedback completes under 100 ms without timer advancement'
   assert.ok(elapsed < 100, `expected <100ms, got ${elapsed}ms`);
 });
 
-test('mutation observer batches targets and added nodes into one incremental discovery', async () => {
+test('mutation observer batches targets, added nodes, and removed nodes into one incremental discovery', async () => {
   let observerCallback;
   const timers = [];
   class CapturingMutationObserver {
@@ -808,14 +808,18 @@ test('mutation observer batches targets and added nodes into one incremental dis
   const baselineTimerCount = timers.length;
   const targetA = { nodeType: 1 };
   const addedA = { nodeType: 1 };
+  const removedA = { nodeType: 1 };
   const targetB = { nodeType: 1 };
-  observerCallback([{ target: targetA, addedNodes: [addedA] }]);
+  const bodyTarget = { nodeType: 1, tagName: 'BODY' };
+  const addedFromBody = { nodeType: 1 };
+  observerCallback([{ target: targetA, addedNodes: [addedA], removedNodes: [removedA] }]);
   observerCallback([{ target: targetB, addedNodes: [] }]);
+  observerCallback([{ target: bodyTarget, addedNodes: [addedFromBody] }]);
   assert.equal(timers.length, baselineTimerCount + 1);
   assert.equal(discoveries.length, 0);
   timers[baselineTimerCount]();
   assert.equal(discoveries.length, 1);
-  assert.deepEqual(Array.from(discoveries[0]), [targetA, addedA, targetB]);
+  assert.deepEqual(Array.from(discoveries[0]), [targetA, addedA, removedA, targetB, addedFromBody]);
   assert.equal(loaded.api.runtime.pendingMutationRoots.size, 0);
 });
 
@@ -2066,6 +2070,43 @@ test('quick-buy commits before same-chain navigation and background native refre
   await action;
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(loaded.calls.buy, 1);
+});
+
+test('quick-buy freezes complete click-time metadata before same-chain navigation', async () => {
+  const loaded = loadContent();
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  loaded.api.rememberNativePrice('eth', 3_000, loaded.clock.now);
+  const context = {
+    token: {
+      chain: 'eth', address: ADDRESS_A, symbol: 'CLICK', name: 'Click Token', logoUrl: 'click.png',
+      launchpad: 'Clanker', launchMode: 'MIGRATED', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    },
+    quote: {
+      priceUsd: 2, marketCapUsd: 200_000, source: 'GMGN_TRENCH', observedAt: loaded.clock.now
+    },
+    amountNative: 1,
+    sourceUrl: `https://gmgn.ai/eth/token/${ADDRESS_A}`
+  };
+
+  const action = loaded.api.handleQuickBuy(context);
+  context.token.chain = 'base';
+  context.token.address = ADDRESS_B;
+  context.token.symbol = 'STALE';
+  context.token.name = 'Stale Token';
+  context.token.logoUrl = 'stale.png';
+  context.token.launchpad = 'Bankr';
+  context.quote.marketCapUsd = 999_999;
+  loaded.context.location.href = `https://gmgn.ai/eth/token/${ADDRESS_B}`;
+  await action;
+
+  const order = loaded.calls.buyOrders[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(order.token)), {
+    chain: 'eth', address: ADDRESS_A, symbol: 'CLICK', name: 'Click Token', logoUrl: 'click.png',
+    launchpad: 'Clanker', launchMode: 'MIGRATED', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+  });
+  assert.equal(order.quote.marketCapUsd, 200_000);
+  assert.equal(order.sourceUrl, `https://gmgn.ai/eth/token/${ADDRESS_A}`);
 });
 
 test('stale or untrusted populated GMGN fields still request verified DEX fallback', () => {

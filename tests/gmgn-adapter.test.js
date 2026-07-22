@@ -54,7 +54,7 @@ function quickBuyHarness({
   let slotRect = { height: 24, width: 80 };
   let nativeRect = { height: 24, width: 80 };
   const nativeControl = {
-    isConnected: true, reparented: 0,
+    isConnected: true, reparented: 0, restored: 0, realHandlerCalls: 0,
     textContent: '0.1 SOL',
     getBoundingClientRect: () => ({ ...nativeRect }),
     replaceWith(node) { this.isConnected = false; node.isConnected = true; replacement = node; },
@@ -69,7 +69,8 @@ function quickBuyHarness({
       remove: (...names) => names.forEach((name) => classes.delete(name)),
       toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }
     },
-    closest: () => card,
+    matches: (selector) => selector === '.BuyButton-continer',
+    closest: (selector) => selector === '.BuyButton-continer' ? slot : card,
     contains: (node) => node === card,
     getBoundingClientRect: () => ({ ...slotRect }),
     appendChild(node) { node.isConnected = true; replacement = node === nativeControl ? null : node; return node; },
@@ -77,6 +78,10 @@ function quickBuyHarness({
       if (selector === '.tango-list-quick-buy') return replacement;
       if (selector === '[data-testid="quickbuy"]') return nativeControl.isConnected ? nativeControl : null;
       return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '.tango-list-quick-buy') return replacement ? [replacement] : [];
+      return [];
     }
   };
   const makeElement = () => ({
@@ -84,7 +89,10 @@ function quickBuyHarness({
     setAttribute() {}, append() {}, remove() { this.isConnected = false; },
     replaceWith(node) {
       this.isConnected = false;
-      if (node === nativeControl && nativeControl.isConnected) nativeControl.reparented += 1;
+      if (node === nativeControl) {
+        nativeControl.restored += 1;
+        if (nativeControl.isConnected) nativeControl.reparented += 1;
+      }
       node.isConnected = true;
       replacement = node === nativeControl ? null : node;
     }
@@ -817,7 +825,7 @@ test('verified non-Pump Solana cards receive Tango quick-buy with a provisional 
   }
 });
 
-test('quick-buy restores tracked overrides omitted from the capped discovery slots', () => {
+test('quick-buy restores tracked overrides omitted from authoritative discovery', () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
   const harness = quickBuyHarness();
   global.document = harness.document;
@@ -885,17 +893,18 @@ test('quick-buy synchronizes four GMGN sizes and reconciled native geometry with
     const actionId = harness.slot.dataset.tangoActionId;
     assert.equal(typeof resizeCallback, 'function');
 
-    for (const { height, width, expanded, narrow } of [
-      { height: 24, width: 80, expanded: false, narrow: false },
-      { height: 32, width: 72, expanded: false, narrow: true },
-      { height: 40, width: 80, expanded: true, narrow: false },
-      { height: 48, width: 72, expanded: true, narrow: true }
+    for (const { size, height, width, expanded, narrow } of [
+      { size: 'small', height: 24, width: 80, expanded: false, narrow: false },
+      { size: 'large', height: 32, width: 72, expanded: false, narrow: true },
+      { size: 'extra-large', height: 40, width: 80, expanded: true, narrow: false },
+      { size: 'giant', height: 48, width: 72, expanded: true, narrow: true }
     ]) {
       harness.setSlotRect({ height, width });
       resizeCallback([{ target: harness.slot }]);
       assert.equal(replacement.style.height, `${height}px`);
       assert.equal(harness.classes.has('tango-quick-expanded'), expanded);
       assert.equal(harness.classes.has('tango-quick-narrow'), narrow);
+      assert.equal(harness.slot.dataset.tangoQuickSize, size);
       assert.equal(harness.slot.dataset.tangoActionId, actionId);
     }
     assert.equal(orders.length, 0);
@@ -917,6 +926,42 @@ test('quick-buy synchronizes four GMGN sizes and reconciled native geometry with
     global.location = original.location;
     global.requestAnimationFrame = original.raf;
     global.ResizeObserver = original.ResizeObserver;
+    global.Tango.GMGN = original.gmgn;
+  }
+});
+
+test('quick-buy defers zero geometry and recovers on the slot resize observation', () => {
+  const modulePath = require.resolve('../src/adapters/gmgn.js');
+  const original = {
+    document: global.document, location: global.location, raf: global.requestAnimationFrame,
+    ResizeObserver: global.ResizeObserver, gmgn: global.Tango.GMGN
+  };
+  let resizeCallback;
+  class FakeResizeObserver {
+    constructor(callback) { resizeCallback = callback; }
+    observe() {}
+    disconnect() {}
+  }
+  global.ResizeObserver = FakeResizeObserver;
+  delete require.cache[modulePath];
+  const freshGmgn = require(modulePath);
+  const harness = quickBuyHarness();
+  harness.setSlotRect({ height: 0, width: 0 });
+  harness.setNativeRect({ height: 0, width: 0 });
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=sol', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = () => 1;
+  try {
+    assert.equal(freshGmgn.discoverTokenCards(() => {}), 1);
+    assert.equal(harness.replacement.style.height, undefined);
+    assert.equal(harness.slot.dataset.tangoQuickSize, undefined);
+    harness.setSlotRect({ height: 48, width: 96 });
+    resizeCallback([{ target: harness.slot }]);
+    assert.equal(harness.replacement.style.height, '48px');
+    assert.equal(harness.slot.dataset.tangoQuickSize, 'giant');
+  } finally {
+    delete require.cache[modulePath];
+    Object.assign(global, original);
     global.Tango.GMGN = original.gmgn;
   }
 });
@@ -1151,12 +1196,12 @@ test('detached quick-buy slots release actions and resize observations without a
       return [];
     };
 
-    assert.equal(freshGmgn.discoverTokenCards(() => {}, 0.1, 'PAPER', [{}]), 0);
+    assert.equal(freshGmgn.discoverTokenCards(() => {}, 0.1, 'PAPER', [first.slot]), 0);
     assert.deepEqual(observed, [first.slot]);
     assert.deepEqual(unobserved, [first.slot]);
     assert.equal(first.slot.__tangoQuickBuyHandler, undefined);
     assert.equal(first.slot.dataset.tangoActionId, undefined);
-    assert.equal(freshGmgn.discoverTokenCards(() => {}, 0.1, 'PAPER', [{}]), 0);
+    assert.equal(freshGmgn.discoverTokenCards(() => {}, 0.1, 'PAPER', [first.slot]), 0);
     assert.deepEqual(unobserved, [first.slot]);
 
     messageListener({
@@ -1176,7 +1221,7 @@ test('detached quick-buy slots release actions and resize observations without a
   }
 });
 
-test('incremental discovery supports slot and closest roots and caps roots and slots at 80', () => {
+test('incremental discovery supports slot and closest roots beyond 80 visible controls', () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
   const harnesses = Array.from({ length: 81 }, (_, index) => quickBuyHarness({
     chain: 'base',
@@ -1207,11 +1252,127 @@ test('incremental discovery supports slot and closest roots and caps roots and s
   global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
   global.requestAnimationFrame = (callback) => callback();
   try {
-    assert.equal(GMGN.discoverTokenCards(() => {}, 0.1, 'PAPER', roots), 80);
-    assert.equal(harnesses.filter((harness) => harness.replacement).length, 80);
-    assert.equal(harnesses[80].replacement, null);
+    assert.equal(GMGN.discoverTokenCards(() => {}, 0.1, 'PAPER', roots), 81);
+    assert.equal(harnesses.filter((harness) => harness.replacement).length, 81);
+    assert.ok(harnesses[80].replacement);
   } finally {
     Object.assign(global, original);
+  }
+});
+
+test('virtual-list card reuse rebinds the live slot without restoring its stale native control', async () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  const orders = [];
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(GMGN.discoverTokenCards((order) => orders.push(order)), 1);
+    const oldReplacement = harness.replacement;
+    const oldActionId = harness.slot.dataset.tangoActionId;
+    harness.card.getAttribute = (name) => name === 'href' ? `https://gmgn.ai/base/token/${EVM_ADDRESS_2}` : null;
+    harness.card.innerText = `${EVM_ADDRESS_2}\nNEXT Next Token\nMC\n$20K`;
+
+    assert.equal(GMGN.discoverTokenCards((order) => orders.push(order), 0.1, 'PAPER', [harness.slot]), 1);
+    assert.equal(harness.nativeControl.restored, 0);
+    assert.equal(harness.nativeControl.isConnected, false);
+    assert.ok(harness.replacement);
+    assert.equal(harness.slot.querySelectorAll?.('.tango-list-quick-buy')?.length || 1, 1);
+    assert.notEqual(harness.slot.dataset.tangoActionId, oldActionId);
+    assert.equal(oldReplacement.isConnected, false);
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders.length, 1);
+    assert.equal(orders[0].token.address, EVM_ADDRESS_2);
+    assert.equal(harness.nativeControl.realHandlerCalls, 0);
+  } finally {
+    Object.assign(global, original);
+  }
+});
+
+test('whole-card and slot replacement releases old bindings and injects only the current live slot', () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const first = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  const second = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS_2 });
+  let visibleSlots = [first.slot];
+  const document = {
+    ...first.document,
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      if (selector === '.BuyButton-continer') return visibleSlots;
+      if (selector === '.tango-native-buy-overridden') return [first, second]
+        .filter((harness) => harness.classes.has('tango-native-buy-overridden')).map((harness) => harness.slot);
+      return [];
+    }
+  };
+  second.slot.matches = (selector) => selector === '.BuyButton-continer';
+  second.slot.querySelectorAll = () => [];
+  const secondCard = second.slot.closest();
+  second.slot.closest = (selector) => selector === '.BuyButton-continer' ? second.slot : secondCard;
+  global.document = document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(GMGN.discoverTokenCards(() => {}), 1);
+    const oldHandler = first.slot.__tangoQuickBuyHandler;
+    first.slot.isConnected = false;
+    first.card.isConnected = false;
+    first.replacement.isConnected = false;
+    visibleSlots = [second.slot];
+
+    assert.equal(GMGN.discoverTokenCards(() => {}, 0.1, 'PAPER', [first.slot, second.slot]), 1);
+    assert.equal(first.slot.__tangoQuickBuyHandler, undefined);
+    assert.equal(first.nativeControl.restored, 0);
+    assert.ok(second.replacement);
+    assert.equal(typeof second.slot.__tangoQuickBuyHandler, 'function');
+    assert.notEqual(second.slot.__tangoQuickBuyHandler, oldHandler);
+  } finally {
+    Object.assign(global, original);
+  }
+});
+
+test('pointer and click bridge messages dispatch one paper action and never the native handler', async () => {
+  const modulePath = require.resolve('../src/adapters/gmgn.js');
+  const original = {
+    document: global.document, location: global.location, raf: global.requestAnimationFrame,
+    window: global.window, gmgn: global.Tango.GMGN
+  };
+  let messageListener;
+  const fakeWindow = {
+    addEventListener(type, listener) { if (type === 'message') messageListener = listener; }
+  };
+  global.window = fakeWindow;
+  delete require.cache[modulePath];
+  const freshGmgn = require(modulePath);
+  const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  const gate = {};
+  gate.promise = new Promise((resolve) => { gate.resolve = resolve; });
+  let paperCalls = 0;
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    freshGmgn.discoverTokenCards(() => { paperCalls += 1; return gate.promise; });
+    const event = {
+      source: fakeWindow,
+      data: {
+        source: 'TANGO_GMGN_PAGE', type: 'PAPER_QUICK_BUY_CLICK',
+        actionId: harness.slot.dataset.tangoActionId
+      }
+    };
+    messageListener(event);
+    messageListener(event);
+    assert.equal(paperCalls, 1);
+    assert.equal(harness.nativeControl.realHandlerCalls, 0);
+    gate.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    delete require.cache[modulePath];
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+    global.window = original.window;
+    global.Tango.GMGN = original.gmgn;
   }
 });
 
@@ -1237,9 +1398,15 @@ test('incremental discovery leaves unrelated tracked overrides intact', () => {
   try {
     assert.equal(GMGN.discoverTokenCards(() => {}), 2);
     const unrelatedReplacement = unrelated.replacement;
+    let unrelatedLifecycleChecks = 0;
+    Object.defineProperty(unrelated.slot, 'isConnected', {
+      configurable: true,
+      get() { unrelatedLifecycleChecks += 1; return true; }
+    });
     affected.card.querySelectorAll = (selector) => selector === '.BuyButton-continer' ? [affected.slot] : [];
     affected.card.innerText = 'invalid card';
     assert.equal(GMGN.discoverTokenCards(() => {}, 0.1, 'PAPER', [affected.card]), 0);
+    assert.equal(unrelatedLifecycleChecks, 0);
     assert.equal(unrelated.replacement, unrelatedReplacement);
     assert.equal(unrelatedReplacement.isConnected, true);
     assert.equal(unrelated.slot.dataset.tangoQuickBuy, '1');
