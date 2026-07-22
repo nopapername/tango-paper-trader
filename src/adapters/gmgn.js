@@ -347,16 +347,22 @@
     const previousMetadataQuality = metadataQuality(previous.token);
     const nextMetadataQuality = metadataQuality(next.token);
     const nextHasQuote = Number(next.quote?.priceUsd) > 0 || Number(next.quote?.marketCapUsd) > 0;
-    if (nextMetadataQuality <= previousMetadataQuality && !nextHasQuote) return previous;
+    if (nextMetadataQuality < previousMetadataQuality && !nextHasQuote) return previous;
 
+    const metadataCompleteness = (field, value) => {
+      if (value == null || String(value).trim() === '') return 0;
+      const placeholder = ['TOKEN', 'UNKNOWN', 'N/A', 'NA', '-', '--'].includes(String(value).trim().toUpperCase());
+      return ['symbol', 'name'].includes(field) && placeholder ? 0 : 1;
+    };
     const token = nextMetadataQuality >= previousMetadataQuality
-      ? {
-        ...previous.token,
-        ...Object.fromEntries(Object.entries(next.token || {}).filter(([field, value]) => (
-          ['chain', 'address', 'metadataVerified', 'metadataSource'].includes(field)
-          || (value != null && String(value).trim() !== '')
-        )))
-      }
+      ? Object.entries(next.token || {}).reduce((merged, [field, value]) => {
+        const nextCompleteness = metadataCompleteness(field, value);
+        const shouldUpgrade = nextMetadataQuality > previousMetadataQuality
+          ? nextCompleteness > 0
+          : nextCompleteness > metadataCompleteness(field, previous.token?.[field]);
+        if (['chain', 'address'].includes(field) || shouldUpgrade) merged[field] = value;
+        return merged;
+      }, { ...previous.token })
       : previous.token;
     return {
       token,

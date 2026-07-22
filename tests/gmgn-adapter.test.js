@@ -443,6 +443,50 @@ test('verified exact-route detail metadata upgrades identity without discarding 
   });
 });
 
+test('equal-rank detail reads fill placeholder metadata without downgrading rich exact-route fields', () => {
+  const url = `https://gmgn.ai/base/token/${EVM_ADDRESS}`;
+  const previous = {
+    token: {
+      chain: 'base', address: EVM_ADDRESS, symbol: 'TOKEN', name: 'Token', logoUrl: '',
+      launchpad: '', launchMode: 'MIGRATED', metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+    },
+    quote: { priceUsd: 2, marketCapUsd: 200_000, observedAt: 1_000, source: 'GMGN_NETWORK' }
+  };
+  const completeDetail = {
+    token: {
+      chain: 'base', address: EVM_ADDRESS, symbol: 'REAL', name: 'Real Token', logoUrl: 'real.png',
+      launchpad: 'Clanker', launchMode: '', metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+    },
+    quote: {}
+  };
+
+  const upgraded = GMGN.resolveCurrentTokenRead(previous, completeDetail, url);
+  assert.deepEqual(upgraded, {
+    token: {
+      ...completeDetail.token,
+      launchMode: 'MIGRATED'
+    },
+    quote: previous.quote
+  });
+
+  const genericDetail = {
+    token: {
+      chain: 'base', address: EVM_ADDRESS, symbol: 'TOKEN', name: 'Token', logoUrl: '',
+      launchpad: '', launchMode: '', metadataVerified: true, metadataSource: 'GMGN_DETAIL'
+    },
+    quote: {}
+  };
+  assert.deepEqual(GMGN.resolveCurrentTokenRead(upgraded, genericDetail, url), upgraded);
+
+  const wrongIdentity = {
+    token: {
+      ...completeDetail.token, address: EVM_ADDRESS_2, symbol: 'WRONG', name: 'Wrong Token'
+    },
+    quote: {}
+  };
+  assert.deepEqual(GMGN.resolveCurrentTokenRead(upgraded, wrongIdentity, url), upgraded);
+});
+
 test('current-token reads reject a verified context for the wrong route identity', () => {
   const wrongAddress = {
     token: { chain: 'base', address: EVM_ADDRESS_2, symbol: 'WRONG', metadataVerified: true, metadataSource: 'GMGN_DETAIL' },
