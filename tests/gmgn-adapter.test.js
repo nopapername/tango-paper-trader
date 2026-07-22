@@ -39,6 +39,7 @@ function quickBuyHarness({
     },
     firstElementChild: { querySelector: () => null }
   };
+  let columnAmount = '';
   const column = {
     isConnected: true,
     textContent: 'new creation\n',
@@ -46,6 +47,9 @@ function quickBuyHarness({
     contains: (node) => node === card,
     querySelector(selector) {
       if (selector === '[class~="group/a"]') return card;
+      if (selector === '[data-sentry-component="BuyAmountInput"] input' && columnAmount !== '') {
+        return { value: columnAmount };
+      }
       return null;
     }
   };
@@ -111,6 +115,7 @@ function quickBuyHarness({
   return {
     card, slot, document, nativeControl, classes,
     setVisibleSlots(slots) { visibleSlots = slots; },
+    setColumnAmount(value) { columnAmount = String(value); },
     setSlotRect(rect) { slotRect = { ...slotRect, ...rect }; },
     setNativeRect(rect) { nativeRect = { ...nativeRect, ...rect }; },
     get replacement() { return replacement; }
@@ -864,6 +869,43 @@ test('quick-buy restoration does not reparent an original control already connec
     global.document = original.document;
     global.location = original.location;
     global.requestAnimationFrame = original.raf;
+  }
+});
+
+test('amount-driven paper rebind preserves and restores the current native control exactly once', () => {
+  const modulePath = require.resolve('../src/adapters/gmgn.js');
+  const original = {
+    document: global.document, location: global.location, raf: global.requestAnimationFrame,
+    gmgn: global.Tango.GMGN
+  };
+  delete require.cache[modulePath];
+  const freshGmgn = require(modulePath);
+  const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  try {
+    assert.equal(freshGmgn.discoverTokenCards(() => {}), 1);
+    const firstPaperControl = harness.replacement;
+    harness.setColumnAmount('0.25');
+
+    assert.equal(freshGmgn.discoverTokenCards(() => {}), 1);
+    assert.equal(firstPaperControl.isConnected, false);
+    assert.equal(harness.slot.dataset.tangoAmountSol, '0.25');
+    assert.equal(harness.nativeControl.restored, 0);
+
+    freshGmgn.clearQuickBuy();
+
+    assert.equal(harness.nativeControl.isConnected, true);
+    assert.equal(harness.nativeControl.restored, 1);
+    assert.equal(harness.nativeControl.reparented, 0);
+    assert.equal(harness.replacement, null);
+  } finally {
+    delete require.cache[modulePath];
+    global.document = original.document;
+    global.location = original.location;
+    global.requestAnimationFrame = original.raf;
+    global.Tango.GMGN = original.gmgn;
   }
 });
 

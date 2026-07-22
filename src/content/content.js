@@ -13,7 +13,7 @@
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null,
-    routeEpoch: 0, routeIdentity: null, pendingMutationRoots: new Set(),
+    routeEpoch: 0, routeIdentity: null, pendingMutationRoots: new Set(), quickBuyMode: 'unknown',
     selectedChainSync: null,
     selectedChainPersistence: {
       desiredChain: null, persistedChain: null, dirty: false, opportunity: 0
@@ -194,7 +194,7 @@
     runtime.positionCalibrationDirty.clear();
     runtime.markerPayloads = new WeakMap();
     syncChartMarkers(true);
-    Tango.GMGN.clearQuickBuy();
+    clearQuickBuyButtons();
     clearHeaderAccountSummary();
     clearShellMarkup();
   }
@@ -381,7 +381,7 @@
       previousSettings.language !== runtime.settings.language ||
       Number(previousChainSettings?.buyPresets?.[0]) !== Number(currentChainSettings?.buyPresets?.[0])
     );
-    if (!chain || !runtime.settings.enabled || !runtime.state.initialized || !runtime.settings.showListQuickBuy || quickBuyConfigChanged) Tango.GMGN.clearQuickBuy();
+    if (!chain || !runtime.settings.enabled || !runtime.state.initialized || !runtime.settings.showListQuickBuy || quickBuyConfigChanged) clearQuickBuyButtons();
     if (!runtime.settings.enabled) runtime.current = null;
     if (becameEnabled) ensureRouteTokenContext();
     if (chain && runtime.settings.enabled) syncSelectedChainFromRoute();
@@ -411,9 +411,16 @@
     const settings = chainSettings();
     if (chain && settings && runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) {
       Tango.GMGN.discoverTokenCards(handleQuickBuy, settings.buyPresets?.[0] || 0.1, t('paper'), roots);
+      runtime.quickBuyMode = 'active';
     } else {
-      Tango.GMGN.clearQuickBuy();
+      clearQuickBuyButtons();
     }
+  }
+
+  function clearQuickBuyButtons() {
+    if (runtime.quickBuyMode === 'cleared') return;
+    Tango.GMGN.clearQuickBuy();
+    runtime.quickBuyMode = 'cleared';
   }
 
   function queueQuickBuySync(root) {
@@ -450,7 +457,7 @@
       return;
     }
     if (!runtime.settings?.enabled || !runtime.state?.initialized) {
-      Tango.GMGN.clearQuickBuy();
+      clearQuickBuyButtons();
       return;
     }
     const previousCurrent = runtime.current;
@@ -1747,7 +1754,7 @@
     }
     if (!runtime.state || !runtime.settings) return;
     if (!runtime.settings.enabled || !runtime.state.initialized) {
-      Tango.GMGN.clearQuickBuy();
+      clearQuickBuyButtons();
       clearShellMarkup();
       clearHeaderAccountSummary();
       return;
@@ -1914,9 +1921,10 @@
         handleRouteChange();
       }
       for (const record of records) {
-        const targetTag = String(record.target?.tagName || '').toUpperCase();
-        if (record.target?.nodeType === 1 && targetTag !== 'BODY' && targetTag !== 'HTML') {
-          runtime.pendingMutationRoots.add(record.target);
+        const target = record.target?.nodeType === 3 ? record.target.parentElement : record.target;
+        const targetTag = String(target?.tagName || '').toUpperCase();
+        if (target?.nodeType === 1 && targetTag !== 'BODY' && targetTag !== 'HTML') {
+          runtime.pendingMutationRoots.add(target);
         }
         for (const node of record.addedNodes || []) {
           if (node?.nodeType === 1) runtime.pendingMutationRoots.add(node);
@@ -1938,7 +1946,9 @@
         if (document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe')) syncChartMarkers();
       }, 160);
     });
-    runtime.observer.observe(document.body, { childList: true, subtree: true });
+    runtime.observer.observe(document.body, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['href'], characterData: true
+    });
     const handleQuickBuyAmountChange = (event) => {
       if (event.target?.closest?.('[data-sentry-component="BuyAmountInput"]')) {
         const root = event.target.closest('[data-sentry-component="TrenchColumn"], [class~="group/a"]') || event.target;

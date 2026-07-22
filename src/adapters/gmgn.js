@@ -780,6 +780,9 @@
       root?.querySelectorAll?.('.BuyButton-continer').forEach((slot) => slots.add(slot));
       const closest = root?.closest?.('.BuyButton-continer');
       if (closest) slots.add(closest);
+      const card = root?.closest?.('[class~="group/a"]');
+      const scope = card || root?.closest?.('[data-sentry-component="TrenchColumn"]');
+      scope?.querySelectorAll?.('.BuyButton-continer').forEach((slot) => slots.add(slot));
     }
     return [...slots];
   }
@@ -882,8 +885,10 @@
         removeDuplicatePaperControls(slot, existingBinding.replacement);
         continue;
       }
+      const preservedNativeControl = existingBinding && quickBuyBindingMatches(slot, existingBinding, chain)
+        ? existingBinding.nativeControl : null;
       if (existingBinding) restoreQuickBuySlot(slot, false);
-      if (!nativeControl) nativeControl = slot.querySelector('[data-testid="quickbuy"]');
+      if (!nativeControl) nativeControl = preservedNativeControl || slot.querySelector('[data-testid="quickbuy"]');
       if (!nativeControl && !existingReplacement) continue;
       const replacement = document.createElement('button');
       replacement.type = 'button';
@@ -953,7 +958,7 @@
       quickBuyActions.set(actionId, handleClick);
       trackedQuickBuySlots.add(slot);
       if (existingReplacement?.isConnected) existingReplacement.replaceWith(replacement);
-      else if (nativeControl) nativeControl.replaceWith(replacement);
+      else if (nativeControl?.isConnected) nativeControl.replaceWith(replacement);
       else slot.appendChild?.(replacement);
       if (nativeControl?.isConnected) nativeControl.remove();
       removeDuplicatePaperControls(slot, replacement);

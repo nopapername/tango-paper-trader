@@ -14,6 +14,7 @@ const RealState = require('../src/core/state.js');
 const RealEngine = require('../src/core/engine.js');
 const StateCoordinator = require('../src/core/state-coordinator.js');
 const GMGNQuotes = require('../src/adapters/gmgn-quotes.js');
+const RealGMGN = require('../src/adapters/gmgn.js');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const START = "  start().catch((error) => console.error('[Tango Paper Trader]', error));";
 const EXPOSE = `  global.__contentTest = {
@@ -61,6 +62,120 @@ function defaultSettings() {
     confirmationEnabled: true, platformFeeBps: 0, slippageBps: 0, soundEnabled: false,
     barCollapsed: false, panelCollapsed: false, panelPosition: null,
     chains: Object.fromEntries(Chains.all().map(({ id }) => [id, { ...chain }])), sellPresets: [100]
+  };
+}
+
+function mutationQuickBuyHarness(address = ADDRESS_A) {
+  let currentAddress = address;
+  let replacement = null;
+  const classes = new Set();
+  const column = {
+    isConnected: true,
+    textContent: 'new creation\n',
+    contains: (node) => node === card,
+    querySelector(selector) {
+      if (selector === '[class~="group/a"]') return card;
+      return null;
+    },
+    querySelectorAll(selector) { return selector === '.BuyButton-continer' ? [slot] : []; }
+  };
+  const card = {
+    nodeType: 1,
+    isConnected: true,
+    parentElement: column,
+    get innerText() { return `${currentAddress}\nTOKEN Token Name\nMC\n$10K`; },
+    get textContent() { return this.innerText; },
+    getAttribute(name) {
+      return name === 'href' ? `https://gmgn.ai/base/token/${currentAddress}` : null;
+    },
+    matches: () => false,
+    closest(selector) {
+      if (selector === '[class~="group/a"]') return card;
+      if (selector === '[data-sentry-component="TrenchColumn"]') return column;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '.BuyButton-continer') return [slot];
+      return [];
+    },
+    firstElementChild: { querySelector: () => null }
+  };
+  const identityNode = {
+    nodeType: 1,
+    tagName: 'A',
+    parentElement: card,
+    matches: () => false,
+    closest(selector) {
+      if (selector === '[class~="group/a"]') return card;
+      if (selector === '[data-sentry-component="TrenchColumn"]') return column;
+      return null;
+    },
+    querySelectorAll: () => []
+  };
+  const identityText = { nodeType: 3, parentElement: identityNode };
+  const nativeControl = {
+    isConnected: true,
+    restored: 0,
+    textContent: '0.1 ETH',
+    getBoundingClientRect: () => ({ height: 24, width: 80 }),
+    replaceWith(node) { this.isConnected = false; node.isConnected = true; replacement = node; },
+    remove() { this.isConnected = false; }
+  };
+  const slot = {
+    nodeType: 1,
+    isConnected: true,
+    parentElement: card,
+    dataset: {},
+    classList: {
+      add(...names) { names.forEach((name) => classes.add(name)); },
+      remove(...names) { names.forEach((name) => classes.delete(name)); },
+      toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }
+    },
+    matches: (selector) => selector === '.BuyButton-continer',
+    closest(selector) {
+      if (selector === '.BuyButton-continer') return slot;
+      if (selector === '[class~="group/a"]') return card;
+      if (selector === '[data-sentry-component="TrenchColumn"]') return column;
+      return null;
+    },
+    getBoundingClientRect: () => ({ height: 24, width: 80 }),
+    appendChild(node) { node.isConnected = true; replacement = node; return node; },
+    querySelector(selector) {
+      if (selector === '.tango-list-quick-buy') return replacement?.isConnected ? replacement : null;
+      if (selector === '[data-testid="quickbuy"]') return nativeControl.isConnected ? nativeControl : null;
+      return null;
+    },
+    querySelectorAll(selector) {
+      return selector === '.tango-list-quick-buy' && replacement?.isConnected ? [replacement] : [];
+    }
+  };
+  const makeElement = () => ({
+    dataset: {}, style: {}, className: '', disabled: false, isConnected: false,
+    setAttribute() {}, append() {},
+    remove() { this.isConnected = false; },
+    replaceWith(node) {
+      this.isConnected = false;
+      if (node === nativeControl) nativeControl.restored += 1;
+      node.isConnected = true;
+      replacement = node === nativeControl ? null : node;
+    }
+  });
+  const document = {
+    head: { appendChild() {} },
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      if (selector === '.BuyButton-continer') return [slot];
+      if (selector === '.tango-native-buy-overridden') return classes.has('tango-native-buy-overridden') ? [slot] : [];
+      if (selector === '.tango-list-quick-buy') return replacement?.isConnected ? [replacement] : [];
+      return [];
+    },
+    createElement: makeElement
+  };
+  return {
+    card, column, document, identityNode, identityText, nativeControl, slot,
+    setAddress(next) { currentAddress = next; },
+    get replacement() { return replacement; },
+    get paperControlCount() { return replacement?.isConnected ? 1 : 0; }
   };
 }
 
@@ -162,7 +277,7 @@ function loadContent({
   const calls = {
     buy: 0, buyOrders: [], sell: 0, sellOrders: [], metadataBatches: [],
     closeAll: 0, closeAllOrders: [], patches: [], fullSaves: [], getAll: 0, chainUsdSummaries: [],
-    updatePositionQuotes: [], readCurrentToken: 0, discoverTokenCards: 0, storeSubscriber: null
+    updatePositionQuotes: [], readCurrentToken: 0, discoverTokenCards: 0, clearQuickBuy: 0, storeSubscriber: null
   };
   const clock = { now: 1_000_000 };
   class FakeDate extends Date {
@@ -323,7 +438,7 @@ function loadContent({
       breakevenSellPercent: () => null
     },
     GMGN: {
-      clearQuickBuy() {},
+      clearQuickBuy() { calls.clearQuickBuy += 1; },
       discoverTokenCards: () => { calls.discoverTokenCards += 1; return 0; },
       readVisibleTokenMetadata: () => [],
       readCurrentToken: async () => {
@@ -821,6 +936,112 @@ test('mutation observer batches targets, added nodes, and removed nodes into one
   assert.equal(discoveries.length, 1);
   assert.deepEqual(Array.from(discoveries[0]), [targetA, addedA, removedA, targetB, addedFromBody]);
   assert.equal(loaded.api.runtime.pendingMutationRoots.size, 0);
+});
+
+test('content mutations promote changed card descendants into real GMGN live-slot reconciliation', async () => {
+  const original = {
+    document: global.document, location: global.location, raf: global.requestAnimationFrame,
+    ResizeObserver: global.ResizeObserver
+  };
+  let observerCallback;
+  let observerOptions;
+  const timers = [];
+  const observed = [];
+  const unobserved = [];
+  let disconnects = 0;
+  class CapturingMutationObserver {
+    constructor(callback) { observerCallback = callback; }
+    observe(_target, options) { observerOptions = options; }
+  }
+  class CapturingResizeObserver {
+    observe(slot) { observed.push(slot); }
+    unobserve(slot) { unobserved.push(slot); }
+    disconnect() { disconnects += 1; }
+  }
+  const harness = mutationQuickBuyHarness();
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=base',
+    MutationObserver: CapturingMutationObserver,
+    timer(callback) { timers.push(callback); return timers.length; }
+  });
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  global.ResizeObserver = CapturingResizeObserver;
+  loaded.context.Tango.GMGN.discoverTokenCards = (...args) => RealGMGN.discoverTokenCards(...args);
+  const flushMutation = (records) => {
+    const timerIndex = timers.length;
+    observerCallback(records);
+    assert.equal(timers.length, timerIndex + 1);
+    timers[timerIndex]();
+  };
+  try {
+    await loaded.api.start();
+    flushMutation([{
+      type: 'childList', target: { nodeType: 1, tagName: 'BODY' }, addedNodes: [harness.card]
+    }]);
+    const firstControl = harness.replacement;
+    const firstActionId = harness.slot.dataset.tangoActionId;
+    const firstHandler = harness.slot.__tangoQuickBuyHandler;
+    assert.equal(harness.slot.dataset.tangoTokenAddress, ADDRESS_A);
+
+    harness.setAddress(ADDRESS_B);
+    flushMutation([
+      { type: 'attributes', target: harness.identityNode, attributeName: 'href' },
+      { type: 'characterData', target: harness.identityText }
+    ]);
+
+    assert.equal(firstControl.isConnected, false);
+    assert.notEqual(harness.slot.dataset.tangoActionId, firstActionId);
+    assert.notEqual(harness.slot.__tangoQuickBuyHandler, firstHandler);
+    assert.equal(harness.slot.dataset.tangoBindingKey, `base:${ADDRESS_B}`);
+    assert.equal(harness.slot.dataset.tangoTokenAddress, ADDRESS_B);
+    assert.equal(harness.paperControlCount, 1);
+    assert.deepEqual(observed, [harness.slot, harness.slot]);
+    assert.deepEqual(unobserved, [harness.slot]);
+    assert.equal(disconnects, 1);
+    assert.equal(harness.nativeControl.restored, 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(observerOptions)), {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['href'], characterData: true
+    });
+  } finally {
+    RealGMGN.clearQuickBuy();
+    Object.assign(global, original);
+  }
+});
+
+test('disabled quick-buy states clear once on transition and ignore repeated mutation batches', async () => {
+  for (const disabledSettings of [
+    { enabled: true, showListQuickBuy: false },
+    { enabled: false, showListQuickBuy: false }
+  ]) {
+    let observerCallback;
+    const timers = [];
+    let settings = defaultSettings();
+    class CapturingMutationObserver {
+      constructor(callback) { observerCallback = callback; }
+      observe() {}
+    }
+    const loaded = loadContent({
+      href: 'https://gmgn.ai/?chain=base',
+      getAll: () => ({ state: defaultState(), settings }),
+      MutationObserver: CapturingMutationObserver,
+      timer(callback) { timers.push(callback); return timers.length; }
+    });
+    await loaded.api.start();
+    settings = { ...settings, ...disabledSettings };
+
+    await loaded.api.performRefresh();
+
+    assert.equal(loaded.calls.clearQuickBuy, 1, JSON.stringify(disabledSettings));
+    for (let index = 0; index < 3; index += 1) {
+      const timerIndex = timers.length;
+      observerCallback([{ target: { nodeType: 1 }, addedNodes: [], removedNodes: [] }]);
+      assert.equal(timers.length, timerIndex + 1);
+      timers[timerIndex]();
+    }
+    assert.equal(loaded.calls.clearQuickBuy, 1, JSON.stringify(disabledSettings));
+  }
 });
 
 test('market-cap-only quick buy derives price locally and never requests before commit', async () => {
