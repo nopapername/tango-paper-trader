@@ -883,6 +883,35 @@ test('quick-buy restoration does not reparent an original control already connec
   }
 });
 
+test('trench snapshots are bounded and isolated by exact chain and normalized address', () => {
+  GMGN._clearTrenchSnapshots();
+  GMGN.rememberTrenchSnapshot({
+    token: {
+      chain: 'eth', address: `0x${EVM_ADDRESS.slice(2).toUpperCase()}`, symbol: 'TRENCH', name: 'Trench Token',
+      logoUrl: 'trench.png', launchpad: 'Clanker', launchMode: 'MIGRATED'
+    },
+    quote: { marketCapUsd: 9_100, source: 'GMGN_TRENCH', observedAt: 1 }
+  });
+
+  assert.deepEqual(GMGN.readTrenchSnapshot('eth', EVM_ADDRESS), {
+    token: {
+      chain: 'eth', address: EVM_ADDRESS, symbol: 'TRENCH', name: 'Trench Token',
+      logoUrl: 'trench.png', launchpad: 'Clanker', launchMode: 'MIGRATED',
+      metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    },
+    quote: { marketCapUsd: 9_100, source: 'GMGN_TRENCH', observedAt: 1 }
+  });
+  assert.equal(GMGN.readTrenchSnapshot('base', EVM_ADDRESS), null);
+  assert.equal(GMGN.readTrenchSnapshot('eth', EVM_ADDRESS_2), null);
+  for (let index = 0; index <= 200; index += 1) {
+    const address = `0x${index.toString(16).padStart(40, '0')}`;
+    GMGN.rememberTrenchSnapshot({ token: { chain: 'eth', address, symbol: String(index) } });
+  }
+  assert.equal(GMGN.readTrenchSnapshot('eth', `0x${'0'.repeat(40)}`), null);
+  assert.equal(GMGN.readTrenchSnapshot('eth', `0x${(200).toString(16).padStart(40, '0')}`).token.symbol, '200');
+  GMGN._clearTrenchSnapshots();
+});
+
 test('amount-driven paper rebind preserves and restores the current native control exactly once', () => {
   const modulePath = require.resolve('../src/adapters/gmgn.js');
   const original = {
@@ -1078,7 +1107,7 @@ test('quick-buy rechecks the active chain after injection before dispatching', a
   }
 });
 
-test('a linkless same-address detail header is rejected across an EVM chain transition', async () => {
+test('a linkless same-address detail header falls back to the route placeholder across an EVM chain transition', async () => {
   const original = { document: global.document, location: global.location };
   const detail = detailDocument({ chain: 'eth', address: EVM_ADDRESS, priceUsd: 2, marketCapUsd: 2000, liquidityUsd: 500, linked: false });
   global.document = detail.document;
@@ -1087,7 +1116,13 @@ test('a linkless same-address detail header is rejected across an EVM chain tran
     const eth = await GMGN.readCurrentToken();
     assert.equal(eth?.token.chain, 'eth');
     global.location.href = `https://gmgn.ai/base/token/${EVM_ADDRESS}`;
-    assert.equal(await GMGN.readCurrentToken(), null);
+    assert.deepEqual(await GMGN.readCurrentToken(), {
+      token: {
+        chain: 'base', address: EVM_ADDRESS, symbol: '0x1111…1111', name: '0x1111…1111', logoUrl: '',
+        metadataVerified: false, metadataSource: ''
+      },
+      quote: {}
+    });
   } finally {
     global.document = original.document;
     global.location = original.location;
@@ -1243,9 +1278,12 @@ test('incremental discovery scans only supplied mutation roots', () => {
   global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
   global.requestAnimationFrame = (callback) => callback();
   try {
+    GMGN._clearTrenchSnapshots();
     assert.equal(GMGN.discoverTokenCards(() => {}, 0.1, 'PAPER', [harness.card]), 1);
     assert.ok(harness.replacement);
+    assert.equal(GMGN.readTrenchSnapshot('base', EVM_ADDRESS).token.symbol, 'TEST');
   } finally {
+    GMGN._clearTrenchSnapshots();
     Object.assign(global, original);
   }
 });

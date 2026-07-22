@@ -23,7 +23,7 @@ const EXPOSE = `  global.__contentTest = {
     resolvePaperTradeQuote, positionCalibrationUpgrade, queueImmediateCurrentCalibration, paperExecutableQuote,
     requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
     commitCloseAll, savePresetEdits, bindEvents, bindDraggable, render, renderHeaderAccountSummary,
-    detailRouteToken, acceptedTokenObservation, renderPnlCalendar,
+    detailRouteToken, routeTokenPlaceholder, ensureRouteTokenContext, acceptedTokenObservation, renderPnlCalendar,
     dispatchPageMessage: (data) => handlePageMessage({ source: window, data })
   };`;
 const instrumentedSource = contentSource.replace(START, EXPOSE);
@@ -266,7 +266,7 @@ function mergeSettingsPatch(settings, patch) {
 }
 
 function loadContent({
-  href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, getAll, readCurrentToken, sendMessage, patchSettings,
+  href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, getAll, readCurrentToken, readTrenchSnapshot, sendMessage, patchSettings,
   updatePositionQuote,
   requestAnimationFrame = () => 0, timer = setTimeout,
   MutationObserver = class { observe() {} }
@@ -440,6 +440,7 @@ function loadContent({
     GMGN: {
       clearQuickBuy() { calls.clearQuickBuy += 1; },
       discoverTokenCards: () => { calls.discoverTokenCards += 1; return 0; },
+      readTrenchSnapshot: (chain, address) => readTrenchSnapshot ? readTrenchSnapshot(chain, address) : null,
       readVisibleTokenMetadata: () => [],
       readCurrentToken: async () => {
         calls.readCurrentToken += 1;
@@ -1802,7 +1803,7 @@ test('route chain reconciliation persists A after the URL returns A before its r
   assert.equal(persisted.selectedChain, 'eth');
 });
 
-test('every valid detail route renders a placeholder panel without chart or market data', async () => {
+test('every valid detail route renders a placeholder panel and buys at the deterministic fallback without chart or market data', async () => {
   for (const { id: chain } of Chains.all()) {
     const address = chain === 'sol' ? SOL_ADDRESS : ADDRESS_A;
     const loaded = loadContent({
@@ -1812,12 +1813,94 @@ test('every valid detail route renders a placeholder panel without chart or mark
     });
 
     await loaded.api.start();
+    loaded.api.runtime.settings.fastMode = true;
+    loaded.api.runtime.settings.confirmationEnabled = false;
 
     assert.equal(loaded.api.runtime.current?.token.chain, chain, chain);
     assert.equal(loaded.api.runtime.current?.token.address, address, chain);
     assert.equal(loaded.api.runtime.current?.token.metadataVerified, false, chain);
     assert.match(loaded.api.renderPanel(), /tango-panel/, chain);
+    await loaded.api.buy(1);
+    assert.equal(loaded.calls.buy, 1, chain);
+    assert.equal(loaded.calls.buyOrders[0].quote.marketCapUsd, 3_200, chain);
+    loaded.api.runtime.state.positions[`${chain}:${address}`] = {
+      chain, tokenAddress: address, symbol: 'HELD', name: 'Held Token', quantity: 1, costBasisNative: 1,
+      lastPriceUsd: 3_200 / 1_000_000_000, lastMarketCapUsd: 3_200, lastNativePriceUsd: 1,
+      quoteObservedAt: loaded.clock.now
+    };
+    await loaded.api.sell(100);
+    assert.equal(loaded.calls.sell, 1, chain);
   }
+});
+
+test('detail placeholders reuse trench metadata only for the exact chain and normalized address, then accept exact GMGN upgrades', () => {
+  const snapshot = {
+    token: {
+      chain: 'eth', address: ADDRESS_A, symbol: 'TRENCH', name: 'Trench Token', logoUrl: 'trench.png',
+      launchpad: 'Clanker', launchMode: 'MIGRATED', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    },
+    quote: { marketCapUsd: 9_100, source: 'GMGN_TRENCH', observedAt: 1_000_000 }
+  };
+  const loaded = loadContent({
+    href: `https://gmgn.ai/eth/token/0x${ADDRESS_A.slice(2).toUpperCase()}`,
+    readTrenchSnapshot: (chain, address) => chain === 'eth' && address === ADDRESS_A ? snapshot : null
+  });
+
+  const context = loaded.api.ensureRouteTokenContext();
+  assert.deepEqual(JSON.parse(JSON.stringify(context)), snapshot);
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'eth', address: ADDRESS_B, symbol: 'WRONG', name: 'Wrong Token', logoUrl: 'wrong.png',
+      priceUsd: 2, marketCapUsd: 2_000, observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }]
+  });
+  assert.equal(context.token.symbol, 'TRENCH');
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'eth', address: ADDRESS_A, symbol: 'LIVE', name: 'Live Token', logoUrl: 'live.png',
+      priceUsd: 2, marketCapUsd: 2_000, observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    }]
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(context.token)), {
+    chain: 'eth', address: ADDRESS_A, symbol: 'LIVE', name: 'Live Token', logoUrl: 'live.png',
+    launchpad: 'Clanker', launchMode: 'MIGRATED', metadataVerified: true, metadataSource: 'GMGN_NETWORK'
+  });
+});
+
+test('detail placeholders reject trench metadata from a different address or chain', () => {
+  const snapshot = {
+    token: {
+      chain: 'eth', address: ADDRESS_A, symbol: 'WRONG', name: 'Wrong Token', logoUrl: 'wrong.png',
+      metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    },
+    quote: { marketCapUsd: 9_100, source: 'GMGN_TRENCH', observedAt: 1_000_000 }
+  };
+  for (const href of [
+    `https://gmgn.ai/eth/token/${ADDRESS_B}`,
+    `https://gmgn.ai/base/token/${ADDRESS_A}`
+  ]) {
+    const loaded = loadContent({ href, readTrenchSnapshot: () => snapshot });
+    const context = loaded.api.ensureRouteTokenContext();
+    assert.notEqual(context.token.symbol, 'WRONG', href);
+    assert.equal(context.quote.marketCapUsd || 0, 0, href);
+  }
+});
+
+test('detail placeholder metadata falls back from an exact position to an exact trade before the route label', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/eth/token/${ADDRESS_A}` });
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'POSITION', name: 'Position Token', logoUrl: 'position.png',
+    launchpad: 'Clanker', launchMode: 'MIGRATED', metadataSource: 'GMGN_TRENCH'
+  };
+  assert.equal(loaded.api.routeTokenPlaceholder().token.symbol, 'POSITION');
+  delete loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`];
+  loaded.api.runtime.state.trades.push({
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TRADE', name: 'Trade Token', logoUrl: 'trade.png',
+    launchpad: 'Clanker', launchMode: 'MIGRATED', quoteSource: 'GMGN_TRENCH'
+  });
+  assert.equal(loaded.api.routeTokenPlaceholder().token.symbol, 'TRADE');
+  loaded.api.runtime.state.trades[0].tokenAddress = ADDRESS_B;
+  assert.notEqual(loaded.api.routeTokenPlaceholder().token.symbol, 'TRADE');
 });
 
 test('trench and invalid token routes do not create placeholder detail contexts', async () => {

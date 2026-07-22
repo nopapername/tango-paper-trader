@@ -3,6 +3,8 @@
   const quickBuyActions = new Map();
   const trackedQuickBuySlots = new Set();
   const trenchColumns = new WeakMap();
+  const trenchSnapshots = new Map();
+  const MAX_TRENCH_SNAPSHOTS = 200;
   let lastVerifiedDetail = null;
 
   if (typeof window !== 'undefined') {
@@ -31,6 +33,39 @@
 
   function chainFromUrl(url = global.location?.href || '') {
     return Tango.Chains?.fromUrl?.(url)?.id || null;
+  }
+
+  function trenchSnapshotKey(chain, address) {
+    if (!chain || !Tango.Chains.validateAddress(chain, address)) return '';
+    return `${chain}:${Tango.Chains.normalizeAddress(chain, address)}`;
+  }
+
+  function readTrenchSnapshot(chain, address) {
+    const snapshot = trenchSnapshots.get(trenchSnapshotKey(chain, address));
+    return snapshot ? { token: { ...snapshot.token }, quote: { ...snapshot.quote } } : null;
+  }
+
+  function rememberTrenchSnapshot(context) {
+    const chain = context?.token?.chain;
+    const address = context?.token?.address;
+    const key = trenchSnapshotKey(chain, address);
+    if (!key) return null;
+    const token = context.token;
+    trenchSnapshots.delete(key);
+    trenchSnapshots.set(key, {
+      token: {
+        chain, address: Tango.Chains.normalizeAddress(chain, address),
+        symbol: String(token.symbol || '').trim().slice(0, 32),
+        name: String(token.name || '').trim().slice(0, 100),
+        logoUrl: String(token.logoUrl || '').trim().slice(0, 1000),
+        launchpad: String(token.launchpad || '').trim().slice(0, 64),
+        launchMode: String(token.launchMode || '').trim().slice(0, 64),
+        metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+      },
+      quote: { ...(context.quote || {}) }
+    });
+    while (trenchSnapshots.size > MAX_TRENCH_SNAPSHOTS) trenchSnapshots.delete(trenchSnapshots.keys().next().value);
+    return readTrenchSnapshot(chain, address);
   }
 
   function tokenAddressFromUrl(url = global.location?.href || '') {
@@ -456,19 +491,27 @@
     const rawAddress = tokenAddressFromUrl();
     if (!chain || !Tango.Chains.validateAddress(chain, rawAddress)) return null;
     const address = Tango.Chains.normalizeAddress(chain, rawAddress);
+    const routeLabel = `${address.slice(0, 6)}…${address.slice(-4)}`;
+    const placeholder = readTrenchSnapshot(chain, address) || {
+      token: {
+        chain, address, symbol: routeLabel, name: routeLabel, logoUrl: '',
+        metadataVerified: false, metadataSource: ''
+      },
+      quote: {}
+    };
     let detail = findTokenDetailScope(address, chain, true);
-    if (!detail) return null;
+    if (!detail) return placeholder;
     const firstIdentity = detailTokenIdentity(detail.identityScope || detail.scope, address, chain);
     const firstFingerprint = `${firstIdentity.symbol}\u0000${firstIdentity.name}\u0000${tokenLogo(detail.header)}`;
     await new Promise((resolve) => setTimeout(resolve, 48));
     if (chainFromUrl() !== chain || Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl()) !== address) return null;
     const confirmed = findTokenDetailScope(address, chain, true);
-    if (!confirmed) return null;
+    if (!confirmed) return placeholder;
     const identity = detailTokenIdentity(confirmed.identityScope || confirmed.scope, address, chain);
     const fingerprint = `${identity.symbol}\u0000${identity.name}\u0000${tokenLogo(confirmed.header)}`;
-    if (fingerprint !== firstFingerprint) return null;
+    if (fingerprint !== firstFingerprint) return placeholder;
     if (lastVerifiedDetail?.address === address && lastVerifiedDetail.chain !== chain
-      && !confirmed.chainBound && lastVerifiedDetail.fingerprint === fingerprint) return null;
+      && !confirmed.chainBound && lastVerifiedDetail.fingerprint === fingerprint) return placeholder;
     detail = confirmed;
     const quote = detailQuote(detail, chain, address);
     if (!quote) return null;
@@ -760,12 +803,14 @@
       if (!trenchColumn(card)) continue;
       const metadata = verifiedCardMetadata(card, address, chain);
       if (!metadata) continue;
-      found.set(normalized, {
+      const token = {
         chain, address: normalized,
         symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
         launchpad: metadata.launchpad, launchMode: metadata.launchMode,
         metadataVerified: true, metadataSource: 'GMGN_TRENCH'
-      });
+      };
+      rememberTrenchSnapshot({ token, quote: cardMarketSnapshot(card, chain, normalized, token) });
+      found.set(normalized, token);
     }
     return [...found.values()];
   }
@@ -875,6 +920,12 @@
         if (slot.dataset.tangoQuickBuy === '1') restoreQuickBuySlot(slot, true);
         continue;
       }
+      const snapshotToken = {
+        chain, address, symbol: metadata.symbol, name: metadata.name, logoUrl: metadata.logoUrl,
+        launchpad: metadata.launchpad || (chain === 'sol' && /pump$/i.test(address) ? 'Pump.fun' : ''),
+        launchMode: metadata.launchMode || '', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+      };
+      rememberTrenchSnapshot({ token: snapshotToken, quote: cardMarketSnapshot(card, chain, address, snapshotToken) });
       const bindingKey = `${chain}:${address}`;
       if (existingBinding?.replacement?.isConnected && existingBinding.key === bindingKey
         && Number(existingBinding.amountNative) === amountSol && existingBinding.paperLabel === paperLabel
@@ -933,6 +984,7 @@
             launchMode: clickMetadata.launchMode || '', metadataVerified: true, metadataSource: 'GMGN_TRENCH'
           };
           const quote = cardMarketSnapshot(card, chain, address, token);
+          rememberTrenchSnapshot({ token, quote });
           await onQuickBuy({
             actionId, token: { ...token }, quote: { ...quote }, amountNative: amountSol, amountSol,
             sourceUrl: href
@@ -1009,6 +1061,7 @@
 
   Tango.GMGN = {
     chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, readVisibleTokenMetadata, discoverTokenCards, clearQuickBuy,
+    rememberTrenchSnapshot, readTrenchSnapshot,
     resolveCurrentTokenRead, needsCurrentTokenRead,
     _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,
     _cardIdentityFromText: cardIdentityFromText, _addressHintMatches: addressHintMatches,
@@ -1018,7 +1071,8 @@
     _resolveCurrentTokenRead: resolveCurrentTokenRead, _needsCurrentTokenRead: needsCurrentTokenRead,
     _selectQuickBuyAmount: selectQuickBuyAmount,
     _isTrenchPage: isTrenchPage,
-    _isTokenDetailPage: isTokenDetailPage
+    _isTokenDetailPage: isTokenDetailPage,
+    _clearTrenchSnapshots: () => trenchSnapshots.clear()
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.GMGN;

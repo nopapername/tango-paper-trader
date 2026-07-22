@@ -67,13 +67,44 @@
     if (!routeToken) return null;
     const address = routeToken.address;
     const symbol = `${address.slice(0, 6)}…${address.slice(-4)}`;
-    return {
+    const label = {
       token: {
         chain: routeToken.chain, address, symbol, name: symbol, logoUrl: '',
         metadataVerified: false, metadataSource: ''
       },
       quote: {}
     };
+    const matchesRoute = (candidate) => candidate?.token?.chain === routeToken.chain
+      && Tango.Chains.validateAddress(routeToken.chain, candidate.token.address || candidate.token.tokenAddress)
+      && Tango.Chains.normalizeAddress(routeToken.chain, candidate.token.address || candidate.token.tokenAddress) === address;
+    const snapshot = Tango.GMGN.readTrenchSnapshot?.(routeToken.chain, address);
+    if (matchesRoute(snapshot)) return {
+      token: { ...snapshot.token, chain: routeToken.chain, address }, quote: { ...(snapshot.quote || {}) }
+    };
+    const position = runtime.state?.positions?.[Tango.Engine.positionKey(routeToken.chain, address)];
+    if (position?.chain === routeToken.chain && Tango.Chains.validateAddress(routeToken.chain, position.tokenAddress)
+      && Tango.Chains.normalizeAddress(routeToken.chain, position.tokenAddress) === address) {
+      return {
+        token: {
+          chain: routeToken.chain, address, symbol: position.symbol || symbol, name: position.name || position.symbol || symbol,
+          logoUrl: position.logoUrl || '', launchpad: position.launchpad || '', launchMode: position.launchMode || '',
+          metadataVerified: Boolean(position.metadataSource), metadataSource: position.metadataSource || ''
+        },
+        quote: positionQuote(position) || {}
+      };
+    }
+    const trade = [...(runtime.state?.trades || [])].reverse().find((item) => item?.chain === routeToken.chain
+      && Tango.Chains.validateAddress(routeToken.chain, item.tokenAddress)
+      && Tango.Chains.normalizeAddress(routeToken.chain, item.tokenAddress) === address);
+    if (trade) return {
+      token: {
+        chain: routeToken.chain, address, symbol: trade.symbol || symbol, name: trade.name || trade.symbol || symbol,
+        logoUrl: trade.logoUrl || '', launchpad: trade.launchpad || '', launchMode: trade.launchMode || '',
+        metadataVerified: Boolean(trade.quoteSource), metadataSource: trade.quoteSource || ''
+      },
+      quote: {}
+    };
+    return label;
   }
   function ensureRouteTokenContext() {
     const placeholder = routeTokenPlaceholder();
