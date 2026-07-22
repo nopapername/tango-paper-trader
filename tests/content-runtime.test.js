@@ -15,6 +15,7 @@ const RealEngine = require('../src/core/engine.js');
 const StateCoordinator = require('../src/core/state-coordinator.js');
 const GMGNQuotes = require('../src/adapters/gmgn-quotes.js');
 const RealGMGN = require('../src/adapters/gmgn.js');
+const RealMarkers = require('../src/content/markers.js');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.js'), 'utf8');
 const START = "  start().catch((error) => console.error('[Tango Paper Trader]', error));";
 const EXPOSE = `  global.__contentTest = {
@@ -24,7 +25,9 @@ const EXPOSE = `  global.__contentTest = {
     requireExecutableQuote, freshExecutableQuote, renderPanel, renderBar, renderDrawer, requestCloseAll,
     commitCloseAll, savePresetEdits, bindEvents, bindDraggable, render, renderHeaderAccountSummary,
     detailRouteToken, routeTokenPlaceholder, ensureRouteTokenContext, acceptedTokenObservation, renderPnlCalendar,
-    dispatchPageMessage: (data) => handlePageMessage({ source: window, data })
+    chartMarkerPayload, syncChartMarkers,
+    dispatchPageMessage: (data) => handlePageMessage({ source: window, data }),
+    dispatchWindowMessage: (event) => handlePageMessage(event)
   };`;
 const instrumentedSource = contentSource.replace(START, EXPOSE);
 
@@ -268,6 +271,7 @@ function mergeSettingsPatch(settings, patch) {
 function loadContent({
   href = `https://gmgn.ai/eth/token/${ADDRESS_A}`, getAll, readCurrentToken, readTrenchSnapshot, sendMessage, patchSettings,
   updatePositionQuote,
+  chartFrames = [],
   requestAnimationFrame = () => 0, timer = setTimeout,
   MutationObserver = class { observe() {} }
 } = {}) {
@@ -330,8 +334,14 @@ function loadContent({
     body: genericElement(), head: genericElement(),
     documentElement: { appendChild() {} },
     createElement() { createCount += 1; return createCount === 1 ? host : createCount === 3 ? shell : genericElement(); },
-    querySelector(selector) { return documentSingles.get(selector) || null; },
-    querySelectorAll() { return []; }, addEventListener() {}
+    querySelector(selector) {
+      if (selector === 'iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe') return chartFrames[0] || null;
+      return documentSingles.get(selector) || null;
+    },
+    querySelectorAll(selector) {
+      return selector === 'iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe'
+        ? chartFrames : [];
+    }, addEventListener() {}
   };
   const windowListeners = new Map();
   const context = {
@@ -387,7 +397,7 @@ function loadContent({
       trades: (state, chain) => (state?.trades || []).filter((trade) => trade.chain === chain),
       daily: (state, chain) => state?.dailyRealizedByChain?.[chain] || {}, closeOrders: () => []
     },
-    Markers: { buildPayload: () => ({ markers: [] }) },
+    Markers: RealMarkers,
     Store: {
       getAll: async () => {
         calls.getAll += 1;
@@ -467,6 +477,253 @@ function loadContent({
     shadowLists, shadowSingles, shell, shellLists, windowListeners
   };
 }
+
+function chartFrame() {
+  const messages = [];
+  return {
+    messages,
+    contentWindow: { postMessage(message) { messages.push(message); } }
+  };
+}
+
+function markerPayloads(frame) {
+  return frame.messages
+    .filter((message) => message?.source === 'TANGO_PAPER_PARENT' && message?.type === 'CHART_MARKERS')
+    .map((message) => JSON.parse(JSON.stringify(message.payload)));
+}
+
+test('trench quick buy publishes its entry marker on detail navigation before a recovery timer', async () => {
+  const frame = chartFrame();
+  const frames = [frame];
+  const loaded = loadContent({ href: 'https://gmgn.ai/?chain=eth', chartFrames: frames });
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  loaded.api.rememberNativePrice('eth', 3_000, loaded.clock.now);
+  loaded.context.Tango.Store.executeBuy = async (order) => {
+    const trade = {
+      id: 'buy-trench', chain: 'eth', tokenAddress: ADDRESS_A, side: 'BUY',
+      marketCapUsd: order.quote.marketCapUsd, observedPriceUsd: order.quote.priceUsd
+    };
+    return {
+      state: {
+        ...loaded.api.runtime.state,
+        positions: {
+          [`eth:${ADDRESS_A}`]: {
+            chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'FAST', quantity: 1,
+            averageEntryMarketCap: order.quote.marketCapUsd,
+            averageEntryPriceUsd: order.quote.priceUsd
+          }
+        },
+        trades: [trade]
+      },
+      trade
+    };
+  };
+
+  await loaded.api.handleQuickBuy({
+    token: { chain: 'eth', address: ADDRESS_A, symbol: 'FAST' },
+    quote: {
+      priceUsd: 2, marketCapUsd: 2_000, nativePriceUsd: 3_000,
+      observedAt: loaded.clock.now, nativePriceObservedAt: loaded.clock.now, source: 'GMGN_NETWORK'
+    },
+    amountNative: 1
+  });
+  assert.deepEqual(markerPayloads(frame).at(-1), { markers: [] });
+
+  loaded.context.location.href = `https://gmgn.ai/eth/token/${ADDRESS_A}`;
+  loaded.api.handleRouteChange();
+
+  assert.equal(markerPayloads(frame).at(-1).markers[0].id, `entry:eth:${ADDRESS_A}`);
+});
+
+test('detail buy and sell publish committed markers immediately', async () => {
+  const frame = chartFrame();
+  const loaded = loadContent({ chartFrames: [frame] });
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.settings.fastMode = true;
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  loaded.api.rememberNativePrice('eth', 3_000, loaded.clock.now);
+  loaded.context.Tango.Store.executeBuy = async (order) => {
+    const trade = {
+      id: 'buy-direct', chain: 'eth', tokenAddress: ADDRESS_A, side: 'BUY',
+      marketCapUsd: order.quote.marketCapUsd, observedPriceUsd: order.quote.priceUsd
+    };
+    return {
+      state: {
+        ...loaded.api.runtime.state,
+        positions: {
+          [`eth:${ADDRESS_A}`]: {
+            chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 1,
+            averageEntryMarketCap: order.quote.marketCapUsd,
+            averageEntryPriceUsd: order.quote.priceUsd
+          }
+        },
+        trades: [trade]
+      },
+      trade
+    };
+  };
+  loaded.context.Tango.Store.executeSell = async (order) => {
+    const trade = {
+      id: 'sell-direct', chain: 'eth', tokenAddress: ADDRESS_A, side: 'SELL',
+      marketCapUsd: order.quote.marketCapUsd, observedPriceUsd: order.quote.priceUsd
+    };
+    return {
+      state: { ...loaded.api.runtime.state, trades: [...loaded.api.runtime.state.trades, trade] },
+      trade
+    };
+  };
+
+  await loaded.api.buy(1);
+  assert.equal(markerPayloads(frame).at(-1).markers[0].id, `entry:eth:${ADDRESS_A}`);
+
+  await loaded.api.sell(50);
+  assert.equal(markerPayloads(frame).at(-1).markers.at(-1).id, `sell:eth:${ADDRESS_A}:sell-direct`);
+});
+
+test('chart READY replays the latest payload only to the ready frame', () => {
+  const first = chartFrame();
+  const second = chartFrame();
+  const loaded = loadContent({ chartFrames: [first, second] });
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, averageEntryMarketCap: 1_000, averageEntryPriceUsd: 1
+  };
+  loaded.api.syncChartMarkers();
+  first.messages.length = 0;
+  second.messages.length = 0;
+  loaded.api.runtime.current = null;
+
+  loaded.api.dispatchWindowMessage({
+    source: second.contentWindow,
+    data: { source: 'TANGO_PAPER_CHART', type: 'READY' }
+  });
+
+  assert.equal(markerPayloads(first).length, 0);
+  assert.equal(markerPayloads(second).length, 1);
+  assert.equal(markerPayloads(second)[0].markers[0].id, `entry:eth:${ADDRESS_A}`);
+});
+
+test('a replaced chart frame replays the stored payload without waiting for state reconstruction', async () => {
+  let observerCallback;
+  const timers = [];
+  const first = chartFrame();
+  const frames = [first];
+  class CapturingMutationObserver {
+    constructor(callback) { observerCallback = callback; }
+    observe() {}
+  }
+  const loaded = loadContent({
+    chartFrames: frames,
+    readCurrentToken: async () => quoteContext(),
+    MutationObserver: CapturingMutationObserver,
+    timer(callback) { timers.push(callback); return timers.length; }
+  });
+  await loaded.api.start();
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, averageEntryMarketCap: 1_000, averageEntryPriceUsd: 1
+  };
+  loaded.api.syncChartMarkers(true);
+  loaded.api.runtime.current = null;
+
+  const replacement = chartFrame();
+  frames.splice(0, 1, replacement);
+  observerCallback([{
+    target: { nodeType: 1, tagName: 'BODY' }, addedNodes: [replacement], removedNodes: [first]
+  }]);
+  timers.at(-1)();
+
+  assert.equal(markerPayloads(replacement).length, 1);
+  assert.equal(markerPayloads(replacement)[0].markers[0].id, `entry:eth:${ADDRESS_A}`);
+});
+
+test('a factual same-token quote repositions provisional markers without rewriting executions', () => {
+  const frame = chartFrame();
+  const loaded = loadContent({ chartFrames: [frame] });
+  const position = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 1,
+    averageEntryMarketCap: 500, averageEntryPriceUsd: 0.0000005,
+    valuationMode: 'MARKET_CAP', averageEntryPriceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  const trade = {
+    id: 'buy-provisional', chain: 'eth', tokenAddress: ADDRESS_A, side: 'BUY',
+    marketCapUsd: 500, observedPriceUsd: 0.0000005, priceProvenance: 'MARKET_CAP_DERIVED'
+  };
+  loaded.api.runtime.current = {
+    token: { chain: 'eth', address: ADDRESS_A, symbol: 'TEST' },
+    quote: {
+      priceUsd: 0, marketCapUsd: 1_000, observedAt: loaded.clock.now,
+      valuationMode: 'MARKET_CAP', priceProvenance: 'MARKET_CAP_DERIVED'
+    }
+  };
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = position;
+  loaded.api.runtime.state.trades = [trade];
+  loaded.api.syncChartMarkers();
+  const executionSnapshot = JSON.stringify({ position, trade });
+  assert.equal(markerPayloads(frame).at(-1).markers[0].price, 0);
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'eth', address: ADDRESS_A, priceUsd: 2, marketCapUsd: 2_000,
+      observedAt: loaded.clock.now, source: 'GMGN_NETWORK', priceProvenance: 'OBSERVED_PRICE'
+    }]
+  });
+
+  assert.equal(markerPayloads(frame).at(-1).markers[0].price, 0.5);
+  assert.equal(JSON.stringify({ position, trade }), executionSnapshot);
+});
+
+test('disabling publishes empty markers before dropping the current token', async () => {
+  const frame = chartFrame();
+  const disabled = { ...defaultSettings(), enabled: false };
+  const loaded = loadContent({ chartFrames: [frame], getAll: () => ({ state: defaultState(), settings: disabled }) });
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, averageEntryMarketCap: 1_000, averageEntryPriceUsd: 1
+  };
+  loaded.api.syncChartMarkers();
+  assert.equal(markerPayloads(frame).at(-1).markers.length, 1);
+
+  await loaded.api.performRefresh();
+
+  assert.deepEqual(markerPayloads(frame).at(-1), { markers: [] });
+  assert.equal(loaded.api.runtime.current, null);
+});
+
+test('a replacement chart frame added while disabled receives only the empty payload', async () => {
+  let observerCallback;
+  const timers = [];
+  let settings = defaultSettings();
+  const first = chartFrame();
+  const frames = [first];
+  class CapturingMutationObserver {
+    constructor(callback) { observerCallback = callback; }
+    observe() {}
+  }
+  const loaded = loadContent({
+    chartFrames: frames,
+    getAll: () => ({ state: defaultState(), settings }),
+    readCurrentToken: async () => quoteContext(),
+    MutationObserver: CapturingMutationObserver,
+    timer(callback) { timers.push(callback); return timers.length; }
+  });
+  await loaded.api.start();
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, averageEntryMarketCap: 1_000, averageEntryPriceUsd: 1
+  };
+  loaded.api.syncChartMarkers(true);
+  settings = { ...settings, enabled: false };
+  await loaded.api.performRefresh();
+
+  const replacement = chartFrame();
+  frames.splice(0, 1, replacement);
+  observerCallback([{
+    target: { nodeType: 1, tagName: 'BODY' }, addedNodes: [replacement], removedNodes: [first]
+  }]);
+  timers.at(-1)();
+
+  assert.deepEqual(markerPayloads(replacement), [{ markers: [] }]);
+});
 
 function setPresetInputs(loaded, {
   buy = [1, 2, 3, 4, 5, 6, 7, 8],

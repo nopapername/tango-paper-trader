@@ -19,7 +19,7 @@ function between(startText, endText) {
 
 test('chart frames are checked before a marker payload scans trades', () => {
   const block = between('function syncChartMarkers(', 'function renderModal(');
-  const query = block.indexOf('document.querySelectorAll(');
+  const query = block.indexOf('const frames = chartFrames();');
   const guard = block.indexOf('if (!frames.length) return;');
   const payload = block.indexOf('chartMarkerPayload()');
   assert.ok(query >= 0 && guard > query && payload > guard);
@@ -37,7 +37,24 @@ test('render computes one portfolio summary and passes it to the drawer', () => 
 
 test('clearing route context immediately publishes an empty marker payload', () => {
   const clear = between('function clearChainContext()', "window.addEventListener('message'");
-  assert.match(clear, /syncChartMarkers\(true\)/);
+  assert.match(clear, /clearChartMarkers\(\)/);
+  assert.ok(clear.indexOf('clearChartMarkers()') < clear.indexOf('runtime.current = null'));
+});
+
+test('successful direct trades force marker publication after committed state assignment', () => {
+  const buy = between('async function commitBuy(', 'async function sell(');
+  const sell = between('async function commitSell(', 'function requestCloseAll(');
+  for (const block of [buy, sell]) {
+    assert.match(block, /runtime\.state = result\.state;\s*publishChartMarkers\(true\);/);
+  }
+});
+
+test('marker delivery stores one latest payload while signatures remain frame-local', () => {
+  const block = between('function chartMarkerPayload()', 'function renderModal(');
+  assert.match(block, /runtime\.latestMarkerPayload/);
+  assert.match(block, /runtime\.markerPayloads\.get\(frame\)/);
+  assert.match(block, /runtime\.markerPayloads\.set\(frame, signature\)/);
+  assert.match(block, /runtime\.markerPayloads\.delete\(frame\)/);
 });
 
 test('content resolves account and settings from the active GMGN chain', () => {

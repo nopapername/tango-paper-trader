@@ -11,6 +11,57 @@ const chartSource = fs.readFileSync(path.resolve(__dirname, '../src/content/char
 const ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 const labels = { entry: 'Paper Buy', exit: 'Paper Sell', hide: 'Hide line' };
 
+function loadChartBridge() {
+  const listeners = new Map();
+  const makeElement = () => {
+    const children = [];
+    return {
+      id: '', isConnected: true, style: {}, children,
+      get childElementCount() { return children.length; },
+      append(...nodes) { children.push(...nodes); },
+      appendChild(node) { children.push(node); return node; },
+      replaceChildren(...nodes) { children.splice(0, children.length, ...nodes); },
+      addEventListener() {}, setAttribute() {}
+    };
+  };
+  const instrumented = chartSource.replace(
+    '  setInterval(renderMarkers, 400);',
+    `  window.__chartTest = {
+      seedEmptyCaches() {
+        lastScaleMode = { type: 'PRICE', factor: 1 };
+        stableScale = { type: 'PRICE', factor: 1 };
+        stableSignature = 'stale-scale';
+        renderedSignature = 'stale-render';
+        markerPositions.set('stale', 123);
+        ensureOverlay().replaceChildren(document.createElement('div'));
+      },
+      snapshot() {
+        return {
+          markerState, lastScaleMode, stableScale, stableSignature, renderedSignature,
+          markerPositions: [...markerPositions], overlayChildren: overlay?.childElementCount || 0
+        };
+      }
+    };
+    setInterval(renderMarkers, 400);`
+  );
+  const context = {
+    console, Date, Map, WeakMap, Set, Math, Number,
+    innerWidth: 1200, innerHeight: 800,
+    document: {
+      body: makeElement(), documentElement: makeElement(), createElement: makeElement
+    },
+    setInterval() { return 0; }
+  };
+  context.window = {
+    top: {}, frameElement: { title: 'Financial Chart' }, parent: { postMessage() {} },
+    addEventListener(type, listener) { listeners.set(type, listener); }
+  };
+  context.window.window = context.window;
+  Object.assign(context.window, context);
+  require('node:vm').runInNewContext(instrumented, context.window, { filename: 'src/content/chart-main.js' });
+  return { api: context.window.__chartTest, message: (data) => listeners.get('message')({ data }) };
+}
+
 test('returns the existing empty marker shape without a current token', () => {
   assert.deepEqual(buildPayload({ current: null, position: null, trades: [], labels }), { markers: [] });
 });
@@ -74,6 +125,9 @@ test('synthetic market-cap prices stay off the price axis until a real ratio ref
 
   assert.equal(payload.markers[0].price, 0);
   assert.equal(payload.markers[1].price, 0);
+  assert.equal(payload.currentMarketCap, 2_000);
+  assert.equal(payload.markers[0].marketCap, 1_000);
+  assert.equal(payload.markers[1].marketCap, 1_500);
 
   const withRealReference = buildPayload({
     current: { ...current, quote: { priceUsd: 0.000002, marketCapUsd: 2_000, priceProvenance: 'OBSERVED_PRICE' } },
@@ -98,4 +152,22 @@ test('synthetic market-cap prices stay off the price axis until a real ratio ref
 test('chart cache identity includes chain as well as token address', () => {
   assert.match(chartSource, /markerState\?\.chain !== nextState\?\.chain/);
   assert.match(chartSource, /markerState\?\.tokenAddress !== nextState\?\.tokenAddress/);
+});
+
+test('an empty marker payload clears overlay and every cached chart placement', () => {
+  const chart = loadChartBridge();
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [] } });
+  chart.api.seedEmptyCaches();
+
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [] } });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), {
+    markerState: { markers: [] },
+    lastScaleMode: null,
+    stableScale: null,
+    stableSignature: '',
+    renderedSignature: '',
+    markerPositions: [],
+    overlayChildren: 0
+  });
 });

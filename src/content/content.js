@@ -12,7 +12,8 @@
     gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-    renderedMarkup: null, markerPayloads: new WeakMap(), quickBuySyncQueued: false, activeChainId: null,
+    renderedMarkup: null, markerPayloads: new WeakMap(), latestMarkerPayload: { markers: [] },
+    quickBuySyncQueued: false, activeChainId: null,
     routeEpoch: 0, routeIdentity: null, pendingMutationRoots: new Set(), quickBuyMode: 'unknown',
     selectedChainSync: null,
     selectedChainPersistence: {
@@ -214,6 +215,7 @@
     runtime.renderedMarkup = '';
   }
   function clearChainContext() {
+    clearChartMarkers();
     runtime.current = null;
     runtime.modal = null;
     runtime.calendarOpen = false;
@@ -223,8 +225,6 @@
     runtime.positionCalibrationPromises.clear();
     runtime.positionCalibrationTargets.clear();
     runtime.positionCalibrationDirty.clear();
-    runtime.markerPayloads = new WeakMap();
-    syncChartMarkers(true);
     clearQuickBuyButtons();
     clearHeaderAccountSummary();
     clearShellMarkup();
@@ -232,7 +232,8 @@
 
   function handlePageMessage(event) {
     if (event.data?.source === 'TANGO_PAPER_CHART' && event.data?.type === 'READY') {
-      syncChartMarkers(true);
+      const frame = [...chartFrames()].find((candidate) => candidate.contentWindow === event.source);
+      if (frame) replayChartMarkers(frame);
       return;
     }
     if (event.source === window && event.data?.source === 'TANGO_GMGN_PAGE'
@@ -307,6 +308,7 @@
       [...runtime.gmgnQuotes.keys()].slice(0, overflow).forEach((key) => runtime.gmgnQuotes.delete(key));
     }
     if (currentQuoteChanged) {
+      publishChartMarkers();
       queueRender();
       queueImmediateCurrentCalibration();
     }
@@ -413,7 +415,10 @@
       Number(previousChainSettings?.buyPresets?.[0]) !== Number(currentChainSettings?.buyPresets?.[0])
     );
     if (!chain || !runtime.settings.enabled || !runtime.state.initialized || !runtime.settings.showListQuickBuy || quickBuyConfigChanged) clearQuickBuyButtons();
-    if (!runtime.settings.enabled) runtime.current = null;
+    if (!runtime.settings.enabled || !runtime.state.initialized) {
+      clearChartMarkers();
+      runtime.current = null;
+    }
     if (becameEnabled) ensureRouteTokenContext();
     if (chain && runtime.settings.enabled) syncSelectedChainFromRoute();
     if (becameEnabled) {
@@ -1263,6 +1268,7 @@
       const executableOrder = { ...order, quote };
       const result = await Tango.Store.executeBuy(executableOrder);
       runtime.state = result.state;
+      publishChartMarkers(true);
       runtime.modal = null;
       playTradeSound('BUY');
       const chain = Tango.Chains.require(order.token.chain);
@@ -1325,6 +1331,7 @@
       const executableOrder = { ...order, quote };
       const result = await Tango.Store.executeSell(executableOrder);
       runtime.state = result.state;
+      publishChartMarkers(true);
       runtime.modal = null;
       playTradeSound('SELL');
       showToast(`${t('sellSuccess')} · ${order.percent}% ${order.token.symbol}`, 'success');
@@ -1746,7 +1753,8 @@
 
   function chartMarkerPayload() {
     const chain = activeChain();
-    if (!chain || !runtime.current?.token || runtime.current.token.chain !== chain.id) return { markers: [] };
+    if (!runtime.settings?.enabled || !runtime.state?.initialized
+      || !chain || !runtime.current?.token || runtime.current.token.chain !== chain.id) return { markers: [] };
     return Tango.Markers.buildPayload({
       current: runtime.current,
       position: currentPosition(),
@@ -1755,16 +1763,41 @@
     });
   }
 
-  function syncChartMarkers(force = false) {
-    const frames = document.querySelectorAll('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe');
-    if (!frames.length) return;
-    const payload = chartMarkerPayload();
+  function chartFrames() {
+    return document.querySelectorAll('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe');
+  }
+
+  function deliverChartMarkers(frames, payload, force = false) {
     const signature = JSON.stringify(payload);
     frames.forEach((frame) => {
       if (!force && runtime.markerPayloads.get(frame) === signature) return;
       runtime.markerPayloads.set(frame, signature);
       frame.contentWindow?.postMessage({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload }, '*');
     });
+  }
+
+  function publishChartMarkers(force = false) {
+    runtime.latestMarkerPayload = chartMarkerPayload();
+    deliverChartMarkers(chartFrames(), runtime.latestMarkerPayload, force);
+  }
+
+  function replayChartMarkers(frame = null) {
+    const frames = frame ? [frame] : chartFrames();
+    if (frame) runtime.markerPayloads.delete(frame);
+    deliverChartMarkers(frames, runtime.latestMarkerPayload);
+  }
+
+  function clearChartMarkers() {
+    runtime.latestMarkerPayload = { markers: [] };
+    runtime.markerPayloads = new WeakMap();
+    deliverChartMarkers(chartFrames(), runtime.latestMarkerPayload, true);
+  }
+
+  function syncChartMarkers(force = false) {
+    const frames = chartFrames();
+    if (!frames.length) return;
+    runtime.latestMarkerPayload = chartMarkerPayload();
+    deliverChartMarkers(frames, runtime.latestMarkerPayload, force);
   }
 
   function renderModal() {
@@ -1785,6 +1818,7 @@
     }
     if (!runtime.state || !runtime.settings) return;
     if (!runtime.settings.enabled || !runtime.state.initialized) {
+      if (runtime.latestMarkerPayload?.chain || runtime.latestMarkerPayload?.markers?.length) clearChartMarkers();
       clearQuickBuyButtons();
       clearShellMarkup();
       clearHeaderAccountSummary();
@@ -1927,6 +1961,7 @@
       return;
     }
     ensureRouteTokenContext();
+    publishChartMarkers(true);
     queueRender();
     syncSelectedChainFromRoute(captureRoute());
     window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
@@ -1974,7 +2009,7 @@
           renderHeaderAccountSummary({});
           if (Tango.GMGN.needsCurrentTokenRead(runtime.current)) tickQuote();
         }
-        if (document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe')) syncChartMarkers();
+        if (document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe')) replayChartMarkers();
       }, 160);
     });
     runtime.observer.observe(document.body, {
