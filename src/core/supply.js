@@ -6,6 +6,60 @@
     RULE: 'LAUNCHPAD_RULE',
     LEGACY: 'LEGACY_PUMP_RULE'
   });
+  const UNKNOWN_INITIAL_MARKET_CAP_USD = 3_200;
+  const UNKNOWN_TOTAL_SUPPLY = 1_000_000_000;
+  const LAUNCHPAD_RULES = Object.freeze([
+    Object.freeze({
+      chain: 'sol', aliases: Object.freeze(['pump', 'pumpfun']), launchMode: 'mayhem',
+      totalSupply: 2_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'sol', aliases: Object.freeze(['pump', 'pumpfun']), launchMode: '',
+      totalSupply: 1_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'base', aliases: Object.freeze(['bankr']), launchMode: '',
+      totalSupply: 100_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'base', aliases: Object.freeze(['clanker']), launchMode: '',
+      totalSupply: 100_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'robinhood', aliases: Object.freeze(['bankr']), launchMode: '',
+      totalSupply: 100_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'robinhood', aliases: Object.freeze(['clanker']), launchMode: '',
+      totalSupply: 100_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'bsc', aliases: Object.freeze(['fourmeme']), launchMode: '',
+      totalSupply: 1_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'bsc', aliases: Object.freeze(['flap']), launchMode: '',
+      totalSupply: 1_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'base', aliases: Object.freeze(['zora', 'zoracoins']), launchMode: '',
+      totalSupply: 1_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'xlayer', aliases: Object.freeze(['dyor', 'bow', 'bowfun']), launchMode: '',
+      totalSupply: 1_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    })
+  ]);
   const positive = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
   const clean = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const observationText = (value) => String(value || '').trim().slice(0, 128);
@@ -43,20 +97,35 @@
     return Number.isFinite(inferred) && Math.abs(inferred - supply) <= supply * 0.001;
   }
 
-  function ruleSupply(chain, launchpad, launchMode) {
-    const id = Tango.Chains?.get?.(chain)?.id || '';
+  function launchpadRule(chain, launchpad, launchMode) {
+    const id = Tango.Chains?.get?.(chain)?.id || clean(chain);
     const platform = clean(launchpad);
     const mode = clean(launchMode);
-    if (id === 'sol' && ['pump', 'pumpfun'].includes(platform)) {
-      return mode.includes('mayhem') ? 2_000_000_000 : 1_000_000_000;
-    }
-    if (['bankr', 'clanker'].includes(platform) && ['base', 'robinhood'].includes(id)) {
-      return 100_000_000_000;
-    }
-    if (id === 'bsc' && ['fourmeme', 'flap'].includes(platform)) return 1_000_000_000;
-    if (id === 'base' && ['zora', 'zoracoins'].includes(platform)) return 1_000_000_000;
-    if (id === 'xlayer' && ['dyor', 'bow', 'bowfun'].includes(platform)) return 1_000_000_000;
-    return 0;
+    const matchingRules = LAUNCHPAD_RULES.filter((rule) => rule.chain === id && rule.aliases.includes(platform));
+    const rule = matchingRules.find((candidate) => candidate.launchMode === mode)
+      || matchingRules.find((candidate) => !candidate.launchMode);
+    return rule && {
+      totalSupply: rule.totalSupply,
+      initialMarketCapUsd: rule.initialMarketCapUsd,
+      source: rule.source
+    };
+  }
+
+  function ruleSupply(chain, launchpad, launchMode) {
+    return launchpadRule(chain, launchpad, launchMode)?.totalSupply || 0;
+  }
+
+  function fallbackValuation(observation = {}) {
+    const rule = launchpadRule(observation.chain, observation.launchpad, observation.launchMode);
+    const totalSupply = rule?.totalSupply || UNKNOWN_TOTAL_SUPPLY;
+    const marketCapUsd = rule?.initialMarketCapUsd || UNKNOWN_INITIAL_MARKET_CAP_USD;
+    return {
+      totalSupply,
+      marketCapUsd,
+      priceUsd: marketCapUsd / totalSupply,
+      supplySource: rule?.source || 'UNKNOWN_FALLBACK',
+      valuationSource: rule ? 'LAUNCHPAD_INITIAL_MARKET_CAP' : 'UNKNOWN_INITIAL_MARKET_CAP'
+    };
   }
 
   function resolve(observation = {}) {
@@ -87,7 +156,9 @@
   }
 
   Tango.Supply = {
-    SOURCES, resolve, ruleSupply, isTrustedSource, coherentRatioObservation, ratioSupplyMatches
+    SOURCES, LAUNCHPAD_RULES, UNKNOWN_INITIAL_MARKET_CAP_USD, UNKNOWN_TOTAL_SUPPLY,
+    launchpadRule, fallbackValuation, resolve, ruleSupply,
+    isTrustedSource, coherentRatioObservation, ratioSupplyMatches
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Supply;
 })(globalThis);

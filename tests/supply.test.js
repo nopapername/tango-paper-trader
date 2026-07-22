@@ -63,6 +63,38 @@ test('launchpad and mode rules distinguish 1B, 2B, and 100B supplies', () => {
   assert.equal(Supply.ruleSupply('xlayer', 'DYOR', ''), 1_000_000_000);
 });
 
+test('verified launchpad rules expose supply and initial market cap', () => {
+  const cases = [
+    ['sol', 'pump.fun', '', 1_000_000_000],
+    ['sol', 'pump.fun', 'mayhem', 2_000_000_000],
+    ['base', 'clanker', '', 100_000_000_000],
+    ['robinhood', 'bankr', '', 100_000_000_000],
+    ['bsc', 'four.meme', '', 1_000_000_000],
+    ['bsc', 'flap', '', 1_000_000_000],
+    ['base', 'zora', '', 1_000_000_000],
+    ['xlayer', 'bow.fun', '', 1_000_000_000]
+  ];
+  for (const [chain, launchpad, launchMode, totalSupply] of cases) {
+    assert.deepEqual(Supply.launchpadRule(chain, launchpad, launchMode), {
+      totalSupply,
+      initialMarketCapUsd: 3_200,
+      source: 'LAUNCHPAD_RULE'
+    });
+  }
+});
+
+test('unknown launchpads use the fixed 3200 USD and one-billion fallback', () => {
+  assert.equal(Supply.UNKNOWN_INITIAL_MARKET_CAP_USD, 3_200);
+  assert.equal(Supply.UNKNOWN_TOTAL_SUPPLY, 1_000_000_000);
+  assert.deepEqual(Supply.fallbackValuation({ chain: 'eth', launchpad: 'unknown' }), {
+    totalSupply: 1_000_000_000,
+    marketCapUsd: 3_200,
+    priceUsd: 0.0000032,
+    supplySource: 'UNKNOWN_FALLBACK',
+    valuationSource: 'UNKNOWN_INITIAL_MARKET_CAP'
+  });
+});
+
 test('launchpad fallback rejects known platforms on the wrong chain', () => {
   assert.equal(Supply.ruleSupply('eth', 'Zora', ''), 0);
   assert.equal(Supply.ruleSupply('base', 'Four.meme', ''), 0);

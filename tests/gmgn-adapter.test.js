@@ -733,6 +733,15 @@ test('quick-buy ignores a launchpad link exposing another card address', async (
     await harness.slot.__tangoQuickBuyHandler();
     assert.equal(orders.length, 1);
     assert.equal(orders[0].token.launchpad, '');
+    assert.deepEqual(Tango.Supply.fallbackValuation({
+      chain: orders[0].token.chain, launchpad: orders[0].token.launchpad
+    }), {
+      totalSupply: 1_000_000_000,
+      marketCapUsd: 3_200,
+      priceUsd: 0.0000032,
+      supplySource: 'UNKNOWN_FALLBACK',
+      valuationSource: 'UNKNOWN_INITIAL_MARKET_CAP'
+    });
   } finally {
     global.document = original.document;
     global.location = original.location;
