@@ -1242,6 +1242,29 @@ test('detail quote reads price, market cap, and exact total supply from one veri
   }
 });
 
+test('a confirmed detail header without factual quote fields returns the minimal route placeholder', async () => {
+  const original = { document: global.document, location: global.location };
+  const detail = detailDocument({
+    chain: 'base', address: EVM_ADDRESS, priceUsd: 0, marketCapUsd: 0, liquidityUsd: 0
+  });
+  GMGN._clearTrenchSnapshots();
+  global.document = detail.document;
+  global.location = { href: `https://gmgn.ai/base/token/${EVM_ADDRESS}`, origin: 'https://gmgn.ai' };
+  try {
+    assert.deepEqual(await GMGN.readCurrentToken(), {
+      token: {
+        chain: 'base', address: EVM_ADDRESS, symbol: '0x1111…1111', name: '0x1111…1111', logoUrl: '',
+        metadataVerified: false, metadataSource: ''
+      },
+      quote: {}
+    });
+  } finally {
+    GMGN._clearTrenchSnapshots();
+    global.document = original.document;
+    global.location = original.location;
+  }
+});
+
 test('trench quick buy snapshots once and dispatches without polling timers', async () => {
   const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame, timeout: global.setTimeout };
   const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS, marketCap: '$2K' });
@@ -1258,6 +1281,37 @@ test('trench quick buy snapshots once and dispatches without polling timers', as
     assert.equal(orders.length, 1);
     assert.equal(orders[0].quote.marketCapUsd, 2_000);
   } finally {
+    Object.assign(global, original);
+  }
+});
+
+test('quick-buy records the click-time trench snapshot before its callback can navigate', async () => {
+  const original = { document: global.document, location: global.location, raf: global.requestAnimationFrame };
+  const harness = quickBuyHarness({
+    chain: 'base', address: EVM_ADDRESS, marketCap: '$2K', identityText: 'DISC Discover Token',
+    launchpadHref: `https://clanker.world/token/${EVM_ADDRESS}`
+  });
+  harness.card.firstElementChild.querySelector = () => ({ src: 'discover.png' });
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  global.requestAnimationFrame = (callback) => callback();
+  GMGN._clearTrenchSnapshots();
+  try {
+    let snapshotAtCallback = null;
+    assert.equal(GMGN.discoverTokenCards(() => {
+      global.location.href = `https://gmgn.ai/base/token/${EVM_ADDRESS}`;
+      snapshotAtCallback = GMGN.readTrenchSnapshot('base', EVM_ADDRESS);
+    }, 0.1, 'PAPER'), 1);
+    harness.card.innerText = `${EVM_ADDRESS}\nCLICK Click Token\nMC\n$7K`;
+    harness.card.firstElementChild.querySelector = () => ({ src: 'click.png' });
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(snapshotAtCallback.token.symbol, 'CLICK');
+    assert.equal(snapshotAtCallback.token.name, 'Click Token');
+    assert.equal(snapshotAtCallback.token.logoUrl, 'click.png');
+    assert.equal(snapshotAtCallback.token.launchpad, 'Clanker');
+    assert.equal(snapshotAtCallback.quote.marketCapUsd, 7_000);
+  } finally {
+    GMGN._clearTrenchSnapshots();
     Object.assign(global, original);
   }
 });

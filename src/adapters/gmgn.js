@@ -514,7 +514,7 @@
       && !confirmed.chainBound && lastVerifiedDetail.fingerprint === fingerprint) return placeholder;
     detail = confirmed;
     const quote = detailQuote(detail, chain, address);
-    if (!quote) return null;
+    if (!quote || !(Number(quote.priceUsd) > 0 || Number(quote.marketCapUsd) > 0)) return placeholder;
     const result = {
       token: {
         chain, address, symbol: identity.symbol, name: identity.name, logoUrl: tokenLogo(detail.header),
