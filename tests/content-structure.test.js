@@ -113,6 +113,8 @@ test('paper execution paths contain no quote wait, pending intent, or network aw
   const closeAll = between('async function commitCloseAll(', 'async function sellBreakeven()');
   const breakeven = between('async function sellBreakeven(', 'function showToast(');
   assert.doesNotMatch(resolver, /await|setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote/);
+  assert.match(resolver, /fallbackValuation\(/);
+  assert.doesNotMatch(resolver, /historicalPrice \|\| 1/);
   const blockingQuoteWork = /setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote|latestCardMarketCap/;
   assert.doesNotMatch(quickBuy, blockingQuoteWork);
   assert.doesNotMatch(buy, blockingQuoteWork);

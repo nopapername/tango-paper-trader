@@ -689,7 +689,7 @@ test('panel trade totals keep Solana address identity case-sensitive', () => {
   assert.match(loaded.api.renderPanel(), /<span>totalBuy<\/span><strong>2 SOL<\/strong>/);
 });
 
-test('quick buy with no market data commits immediately with a provisional 1 USD quote', async () => {
+test('quick buy with no market data commits immediately with a deterministic fallback quote', async () => {
   const never = deferred();
   const loaded = loadContent({
     sendMessage: (message) => /TANGO_GET_(TOKEN_QUOTE|NATIVE_PRICE)/.test(message.type)
@@ -703,10 +703,32 @@ test('quick buy with no market data commits immediately with a provisional 1 USD
     quote: {}, amountNative: 1
   });
   assert.equal(loaded.calls.buy, 1);
-  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 1);
+  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 3_200 / 1_000_000_000);
+  assert.equal(loaded.calls.buyOrders[0].quote.marketCapUsd, 3_200);
+  assert.equal(loaded.calls.buyOrders[0].quote.totalSupply, 1_000_000_000);
   assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 1);
   assert.equal(loaded.calls.buyOrders[0].quote.provisional, true);
   assert.equal(loaded.api.runtime.toast.type, 'success');
+});
+
+test('quick and detail buys resolve deterministic fallback valuations on every supported chain', async () => {
+  const chains = [
+    ['sol', SOL_ADDRESS], ['eth', ADDRESS_A], ['bsc', ADDRESS_A],
+    ['base', ADDRESS_A], ['robinhood', ADDRESS_A], ['xlayer', ADDRESS_A]
+  ];
+  for (const [chain, address] of chains) {
+    const loaded = loadContent({ href: `https://gmgn.ai/${chain}/token/${address}` });
+    loaded.api.runtime.settings.fastMode = true;
+    loaded.api.runtime.settings.confirmationEnabled = false;
+    await loaded.api.handleQuickBuy({
+      token: { chain, address, symbol: 'FALLBACK', metadataVerified: true, metadataSource: 'GMGN_TRENCH' },
+      quote: {}, amountNative: 1
+    });
+    const order = loaded.calls.buyOrders[0];
+    assert.equal(order.quote.priceUsd, 3_200 / 1_000_000_000, chain);
+    assert.equal(order.quote.marketCapUsd, 3_200, chain);
+    assert.equal(order.quote.totalSupply, 1_000_000_000, chain);
+  }
 });
 
 test('local quick-buy feedback completes under 100 ms without timer advancement', async () => {
@@ -928,8 +950,8 @@ test('local paper quotes discard an explicit cross-chain candidate identity', ()
     { chain: 'base', address: ADDRESS_A, symbol: 'TARGET' },
     { chain: 'eth', address: ADDRESS_A, priceUsd: 2, observedAt: loaded.clock.now, source: 'DEXSCREENER' }
   );
-  assert.equal(quote.priceUsd, 1);
-  assert.equal(quote.source, 'TANGO_SYNTHETIC');
+  assert.equal(quote.priceUsd, 3_200 / 1_000_000_000);
+  assert.equal(quote.source, 'TANGO_FALLBACK');
   assert.equal(quote.provisional, true);
 });
 
@@ -940,9 +962,28 @@ test('local paper quotes discard a same-chain candidate for another address', ()
     { chain: 'base', address: ADDRESS_A, symbol: 'TARGET' },
     { chain: 'base', address: ADDRESS_B, priceUsd: 2, observedAt: loaded.clock.now, source: 'GMGN_NETWORK' }
   );
-  assert.equal(quote.priceUsd, 1);
-  assert.equal(quote.source, 'TANGO_SYNTHETIC');
+  assert.equal(quote.priceUsd, 3_200 / 1_000_000_000);
+  assert.equal(quote.source, 'TANGO_FALLBACK');
   assert.equal(quote.provisional, true);
+});
+
+test('paper resolver rejects contaminated live observations before falling back deterministically', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/eth/token/${ADDRESS_A}` });
+  loaded.api.rememberNativePrice('eth', 2_000, loaded.clock.now);
+  const token = { chain: 'eth', address: ADDRESS_A, symbol: 'TARGET' };
+  const cases = [
+    { chain: 'base', address: ADDRESS_A, priceUsd: 9, source: 'GMGN_NETWORK' },
+    { chain: 'eth', address: ADDRESS_B, priceUsd: 9, source: 'GMGN_NETWORK' },
+    { chain: 'eth', address: ADDRESS_A, priceUsd: 9, observedAt: loaded.clock.now - 15_001, source: 'GMGN_NETWORK' },
+    { chain: 'eth', address: ADDRESS_A, priceUsd: 9, syntheticTokenPrice: true, source: 'GMGN_NETWORK' },
+    { chain: 'eth', address: ADDRESS_A, priceUsd: Number.NaN, source: 'GMGN_NETWORK' },
+    { chain: 'eth', address: ADDRESS_A, priceUsd: Infinity, source: 'GMGN_NETWORK' }
+  ];
+  for (const candidate of cases) {
+    const quote = loaded.api.resolvePaperTradeQuote(token, { ...candidate, observedAt: candidate.observedAt ?? loaded.clock.now });
+    assert.equal(quote.priceUsd, 3_200 / 1_000_000_000);
+    assert.equal(quote.source, 'TANGO_FALLBACK');
+  }
 });
 
 test('candidate direct supply with unknown provenance cannot become GMGN exact through the resolver or Engine', () => {
@@ -981,8 +1022,8 @@ test('resolver consumes a provisional 1B divisor without promoting it to trusted
   assert.equal(quote.priceUsd, 5_000 / 1_000_000_000);
   assert.equal(quote.syntheticTokenPrice, true);
   assert.equal(quote.provisional, true);
-  assert.equal(quote.totalSupply, 0);
-  assert.equal(quote.supplySource, '');
+  assert.equal(quote.totalSupply, 1_000_000_000);
+  assert.equal(quote.supplySource, 'UNKNOWN_FALLBACK');
 });
 
 test('cached exact supply wins over a provisional card candidate after cache merge', () => {
@@ -1983,7 +2024,7 @@ test('quick buy uses exact-address last-known token and native prices when refre
   await action;
 
   assert.equal(loaded.calls.buy, 1);
-  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 2);
+  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 3_200 / 1_000_000_000);
   assert.equal(loaded.calls.buyOrders[0].quote.nativePriceUsd, 3_000);
   assert.equal(loaded.calls.buyOrders[0].quote.paperFallback, true);
   assert.equal(loaded.api.runtime.toast?.type, 'success');
@@ -2114,8 +2155,8 @@ test('supplyless EVM market-cap observation fills provisionally before backgroun
 
   assert.equal(loaded.messages.some((message) => message.type === 'TANGO_GET_TOKEN_QUOTE'), true);
   assert.equal(loaded.calls.buy, 1);
-  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 1);
-  assert.equal(loaded.calls.buyOrders[0].quote.source, 'TANGO_SYNTHETIC');
+  assert.equal(loaded.calls.buyOrders[0].quote.priceUsd, 2_000 / 1_000_000_000);
+  assert.equal(loaded.calls.buyOrders[0].quote.source, 'TANGO_FALLBACK');
   assert.equal(loaded.calls.buyOrders[0].quote.provisional, true);
   assert.equal(loaded.calls.buyOrders[0].quote.nativePriceObservedAt, loaded.clock.now - 1_000);
 });
@@ -2152,7 +2193,7 @@ test('non-Pump Solana market cap fills provisionally while real-price refresh st
   await rejected;
   assert.equal(unavailable.messages.some((message) => message.type === 'TANGO_GET_TOKEN_QUOTE'), true);
   assert.equal(unavailable.calls.buy, 1);
-  assert.equal(unavailable.calls.buyOrders[0].quote.priceUsd, 1);
+  assert.equal(unavailable.calls.buyOrders[0].quote.priceUsd, 10_000 / 1_000_000_000);
   assert.equal(unavailable.calls.buyOrders[0].quote.provisional, true);
 
   const resolved = loadContent({
@@ -2177,8 +2218,8 @@ test('non-Pump Solana market cap fills provisionally while real-price refresh st
   await accepted;
   assert.equal(resolved.messages.some((message) => message.type === 'TANGO_GET_TOKEN_QUOTE'), true);
   assert.equal(resolved.calls.buy, 1);
-  assert.equal(resolved.calls.buyOrders[0].quote.priceUsd, 1);
-  assert.equal(resolved.calls.buyOrders[0].quote.source, 'TANGO_SYNTHETIC');
+  assert.equal(resolved.calls.buyOrders[0].quote.priceUsd, 10_000 / 1_000_000_000);
+  assert.equal(resolved.calls.buyOrders[0].quote.source, 'TANGO_FALLBACK');
   assert.equal(resolved.calls.buyOrders[0].quote.provisional, true);
   assert.equal(resolved.calls.buyOrders[0].quote.valuationMode, 'PRICE');
   assert.equal(resolved.calls.buyOrders[0].quote.nativePriceObservedAt, resolved.clock.now - 1_000);

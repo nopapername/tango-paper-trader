@@ -790,7 +790,12 @@
     const candidateIdentityMatches = (candidate?.chain == null || candidate.chain === chain.id)
       && candidateAddresses.every((value) => Tango.Chains.validateAddress(chain.id, value)
         && Tango.Chains.normalizeAddress(chain.id, value) === normalizedAddress);
-    const candidateIsTrusted = candidateIdentityMatches
+    const candidateObservedAt = Number(candidate?.observedAt || 0);
+    const candidateFresh = Number.isSafeInteger(candidateObservedAt)
+      && candidateObservedAt > 0
+      && candidateObservedAt - Date.now() <= 5_000
+      && Date.now() - candidateObservedAt <= Number(Tango.QUOTE_STALE_MS || 15_000);
+    const candidateIsTrusted = candidateIdentityMatches && candidateFresh
       && (candidateSource === 'DEXSCREENER' || candidateSource.startsWith('GMGN'));
     const candidateSyntheticTokenPrice = candidateIsTrusted && candidate?.syntheticTokenPrice === true;
     const candidateProvisionalSupply = candidateSyntheticTokenPrice
@@ -806,9 +811,12 @@
       totalSupplySource: candidateExactSupply ? 'GMGN_EXACT' : '',
       supplySource: candidateExactSupply ? 'GMGN_EXACT' : ''
     } : null;
-    const merged = exact && boundCandidate
-      ? Tango.GMGNQuotes.mergeObservation(exact, boundCandidate)
-      : boundCandidate || exact;
+    const freshExact = exact && Number.isSafeInteger(Number(exact.observedAt))
+      && Date.now() - Number(exact.observedAt) <= Number(Tango.QUOTE_STALE_MS || 15_000)
+      ? exact : null;
+    const merged = freshExact && boundCandidate
+      ? Tango.GMGNQuotes.mergeObservation(freshExact, boundCandidate)
+      : boundCandidate || freshExact;
     const mergedHasFactualPrice = Number.isFinite(Number(merged?.priceUsd)) && Number(merged.priceUsd) > 0;
     const positionAddress = position?.tokenAddress || position?.address;
     const boundPosition = position?.chain === chain.id
@@ -884,31 +892,37 @@
       ? safeMarketCapUsd / supply.totalSupply
       : 0;
     const derivedPrice = Number.isFinite(calculatedPrice) && calculatedPrice > 0 ? calculatedPrice : 0;
-    const provisionalSupply = !supply && Number(local.provisionalSupply) === 1_000_000_000
-      ? 1_000_000_000 : 0;
-    const provisionalPrice = !safeObservedPrice && !derivedPrice
-      && safeMarketCapUsd > 0 && provisionalSupply > 0
-      ? safeMarketCapUsd / provisionalSupply : 0;
     const historicalValue = Number(boundPosition?.lastPriceUsd || boundPosition?.averageEntryPriceUsd || 0);
     const historicalPrice = boundPosition?.syntheticTokenPrice !== true
       && boundPosition?.provisionalTokenPrice !== true
       && Number.isFinite(historicalValue) && historicalValue > 0 ? historicalValue : 0;
-    const priceUsd = safeObservedPrice || derivedPrice || provisionalPrice || historicalPrice || 1;
+    const fallback = Tango.Supply.fallbackValuation({
+      chain: chain.id, launchpad: resolvedLaunchpad, launchMode: resolvedLaunchMode
+    });
+    const executionMarketCap = safeMarketCapUsd || fallback.marketCapUsd;
+    const executionSupply = supply?.totalSupply || fallback.totalSupply;
+    const fallbackPrice = executionMarketCap / executionSupply;
+    const priceUsd = safeObservedPrice || derivedPrice || historicalPrice || fallbackPrice;
     const native = lastKnownNativeObservation(chain.id, local, boundPosition);
     const nativePriceUsd = Number(native.price || 1);
     const now = Date.now();
     const syntheticTokenPrice = !(safeObservedPrice > 0 || derivedPrice > 0 || historicalPrice > 0);
     const syntheticNativePrice = !(native.price > 0);
     const fallbackSupply = derivedPrice > 0 && supply?.confidence === 'fallback';
+    const valuationSource = safeObservedPrice > 0 ? 'OBSERVED_PRICE'
+      : derivedPrice > 0 ? 'OBSERVED_MARKET_CAP'
+        : historicalPrice > 0 ? 'POSITION_HISTORY'
+          : safeMarketCapUsd > 0 ? 'CARD_MARKET_CAP_FALLBACK_SUPPLY'
+            : fallback.valuationSource;
     return {
       ...local,
       chain: chain.id,
       address: normalizedAddress,
       launchpad: resolvedLaunchpad,
       launchMode: resolvedLaunchMode,
-      provisionalSupply,
+      provisionalSupply: syntheticTokenPrice ? Number(executionSupply) : 0,
       priceUsd,
-      marketCapUsd: safeMarketCapUsd,
+      marketCapUsd: executionMarketCap,
       liquidityUsd: Number.isFinite(Number(local.liquidityUsd)) && Number(local.liquidityUsd) > 0
         ? Number(local.liquidityUsd) : 0,
       nativePriceUsd,
@@ -916,14 +930,15 @@
       nativePriceObservedAt: now,
       originalObservedAt: Number(local.observedAt || 0),
       nativeOriginalObservedAt: Number(native.observedAt || 0),
-      source: syntheticTokenPrice ? 'TANGO_SYNTHETIC' : String(local.source || 'GMGN_LAST_KNOWN'),
+      source: syntheticTokenPrice ? 'TANGO_FALLBACK' : String(local.source || 'GMGN_LAST_KNOWN'),
       valuationMode: derivedPrice > 0 ? 'MARKET_CAP' : 'PRICE',
-      priceProvenance: syntheticTokenPrice ? 'SYNTHETIC_PRICE'
+      priceProvenance: syntheticTokenPrice ? 'FALLBACK_INITIAL_MARKET_CAP'
         : derivedPrice > 0 ? 'MARKET_CAP_DERIVED' : 'OBSERVED_PRICE',
-      totalSupply: supply ? Number(supply.totalSupply) : 0,
-      marketCapDivisor: supply ? Number(supply.totalSupply) : undefined,
-      supplySource: supply?.source || '',
+      totalSupply: Number(executionSupply),
+      marketCapDivisor: Number(executionSupply),
+      supplySource: supply?.source || fallback.supplySource,
       supplyConfidence: supply?.confidence || '',
+      valuationSource,
       syntheticTokenPrice,
       syntheticNativePrice,
       provisional: syntheticTokenPrice || syntheticNativePrice || fallbackSupply,

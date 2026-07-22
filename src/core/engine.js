@@ -354,6 +354,17 @@
     const observedAt = quote?.observedAt;
     const nativePriceObservedAt = quote?.nativePriceObservedAt;
     const maxAge = Number(staleMs ?? Tango.QUOTE_STALE_MS ?? 15_000);
+    const contextChain = String(trustContext?.chain || context?.chain || '');
+    const contextAddress = trustContext?.tokenAddress || trustContext?.address
+      || context?.tokenAddress || context?.address;
+    const quoteChain = quote?.chain == null ? '' : String(quote.chain);
+    const quoteAddress = quote?.address ?? quote?.tokenAddress;
+    const quoteBindsAddress = quoteAddress != null && String(quoteAddress).trim() !== '';
+    const invalidIdentity = (quoteChain && quoteChain !== contextChain)
+      || (quoteBindsAddress && (!contextChain || !Tango.Chains.validateAddress(contextChain, quoteAddress)
+        || !Tango.Chains.validateAddress(contextChain, contextAddress)
+        || Tango.Chains.normalizeAddress(contextChain, quoteAddress)
+          !== Tango.Chains.normalizeAddress(contextChain, contextAddress)));
     const invalidOptional = ['priceUsd', 'marketCapUsd', 'liquidityUsd', 'totalSupply'].some((field) =>
       quote?.[field] != null && !finiteBetween(quote[field], 0, Number.MAX_VALUE));
     const resolvedQuoteSupply = quoteSupply(quote, trustContext);
@@ -369,6 +380,7 @@
     if (!quote || !finiteBetween(price, Number.EPSILON, Number.MAX_VALUE)
       || !finiteBetween(quote.nativePriceUsd, Number.EPSILON, Number.MAX_VALUE)
       || invalidOptional
+      || invalidIdentity
       || invalidTrustedSupplyClaim
       || missingCalibrationDimension
       || (quote.marketCapDivisor != null && !finiteBetween(quote.marketCapDivisor, Number.EPSILON, Number.MAX_VALUE))
@@ -447,8 +459,6 @@
       return { status: 'NOOP', state };
     }
 
-    const oldMark = markPosition(existing);
-    const preservedValueNative = Number(oldMark.valueNative);
     const newPriceUsd = effectiveQuotePrice(quote, existing, existing);
     const newNativePriceUsd = Number(quote.nativePriceUsd || existing.lastNativePriceUsd);
     const oldSupply = trustedSupply(existing);
@@ -477,17 +487,8 @@
     const reason = calibrationReason(priceCorrection, nativeCorrection, supplyCorrection);
     if (!reason) return { status: 'NOOP', state };
 
-    const nextQuantity = preservedValueNative * newNativePriceUsd / newPriceUsd;
-    const nextAverageEntryPriceUsd = Number(existing.costBasisNative) * newNativePriceUsd / nextQuantity;
     const selectedSupply = preferredSupply(quote, existing);
-    const nextAverageEntryMarketCap = selectedSupply
-      ? nextAverageEntryPriceUsd * selectedSupply.totalSupply
-      : Number(existing.averageEntryMarketCap || 0);
-    if (![oldMark.priceUsd, oldMark.nativePriceUsd, preservedValueNative, existing.costBasisNative,
-      newPriceUsd, newNativePriceUsd, nextQuantity, nextAverageEntryPriceUsd].every(positiveFinite)
-      || (selectedSupply
-        ? !positiveFinite(nextAverageEntryMarketCap)
-        : !finiteBetween(nextAverageEntryMarketCap, 0, Number.MAX_VALUE))) {
+    if (![newPriceUsd, newNativePriceUsd].every(positiveFinite)) {
       return { status: 'FAILED', state, reason: 'calibrationFailed' };
     }
 
@@ -503,9 +504,6 @@
     const nextState = structuredCloneSafe(state);
     nextState.positions[key] = {
       ...nextState.positions[key],
-      quantity: nextQuantity,
-      averageEntryPriceUsd: nextAverageEntryPriceUsd,
-      averageEntryMarketCap: nextAverageEntryMarketCap,
       lastPriceUsd: newPriceUsd,
       lastMarketCapUsd: Number(quote.marketCapUsd || existing.lastMarketCapUsd || 0),
       lastNativePriceUsd: newNativePriceUsd,
@@ -535,14 +533,14 @@
       chain: existing.chain,
       tokenAddress: existing.tokenAddress,
       reason,
-      fromPriceUsd: Number(oldMark.priceUsd),
+      fromPriceUsd: Number(existing.lastPriceUsd || existing.averageEntryPriceUsd || 0),
       toPriceUsd: Number(newPriceUsd),
-      fromNativePriceUsd: Number(oldMark.nativePriceUsd),
+      fromNativePriceUsd: Number(existing.lastNativePriceUsd || 0),
       toNativePriceUsd: Number(newNativePriceUsd),
       fromSupply: Number(oldSupply?.totalSupply || existing.totalSupply || existing.marketCapDivisor || 0),
       toSupply: Number(selectedSupply?.totalSupply || oldSupply?.totalSupply || 0),
       quantityBefore: Number(existing.quantity),
-      quantityAfter: Number(nextQuantity),
+      quantityAfter: Number(existing.quantity),
       costBasisNative: Number(existing.costBasisNative),
       createdAt: Number(now)
     };
