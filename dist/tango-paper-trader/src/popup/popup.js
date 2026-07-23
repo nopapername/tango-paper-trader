@@ -241,9 +241,20 @@
     document.querySelector('#gmgn')?.addEventListener('click', async () => {
       const chainId = visibleSelectedChain;
       const chainModel = await selectedModel(chainId);
-      if (chainModel) global.chrome.tabs.create({ url: Tango.Chains.trenchUrl(chainModel.chain.id) });
+      if (chainModel) await global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_GMGN' });
     });
   }
+
+  global.chrome.storage?.onChanged?.addListener((_changes, areaName) => {
+    if (areaName !== 'local') return;
+    reload().then(() => {
+      loadError = false;
+      render();
+    }).catch(() => {
+      loadError = true;
+      render();
+    });
+  });
 
   await loadInitial();
 })(globalThis);

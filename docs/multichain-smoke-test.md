@@ -22,6 +22,18 @@ Confirm that a committed paper buy or sell sends an immediately visible marker t
 
 Safety boundary: click only controls labeled Tango and Paper. Do not click GMGN's real buy, real sell, wallet, approval, or signing UI. Do not connect a wallet, approve a token, sign anything, submit a swap, broadcast a transaction or RPC request, or use real funds.
 
+## GMGN UI resilience and shortcut checks
+
+On one supported trench page, switch GMGN custom button size through small, large, extra-large, and giant. At each size, confirm every visible existing and newly arriving Meme card has exactly one Tango Paper quick-buy control whose outer geometry matches the adjacent GMGN control. Repeat during a page/column switch and after scrolling a virtual list away and back. The intermediate compact and expanded DOM phases must not leave a missing, duplicated, or displaced paper control.
+
+With only test paper balance at risk, activate a Tango control by pointer and keyboard. Confirm one local paper order appears and no GMGN native order, wallet, signature, approval, Swap, or transaction UI opens. Disable all features and confirm native GMGN controls are restored while Tango controls, panels, header assets, and chart lines disappear.
+
+On first-install onboarding, enter `10`, then `12.5`; confirm the allocation note changes immediately and lists the six independent native balances (SOL, ETH, BNB, ETH, ETH, OKB). Complete setup and confirm the verified reset opens `https://gmgn.ai/r/X9cuc5jd?chain=bsc` before the onboarding tab closes. Invalid or failed persistence must not open GMGN.
+
+Press `Alt+Shift+P` with the popup open. Confirm the popup master switch and the current GMGN page turn OFF without refresh; press it again and confirm both turn ON and current-route controls reconstruct without refresh.
+
+On a chart whose right axis is actively redrawing, place a paper marker around `$6.028K` while the visible tick is around `$6.02K`. Confirm the line tracks the current tick scale, stale labels from the previous token/scale are ignored within 1.5 seconds, and the line hides temporarily when fewer than three trustworthy current labels exist.
+
 ## Results
 
 | Chain | Detail context | Buy | Partial sell | Close all isolation | Header asset | Drawer isolation | Trench | Chart | Result |

@@ -17,6 +17,7 @@ function deferred() {
 function loadPageMain(fetchImpl, clock = null) {
   const published = [];
   const nativePublished = [];
+  const paperPublished = [];
   const listeners = new Map();
   class FakeElement {}
   class FakeXhr {
@@ -39,6 +40,7 @@ function loadPageMain(fetchImpl, clock = null) {
     postMessage(message) {
       if (message?.type === 'TOKEN_QUOTES') published.push(...message.quotes);
       if (message?.type === 'NATIVE_PRICES') nativePublished.push(...message.prices);
+      if (message?.type === 'PAPER_QUICK_BUY_CLICK') paperPublished.push(message);
     },
     Tango: {
       GMGNQuotes: {
@@ -78,8 +80,52 @@ function loadPageMain(fetchImpl, clock = null) {
   context.top = context;
   vm.runInNewContext(chainsSource, context, { filename: 'src/core/chains.js' });
   vm.runInNewContext(source, context, { filename: 'src/content/page-main.js' });
-  return { context, published, nativePublished, listeners };
+  return { context, published, nativePublished, paperPublished, listeners };
 }
+
+test('paper quick-buy real dispatch blocks every native leaf and delegated ancestor sentinel', () => {
+  const clock = { now: 1_000 };
+  const loaded = loadPageMain(async () => jsonResponse({}), clock);
+  const button = new loaded.context.Element();
+  button.dataset = { tangoActionId: 'paper-1' };
+  button.matches = (selector) => selector === '[data-tango-paper-action="quick-buy"]';
+  const nativeLeaf = new loaded.context.Element();
+  const slot = new loaded.context.Element();
+  const card = new loaded.context.Element();
+  const root = new loaded.context.Element();
+  const sentinels = { nativeLeaf: 0, slot: 0, card: 0, root: 0 };
+  nativeLeaf.onNative = () => { sentinels.nativeLeaf += 1; };
+  slot.onNative = () => { sentinels.slot += 1; };
+  card.onNative = () => { sentinels.card += 1; };
+  root.onNative = () => { sentinels.root += 1; };
+  const path = [button, slot, card, root];
+  const dispatch = (type, key = '') => {
+    const event = {
+      type, key, defaultPrevented: false, propagationStopped: false, immediateStopped: false,
+      composedPath: () => path,
+      preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.propagationStopped = true; },
+      stopImmediatePropagation() { this.immediateStopped = true; this.propagationStopped = true; }
+    };
+    loaded.listeners.get(type)(event);
+    if (!event.propagationStopped) path.forEach((node) => node.onNative?.(event));
+    assert.equal(event.defaultPrevented, true, type);
+    assert.equal(event.immediateStopped, true, type);
+  };
+
+  dispatch('pointerdown');
+  dispatch('pointerup');
+  dispatch('click');
+  clock.now += 701;
+  dispatch('keydown', 'Enter');
+  dispatch('keyup', 'Enter');
+  clock.now += 701;
+  dispatch('keydown', ' ');
+  dispatch('keyup', ' ');
+
+  assert.equal(loaded.paperPublished.length, 3);
+  assert.deepEqual(sentinels, { nativeLeaf: 0, slot: 0, card: 0, root: 0 });
+});
 
 function jsonResponse(payload, url = 'https://gmgn.ai/api/token/quote') {
   return {

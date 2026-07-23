@@ -53,7 +53,8 @@ function mergeSettingsPatch(settings, patch) {
 async function loadDashboard({
   deferThirdGetAll = false, failFirstGetAll = false, failAction = '',
   dashboardLocation = { hash: '', search: '' }, initialized = true,
-  closeSucceeds = true, corruptResetReadback = false
+  closeSucceeds = true, corruptResetReadback = false,
+  emitStorageDuringReset = false, failOpenGmgn = false
 } = {}) {
   const appElements = new Map();
   let document;
@@ -105,18 +106,23 @@ async function loadDashboard({
   let persistedSettings = settingsFixture();
   const refreshedSettings = deferred();
   let getAllCalls = 0;
+  let storageSubscriber = null;
   const calls = { getAll: 0, saves: [], fullSaves: [], resetChain: [], resetAll: 0, resetAllWithBalance: [], exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [], close: 0, sequence: [] };
   const anchors = [];
   const urls = new Map();
   let urlId = 0;
   const source = dashboardSource.replace(
     /  Tango\.Store\.subscribe\(load\);load\(\);\r?\n\}\)\(globalThis\);\s*$/,
-    '  global.__dashboardTest = { runtime, load, render, saveSelectedChain, refreshNativePrices, action, tradesCsv };\n})(globalThis);'
+    '  Tango.Store.subscribe(load);\n  global.__dashboardTest = { runtime, load, render, saveSelectedChain, refreshNativePrices, action, tradesCsv };\n})(globalThis);'
   );
   assert.notEqual(source, dashboardSource, 'dashboard test harness must replace startup');
   const Tango = {
     VERSION: 'test', Chains,
-    I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key },
+    I18n: {
+      resolveLanguage: (value) => value || 'en',
+      t: (key, _language, vars) => key === 'onboardingCapitalAllocation'
+        ? `${key}:${vars?.amount}` : key
+    },
     Format: { native: (value, symbol) => `${value} ${symbol}`, usd: (value) => `$${value}`, percent: String, number: String, duration: String },
     Engine: {
       markPosition: () => ({ valueNative: 0, unrealizedPnlNative: 0, roi: 0 }),
@@ -210,11 +216,12 @@ async function loadDashboard({
             ...patchedSettings.chains[chain.id], initialBalanceNative: balanceNative
           }]))
         };
+        if (emitStorageDuringReset && storageSubscriber) await storageSubscriber();
         return { state: persistedState, settings: persistedSettings };
       },
       async exportData() { calls.exportData += 1; return { product: 'Tango Paper Trader', state: persistedState, settings: persistedSettings }; },
       async importData() { return { state: persistedState, settings: persistedSettings }; },
-      subscribe() {}
+      subscribe(callback) { storageSubscriber = callback; }
     }
   };
   let confirmImpl = () => true;
@@ -245,6 +252,10 @@ async function loadDashboard({
       runtime: {
         async sendMessage(message) {
           calls.nativeMessages.push(message);
+          if (message.type === 'TANGO_OPEN_GMGN') {
+            calls.sequence.push('open');
+            return { ok: !failOpenGmgn };
+          }
           return { ok: true, price: message.chain === 'eth' ? 2_000 : 100, observedAt: message.chain === 'eth' ? 111 : 222 };
         }
       },
@@ -556,12 +567,16 @@ test('Dashboard onboarding defaults to 10 and commits one verified six-chain res
   assert.match(dashboard.app.innerHTML, /independentChains/);
   assert.equal(dashboard.element('#onboarding-balance').value, '10');
   assert.equal(dashboard.element('#onboarding-language').value, 'en');
+  assert.match(dashboard.app.innerHTML, /onboardingCapitalAllocation:10/);
   dashboard.element('#onboarding-balance').value = '12.5';
+  dashboard.element('#onboarding-balance').emit('input');
+  assert.equal(dashboard.element('#onboarding-capital-note').textContent, 'onboardingCapitalAllocation:12.5');
   dashboard.element('#onboarding-language').value = 'zh-CN';
   await dashboard.element('#complete-onboarding').click();
 
   assert.deepEqual(dashboard.calls.resetAllWithBalance, [[12.5, 'zh-CN', undefined]]);
-  assert.deepEqual(dashboard.calls.sequence.slice(-3), ['reset', 'read', 'close']);
+  assert.deepEqual(dashboard.calls.sequence.slice(-4), ['reset', 'read', 'open', 'close']);
+  assert.equal(dashboard.calls.nativeMessages.at(-1).type, 'TANGO_OPEN_GMGN');
   assert.equal(dashboard.context.closed, true);
   assert.equal(dashboard.calls.saves.length, 0);
 });
@@ -591,7 +606,25 @@ test('Dashboard onboarding stays open when persisted read-back is not the reques
 
   assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
   assert.equal(dashboard.calls.close, 0);
+  assert.equal(dashboard.calls.nativeMessages.some((message) => message.type === 'TANGO_OPEN_GMGN'), false);
   assert.match(dashboard.app.innerHTML, /onboardingVerificationFailed/);
+});
+
+test('Dashboard onboarding storage refresh cannot exit setup before GMGN opens successfully', async () => {
+  const dashboard = await loadDashboard({
+    initialized: false,
+    dashboardLocation: { hash: '', search: '?onboarding=1' },
+    emitStorageDuringReset: true,
+    failOpenGmgn: true
+  });
+
+  await dashboard.element('#complete-onboarding').click();
+
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.equal(dashboard.calls.close, 0);
+  assert.match(dashboard.app.innerHTML, /onboardingCommonCapital/);
+  assert.match(dashboard.app.innerHTML, /onboardingVerificationFailed/);
+  assert.ok(dashboard.element('#complete-onboarding'));
 });
 
 test('Dashboard onboarding shows completion when the browser cannot close the tab', async () => {
@@ -601,6 +634,7 @@ test('Dashboard onboarding shows completion when the browser cannot close the ta
   await complete.click();
 
   assert.equal(dashboard.calls.close, 1);
+  assert.deepEqual(dashboard.calls.sequence.slice(-2), ['open', 'close']);
   assert.match(dashboard.app.innerHTML, /onboardingComplete/);
 });
 

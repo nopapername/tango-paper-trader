@@ -84,6 +84,7 @@ tr:last-child td { border-bottom: 0; }
 .onboarding-field .input,.onboarding-field .select { min-width: 0; width: 100%; }
 .onboarding-submit { margin-top: 18px; width: 100%; }
 .onboarding-status { color: var(--red) !important; font-size: 12px; }
+.onboarding-capital-note { color: var(--text) !important; font-size: 12px; line-height: 1.55; margin: 12px auto 0; max-width: 420px; }
 .onboarding-complete { max-width: 560px; }
 .common-capital-field small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .balance-options { display: grid; gap: 8px; grid-template-columns: repeat(3,1fr); margin: 22px 0 10px; }

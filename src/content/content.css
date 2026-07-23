@@ -12,35 +12,20 @@
 .tango-shell, .tango-shell * { box-sizing: border-box; }
 
 .BuyButton-continer.tango-native-buy-overridden {
-  align-items: stretch;
-  display: flex;
   isolation: isolate;
   min-width: 0;
   overflow: hidden;
   position: relative !important;
 }
 .tango-list-quick-buy {
-  align-items: center;
-  appearance: none;
-  background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 10%, transparent);
-  border: 0;
-  border-radius: 6px;
   box-sizing: border-box;
-  color: var(--customize-button-ultra-color, #00ffee);
   cursor: pointer;
-  display: flex;
-  flex: 1 1 auto;
-  font: 700 12px/1 Inter, ui-sans-serif, system-ui, sans-serif;
-  gap: 4px;
-  justify-content: center;
-  min-height: 22px;
+  font: inherit;
   min-width: 0;
   overflow: hidden;
-  padding: 2px 4px;
   white-space: nowrap;
-  width: 100%;
 }
-.tango-list-quick-buy:hover { background: color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 20%, transparent); filter: brightness(1.12); }
+.tango-list-quick-buy:hover { filter: brightness(1.12); }
 .tango-list-quick-buy:active { opacity: .55; }
 .tango-list-quick-buy:disabled { cursor: wait; opacity: .65; }
 .tango-paper-hint {
@@ -71,19 +56,6 @@
   text-shadow: 0 0 9px color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 45%, transparent);
 }
 .tango-buy-amount svg { flex: 0 0 12px; height: 12px; width: 12px; }
-[data-tango-quick-size="small"] .tango-list-quick-buy { gap: 2px; padding-inline: 2px; }
-[data-tango-quick-size="small"] .tango-paper-hint { font-size: 7px; line-height: 9px; }
-[data-tango-quick-size="small"] .tango-buy-amount { font-size: 10px; gap: 1px; }
-[data-tango-quick-size="small"] .tango-buy-amount svg { height: 10px; width: 10px; }
-[data-tango-quick-size="large"] .tango-paper-hint { font-size: 8px; line-height: 11px; }
-[data-tango-quick-size="large"] .tango-buy-amount { font-size: 12px; }
-[data-tango-quick-size="extra-large"] .tango-paper-hint { font-size: 9px; line-height: 13px; padding-inline: 3px; }
-[data-tango-quick-size="extra-large"] .tango-buy-amount { font-size: 14px; }
-[data-tango-quick-size="extra-large"] .tango-buy-amount svg { height: 14px; width: 14px; }
-[data-tango-quick-size="giant"] .tango-list-quick-buy { gap: 6px; padding-inline: 6px; }
-[data-tango-quick-size="giant"] .tango-paper-hint { font-size: 10px; line-height: 15px; padding-inline: 4px; }
-[data-tango-quick-size="giant"] .tango-buy-amount { font-size: 15px; }
-[data-tango-quick-size="giant"] .tango-buy-amount svg { height: 15px; width: 15px; }
 .tango-shell {
   --bg: #0c0d12;
   --panel: rgba(18, 19, 27, 0.97);

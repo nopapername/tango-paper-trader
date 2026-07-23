@@ -471,6 +471,11 @@
     });
   }
 
+  function probeQuickBuyHealth() {
+    if (!runtime.settings?.enabled || !runtime.state?.initialized || !runtime.settings?.showListQuickBuy) return;
+    if (Tango.GMGN.quickBuyNeedsReconcile?.()) syncQuickBuyButtons();
+  }
+
   async function syncVisiblePositionMetadata(routeCapture = captureRoute()) {
     if (!routeCaptureIsCurrent(routeCapture)) return;
     const chain = activeChain();
@@ -1998,6 +2003,7 @@
     runtime.quoteTimer = setInterval(tickQuote, 3000);
     runtime.markerTimer = setInterval(syncChartMarkers, 1000);
     runtime.routeTimer = setInterval(handleRouteChange, 150);
+    runtime.quickBuyProbeTimer = setInterval(probeQuickBuyHealth, 750);
     let mutationTimer;
     runtime.observer = new MutationObserver((records) => {
       if (location.href !== runtime.lastUrl) {
@@ -2030,7 +2036,8 @@
       }, 160);
     });
     runtime.observer.observe(document.body, {
-      childList: true, subtree: true, attributes: true, attributeFilter: ['href'], characterData: true
+      childList: true, subtree: true, attributes: true,
+      attributeFilter: ['href', 'class', 'style', 'data-testid'], characterData: true
     });
     const handleQuickBuyAmountChange = (event) => {
       if (event.target?.closest?.('[data-sentry-component="BuyAmountInput"]')) {

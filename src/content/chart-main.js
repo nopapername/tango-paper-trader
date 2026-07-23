@@ -7,12 +7,15 @@
 
   const SUBSCRIPT = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
   const labelsByCanvas = new Map();
+  const AXIS_LABEL_FRESH_MS = 1_500;
   const canvasIds = new WeakMap();
   const canvasRects = new WeakMap();
   const canvasClearedAt = new WeakMap();
   const canvasConsumedClearAt = new WeakMap();
   let nextCanvasId = 1;
   let clearSequence = 0;
+  let axisLabelSequence = 0;
+  let markerAxisSequenceFloor = 0;
   let markerState = null;
   let overlay = null;
   let lastScaleMode = null;
@@ -68,7 +71,8 @@
       canvasConsumedClearAt.set(canvas, clearedAt);
     }
     records.set(String(text), {
-      text: String(text), value, y: clientY, x: clientX, id, updatedAt: Date.now()
+      text: String(text), value, y: clientY, x: clientX, id,
+      generation: Number(clearedAt || 0), sequence: ++axisLabelSequence, updatedAt: Date.now()
     });
     if (records.size > 100) {
       const oldest = [...records.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt).slice(0, records.size - 100);
@@ -148,14 +152,20 @@
     const groups = [...labelsByCanvas.values()].map((records) => [...records.values()])
       .map((points) => {
         const deduped = new Map();
-        points.filter((point) => now - point.updatedAt < 120_000).forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
+        const latestGeneration = Math.max(0, ...points.map((point) => Number(point.generation || 0)));
+        points.filter((point) => Number(point.sequence || 0) > markerAxisSequenceFloor
+          && now - point.updatedAt <= AXIS_LABEL_FRESH_MS
+          && Number(point.generation || 0) === latestGeneration)
+          .forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
         return [...deduped.values()].sort((a, b) => a.y - b.y);
       }).filter((points) => points.length >= 3 && new Set(points.map((point) => point.value)).size >= 3)
       .map((points) => {
         const linear = robustFit(points, false);
         const logarithmic = robustFit(points, true);
         const fit = !linear ? logarithmic : !logarithmic ? linear : linear.error <= logarithmic.error ? linear : logarithmic;
-        return { points, fit };
+        const tickSpacing = median(points.slice(1).map((point, index) => Math.abs(point.y - points[index].y)));
+        if (!fit || fit.error > Math.max(4, tickSpacing * 0.18)) return { points, fit: null };
+        return { points, fit, tickSpacing };
       }).filter((group) => group.fit);
     const modes = [];
     if (Number(markerState.currentPrice) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(markerState.currentPrice) });
@@ -170,7 +180,11 @@
       candidates.push({ ...mode, points, fit, score });
     }));
     const best = candidates.sort((a, b) => a.score - b.score)[0];
-    if (!best || best.score >= 1.6) return stableScale;
+    if (!best || best.score >= 1.6) {
+      stableScale = null;
+      stableSignature = '';
+      return null;
+    }
     const previous = lastScaleMode && candidates.find((candidate) =>
       candidate.type === lastScaleMode.type && candidate.factor === lastScaleMode.factor && candidate.score < 1.6
     );
@@ -179,7 +193,6 @@
     const signature = `${selected.type}:${selected.factor}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
     const sameMode = stableScale?.type === selected.type && stableScale?.factor === selected.factor;
     if (sameMode && stableSignature === signature) return stableScale;
-    if (sameMode && Date.now() - scaleUpdatedAt < 500) return stableScale;
     stableScale = selected;
     stableSignature = signature;
     scaleUpdatedAt = Date.now();
@@ -229,6 +242,9 @@
         : Number(marker.price || (markerState.currentPrice * Number(marker.marketCap || 0) / markerState.currentMarketCap) || 0);
       if (!(rawValue > 0)) return;
       const fitX = scale.fit.logarithmic ? Math.log(rawValue) : rawValue;
+      const axisValues = scale.points.map((point) => scale.fit.logarithmic ? Math.log(point.value) : point.value).sort((a, b) => a - b);
+      const axisTick = median(axisValues.slice(1).map((value, index) => Math.abs(value - axisValues[index])));
+      if (axisTick > 0 && (fitX < axisValues[0] - axisTick || fitX > axisValues.at(-1) + axisTick)) return;
       const targetY = scale.fit.slope * fitX + scale.fit.intercept;
       if (!Number.isFinite(targetY) || targetY < 35 || targetY > innerHeight - 55) return;
       const previousY = markerPositions.get(marker.id);
@@ -274,8 +290,11 @@
   window.addEventListener('message', (event) => {
     if (event.data?.source !== 'TANGO_PAPER_PARENT' || event.data?.type !== 'CHART_MARKERS') return;
     const nextState = event.data.payload || null;
+    const identityChanged = Boolean(markerState)
+      && (markerState?.chain !== nextState?.chain || markerState?.tokenAddress !== nextState?.tokenAddress);
+    if (identityChanged) markerAxisSequenceFloor = axisLabelSequence;
     if (!nextState?.markers?.length
-      || markerState?.chain !== nextState?.chain || markerState?.tokenAddress !== nextState?.tokenAddress) {
+      || identityChanged) {
       lastScaleMode = null;
       stableScale = null;
       stableSignature = '';

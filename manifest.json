@@ -12,6 +12,14 @@
     "default_title": "Tango Paper Trader",
     "default_popup": "popup.html"
   },
+  "commands": {
+    "toggle-paper-trading": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Toggle all Tango paper trading features"
+    }
+  },
   "options_page": "dashboard.html",
   "content_scripts": [
     {

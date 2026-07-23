@@ -131,6 +131,25 @@ function paperOnlySafetyErrors(sources) {
   return errors;
 }
 
+function releaseContractErrors({ manifest, constantsSource, backgroundSource, adapterSource } = {}) {
+  const errors = [];
+  if (manifest?.commands?.['toggle-paper-trading']?.suggested_key?.default !== 'Alt+Shift+P') {
+    errors.push('Master shortcut must be Alt+Shift+P');
+  }
+  if (!String(constantsSource || '').includes(
+    "Tango.GMGN_ENTRY_URL = 'https://gmgn.ai/r/X9cuc5jd?chain=bsc'"
+  )) errors.push('Missing exact GMGN referral entry constant');
+  if (!/TANGO_OPEN_GMGN/.test(String(backgroundSource || ''))
+    || !/Tango\.GMGN_ENTRY_URL/.test(String(backgroundSource || ''))) {
+    errors.push('Background must own the TANGO_OPEN_GMGN referral action');
+  }
+  if (!/removeAttribute/.test(String(adapterSource || ''))
+    || !/\.type\s*=\s*['"]button['"]/.test(String(adapterSource || ''))) {
+    errors.push('Quick buy replacement must be an inert sanitized button');
+  }
+  return errors;
+}
+
 function collectJavaScriptSources(root, directories = ['src', 'tests', 'scripts']) {
   const sources = [];
   for (const directory of directories) {
@@ -193,6 +212,12 @@ function validateExtension(root = path.resolve(__dirname, '..')) {
   }));
   errors.push(...contentScriptOrderErrors(manifest.content_scripts));
   errors.push(...mainWorldScriptOrderErrors(manifest.content_scripts));
+  errors.push(...releaseContractErrors({
+    manifest,
+    constantsSource,
+    backgroundSource: fs.readFileSync(path.join(root, 'src/background.js'), 'utf8'),
+    adapterSource: fs.readFileSync(path.join(root, 'src/adapters/gmgn.js'), 'utf8')
+  }));
   const workerFile = manifest.background?.service_worker;
   if (workerFile && fs.existsSync(path.join(root, workerFile))) {
     errors.push(...workerImportErrors(workerFile, fs.readFileSync(path.join(root, workerFile), 'utf8')));
@@ -227,5 +252,6 @@ module.exports = {
   workerImportErrors,
   javascriptSyntaxErrors,
   paperOnlySafetyErrors,
+  releaseContractErrors,
   collectProductionJavaScriptSources
 };

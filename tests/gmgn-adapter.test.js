@@ -58,9 +58,17 @@ function quickBuyHarness({
   let elsewhereReplacement = null;
   let slotRect = { height: 24, width: 80 };
   let nativeRect = { height: 24, width: 80 };
+  const nativeAttributes = new Map([
+    ['data-testid', 'quickbuy'], ['href', 'https://gmgn.ai/real-buy'],
+    ['target', '_blank'], ['formaction', '/real-buy'], ['onclick', 'realBuy()'], ['id', 'native-buy']
+  ]);
   const nativeControl = {
     isConnected: true, connectedElsewhere: false, reparented: 0, restored: 0, realHandlerCalls: 0,
+    className: 'gmgn-small rounded-sm',
+    style: { cssText: 'padding: 2px 4px; border-radius: 4px;' },
     textContent: '0.1 SOL',
+    getAttributeNames: () => [...nativeAttributes.keys()],
+    getAttribute: (name) => nativeAttributes.get(name) ?? null,
     getBoundingClientRect: () => ({ ...nativeRect }),
     replaceWith(node) {
       this.isConnected = false;
@@ -96,9 +104,15 @@ function quickBuyHarness({
       return [];
     }
   };
-  const makeElement = () => ({
-    dataset: {}, style: {}, className: '', disabled: false, isConnected: false,
-    setAttribute() {}, append() {}, remove() { this.isConnected = false; },
+  const makeElement = () => {
+    const attributes = new Map();
+    return {
+    dataset: {}, style: { cssText: '' }, className: '', disabled: false, isConnected: false,
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    getAttribute(name) { return attributes.get(name) ?? null; },
+    removeAttribute(name) { attributes.delete(name); },
+    getAttributeNames() { return [...attributes.keys()]; },
+    append() {}, remove() { this.isConnected = false; },
     replaceWith(node) {
       this.isConnected = false;
       if (node === nativeControl) {
@@ -108,7 +122,7 @@ function quickBuyHarness({
       node.isConnected = true;
       replacement = node === nativeControl ? null : node;
     }
-  });
+  }; };
   let visibleSlots = [slot];
   const document = {
     head: { appendChild() {} },
@@ -127,6 +141,11 @@ function quickBuyHarness({
     setColumnAmount(value) { columnAmount = String(value); },
     setSlotRect(rect) { slotRect = { ...slotRect, ...rect }; },
     setNativeRect(rect) { nativeRect = { ...nativeRect, ...rect }; },
+    setNativePresentation(className, cssText) {
+      nativeControl.className = className;
+      nativeControl.style.cssText = cssText;
+      nativeControl.isConnected = true;
+    },
     get replacement() { return replacement; },
     get elsewhereReplacement() { return elsewhereReplacement; },
     get paperControlCount() { return replacement?.isConnected ? 1 : 0; }
@@ -1091,7 +1110,7 @@ test('amount-driven rebind leaves a connected stale native control elsewhere and
   }
 });
 
-test('quick-buy synchronizes four GMGN sizes and reconciled native geometry without actions', () => {
+test('quick-buy follows four native GMGN presentations without height inference or action attributes', () => {
   const modulePath = require.resolve('../src/adapters/gmgn.js');
   const original = {
     document: global.document, location: global.location, raf: global.requestAnimationFrame,
@@ -1117,18 +1136,26 @@ test('quick-buy synchronizes four GMGN sizes and reconciled native geometry with
     const actionId = harness.slot.dataset.tangoActionId;
     assert.equal(typeof resizeCallback, 'function');
 
-    for (const { size, height, width, expanded, narrow } of [
-      { size: 'small', height: 24, width: 80, expanded: false, narrow: false },
-      { size: 'large', height: 32, width: 72, expanded: false, narrow: true },
-      { size: 'extra-large', height: 40, width: 80, expanded: true, narrow: false },
-      { size: 'giant', height: 48, width: 72, expanded: true, narrow: true }
+    for (const { name, className, cssText, height } of [
+      { name: 'small', className: 'gmgn-small rounded-sm', cssText: 'padding: 2px 4px;', height: 22 },
+      { name: 'large', className: 'gmgn-large rounded-md', cssText: 'padding: 4px 8px;', height: 113 },
+      { name: 'extra-large', className: 'gmgn-xl rounded-lg', cssText: 'padding: 7px 10px;', height: 22 },
+      { name: 'giant', className: 'gmgn-giant rounded-xl', cssText: 'padding: 10px 14px;', height: 113 }
     ]) {
-      harness.setSlotRect({ height, width });
+      harness.setSlotRect({ height, width: 80 });
+      harness.setNativePresentation(className, cssText);
       resizeCallback([{ target: harness.slot }]);
-      assert.equal(replacement.style.height, `${height}px`);
-      assert.equal(harness.classes.has('tango-quick-expanded'), expanded);
-      assert.equal(harness.classes.has('tango-quick-narrow'), narrow);
-      assert.equal(harness.slot.dataset.tangoQuickSize, size);
+      freshGmgn.discoverTokenCards((order) => orders.push(order));
+      assert.match(replacement.className, new RegExp(`(?:^|\\s)${className.split(' ')[0]}(?:\\s|$)`), name);
+      assert.match(replacement.style.cssText, new RegExp(cssText.split(':')[0]), name);
+      assert.equal(replacement.getAttribute('data-testid'), null);
+      assert.equal(replacement.getAttribute('href'), null);
+      assert.equal(replacement.getAttribute('target'), null);
+      assert.equal(replacement.getAttribute('formaction'), null);
+      assert.equal(replacement.getAttribute('onclick'), null);
+      assert.equal(replacement.getAttribute('id'), null);
+      assert.equal(replacement.type, 'button');
+      assert.equal(harness.slot.dataset.tangoQuickSize, undefined);
       assert.equal(harness.slot.dataset.tangoActionId, actionId);
     }
     assert.equal(orders.length, 0);
@@ -1138,9 +1165,7 @@ test('quick-buy synchronizes four GMGN sizes and reconciled native geometry with
     harness.nativeControl.isConnected = true;
     assert.equal(freshGmgn.discoverTokenCards((order) => orders.push(order)), 0);
     assert.equal(harness.replacement, replacement);
-    assert.equal(replacement.style.height, '32px');
-    assert.equal(harness.classes.has('tango-quick-expanded'), false);
-    assert.equal(harness.classes.has('tango-quick-narrow'), true);
+    assert.match(replacement.className, /gmgn-giant/);
     assert.equal(harness.nativeControl.isConnected, false);
     assert.equal(harness.slot.dataset.tangoActionId, actionId);
     assert.equal(orders.length, 0);
@@ -1154,7 +1179,7 @@ test('quick-buy synchronizes four GMGN sizes and reconciled native geometry with
   }
 });
 
-test('quick-buy defers zero geometry and recovers on the slot resize observation', () => {
+test('quick-buy remains present through zero geometry and reapplies a recreated native presentation', () => {
   const modulePath = require.resolve('../src/adapters/gmgn.js');
   const original = {
     document: global.document, location: global.location, raf: global.requestAnimationFrame,
@@ -1177,16 +1202,63 @@ test('quick-buy defers zero geometry and recovers on the slot resize observation
   global.requestAnimationFrame = () => 1;
   try {
     assert.equal(freshGmgn.discoverTokenCards(() => {}), 1);
-    assert.equal(harness.replacement.style.height, undefined);
+    assert.match(harness.replacement.className, /gmgn-small/);
     assert.equal(harness.slot.dataset.tangoQuickSize, undefined);
+    harness.setNativePresentation('gmgn-large restored-by-react', 'padding: 8px 12px;');
     harness.setSlotRect({ height: 48, width: 96 });
     resizeCallback([{ target: harness.slot }]);
-    assert.equal(harness.replacement.style.height, '48px');
-    assert.equal(harness.slot.dataset.tangoQuickSize, 'giant');
+    freshGmgn.discoverTokenCards(() => {}, 0.1, 'PAPER', [harness.slot]);
+    assert.match(harness.replacement.className, /restored-by-react/);
+    assert.equal(harness.nativeControl.isConnected, false);
+    assert.equal(harness.slot.dataset.tangoQuickSize, undefined);
   } finally {
     delete require.cache[modulePath];
     Object.assign(global, original);
     global.Tango.GMGN = original.gmgn;
+  }
+});
+
+test('quick-buy health probe ignores a permanently ineligible unbound slot', () => {
+  const original = { document: global.document, location: global.location };
+  global.document = { querySelectorAll: () => [] };
+  GMGN.clearQuickBuy();
+  const hiddenSlot = {
+    isConnected: true, dataset: {},
+    getBoundingClientRect: () => ({ width: 0, height: 0 }),
+    querySelector: () => nativeControl,
+    closest: () => null
+  };
+  const nativeControl = { isConnected: true, closest: () => hiddenSlot };
+  global.document = {
+    querySelector: () => hiddenSlot,
+    querySelectorAll: (selector) => selector === '.BuyButton-continer [data-testid="quickbuy"]' ? [nativeControl] : []
+  };
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  try {
+    assert.equal(GMGN.quickBuyNeedsReconcile(), false);
+  } finally {
+    GMGN.clearQuickBuy();
+    Object.assign(global, original);
+  }
+});
+
+test('quick-buy health probe reports a visible identity-bound unbound native control', () => {
+  const original = { document: global.document, location: global.location };
+  global.document = { querySelectorAll: () => [] };
+  GMGN.clearQuickBuy();
+  const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  harness.nativeControl.closest = (selector) => selector === '.BuyButton-continer' ? harness.slot : null;
+  harness.document.querySelectorAll = (selector) => {
+    if (selector === '.BuyButton-continer [data-testid="quickbuy"]') return [harness.nativeControl];
+    return [];
+  };
+  global.document = harness.document;
+  global.location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  try {
+    assert.equal(GMGN.quickBuyNeedsReconcile(), true);
+  } finally {
+    GMGN.clearQuickBuy();
+    Object.assign(global, original);
   }
 });
 

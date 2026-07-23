@@ -1260,7 +1260,8 @@ test('content mutations promote changed card descendants into real GMGN live-slo
     assert.equal(disconnects, 1);
     assert.equal(harness.nativeControl.restored, 0);
     assert.deepEqual(JSON.parse(JSON.stringify(observerOptions)), {
-      childList: true, subtree: true, attributes: true, attributeFilter: ['href'], characterData: true
+      childList: true, subtree: true, attributes: true,
+      attributeFilter: ['href', 'class', 'style', 'data-testid'], characterData: true
     });
   } finally {
     RealGMGN.clearQuickBuy();

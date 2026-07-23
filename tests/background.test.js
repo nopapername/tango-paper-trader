@@ -22,6 +22,7 @@ function loadPackagedWorker() {
   const imported = [];
   const listeners = [];
   const installListeners = [];
+  const commandListeners = [];
   const context = vm.createContext({
     URL, console, structuredClone,
     chrome: {
@@ -31,6 +32,7 @@ function loadPackagedWorker() {
         getURL(value) { return `chrome-extension://test/${value}`; },
         openOptionsPage: async () => undefined
       },
+      commands: { onCommand: { addListener(listener) { commandListeners.push(listener); } } },
       tabs: { create: async () => undefined },
       storage: {
         local: { get: async () => ({}), set: async () => undefined },
@@ -49,7 +51,7 @@ function loadPackagedWorker() {
     }
   };
   vm.runInContext(fs.readFileSync(path.join(root, workerPath), 'utf8'), context, { filename: workerPath });
-  return { imported, listeners, installListeners };
+  return { imported, listeners, installListeners, commandListeners };
 }
 
 function deferred() {
@@ -66,6 +68,7 @@ function jsonResponse(body, { ok = true, status = 200 } = {}) {
 function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
   const listeners = [];
   const installListeners = [];
+  const commandListeners = [];
   const fetchCalls = [];
   const openedTabs = [];
   const storageValues = {};
@@ -87,6 +90,7 @@ function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
         getURL(value) { return `chrome-extension://test/${value}`; },
         openOptionsPage: async () => undefined
       },
+      commands: { onCommand: { addListener(listener) { commandListeners.push(listener); } } },
       tabs: { create: async ({ url }) => { openedTabs.push(url); } },
       storage: {
         local: {
@@ -103,7 +107,7 @@ function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
   vm.runInNewContext(engineSource, context, { filename: 'src/core/engine.js' });
   vm.runInNewContext(coordinatorSource, context, { filename: 'src/core/state-coordinator.js' });
   vm.runInNewContext(source, context, { filename: 'src/background.js' });
-  return { context, api: context.module.exports, listeners, installListeners, clock, fetchCalls, openedTabs, storageValues };
+  return { context, api: context.module.exports, listeners, installListeners, commandListeners, clock, fetchCalls, openedTabs, storageValues };
 }
 
 function send(loaded, message) {
@@ -165,6 +169,34 @@ test('token tab messages accept every registered GMGN chain and reject non-token
   const rejected = await send('https://gmgn.ai/base/monitor');
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'Invalid GMGN token URL');
+});
+
+test('generic GMGN entry opens only the shared referral URL', async () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const response = await send(loaded, { type: 'TANGO_OPEN_GMGN' });
+  assert.equal(response.ok, true);
+  assert.equal(loaded.context.Tango.GMGN_ENTRY_URL, 'https://gmgn.ai/r/X9cuc5jd?chain=bsc');
+  assert.deepEqual(loaded.openedTabs, [loaded.context.Tango.GMGN_ENTRY_URL]);
+});
+
+test('Alt+Shift+P command toggles only the enabled setting in serialized order', async () => {
+  const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../manifest.json'), 'utf8'));
+  assert.equal(manifest.commands?.['toggle-paper-trading']?.suggested_key?.default, 'Alt+Shift+P');
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const settingsKey = loaded.context.Tango.SETTINGS_KEY;
+  loaded.storageValues[settingsKey] = loaded.context.Tango.State.normalizeSettings({ enabled: true, selectedChain: 'base' });
+  assert.equal(loaded.commandListeners.length, 1);
+
+  await loaded.commandListeners[0]('unknown-command');
+  assert.equal(loaded.storageValues[settingsKey].enabled, true);
+  await Promise.all([
+    loaded.commandListeners[0]('toggle-paper-trading'),
+    loaded.commandListeners[0]('toggle-paper-trading')
+  ]);
+  assert.equal(loaded.storageValues[settingsKey].enabled, true);
+  assert.equal(loaded.storageValues[settingsKey].selectedChain, 'base');
+  await loaded.commandListeners[0]('toggle-paper-trading');
+  assert.equal(loaded.storageValues[settingsKey].enabled, false);
 });
 
 test('Dashboard deep links validate and carry the requested tab and current chain', async () => {

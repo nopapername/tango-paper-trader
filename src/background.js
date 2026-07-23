@@ -23,11 +23,27 @@ const TOKEN_QUOTE_CACHE_MS = 15_000;
 const positiveFinite = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
 const nonnegativeFiniteOrZero = (value) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
 let onboardingOpened = false;
+let commandTail = Promise.resolve();
 
 chrome.runtime.onInstalled.addListener(async ({ reason } = {}) => {
   if (reason !== 'install' || onboardingOpened) return;
   onboardingOpened = true;
   await chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html?onboarding=1') });
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== 'toggle-paper-trading') return Promise.resolve();
+  const toggle = commandTail.then(async () => {
+    const snapshot = await stateCoordinator.getAll();
+    await stateCoordinator.mutate({
+      type: 'PATCH_SETTINGS',
+      patch: { enabled: !snapshot.settings.enabled }
+    });
+  });
+  commandTail = toggle.catch((error) => {
+    console.error('[Tango Paper Trader] shortcut toggle failed', error);
+  });
+  return toggle;
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -56,6 +72,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const dashboardUrl = `${baseUrl}${requestedChain ? `?chain=${encodeURIComponent(requestedChain)}` : ''}${requestedTab ? `#${encodeURIComponent(requestedTab)}` : ''}`;
     const openDashboard = hasDeepLink ? chrome.tabs.create({ url: dashboardUrl }) : chrome.runtime.openOptionsPage();
     openDashboard
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.type === 'TANGO_OPEN_GMGN') {
+    chrome.tabs.create({ url: globalThis.Tango.GMGN_ENTRY_URL })
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;

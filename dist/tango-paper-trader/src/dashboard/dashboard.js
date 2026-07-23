@@ -4,7 +4,8 @@
   const fileInput = document.querySelector('#import-file');
   const tabs = ['overview', 'positions', 'history', 'calendar', 'settings'];
   const initialTab = tabs.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
-  const requestedChain = Tango.Chains.get(new URLSearchParams(location.search || '').get('chain'))?.id || '';
+  const searchParams = new URLSearchParams(location.search || '');
+  const requestedChain = Tango.Chains.get(searchParams.get('chain'))?.id || '';
   const runtime = {
     state: null,
     settings: null,
@@ -20,6 +21,8 @@
     tab: initialTab,
     month: new Date(),
     filters: { search: '', side: 'ALL', result: 'ALL', date: '' },
+    onboardingActive: searchParams.get('onboarding') === '1',
+    onboardingComplete: false,
     onboardingStatus: '',
     toast: '',
     loadError: ''
@@ -29,7 +32,7 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
   }[char]));
   const lang = () => Tango.I18n.resolveLanguage(runtime.settings?.language);
-  const t = (key) => Tango.I18n.t(key, runtime.settings?.language);
+  const t = (key, vars) => Tango.I18n.t(key, runtime.settings?.language, vars);
   const label = (english, chinese) => lang() === 'zh-CN' ? chinese : english;
   const cls = (value) => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : 'flat';
   const native = (value, model, signed = false) => Tango.Format.native(value, model.chain.nativeSymbol, lang(), signed);
@@ -125,7 +128,8 @@
     document.documentElement.lang = lang();
     document.documentElement.dataset.theme = runtime.settings?.theme === 'light' ? 'light' : 'dark';
     if (runtime.loadError) return renderStorageError();
-    if (!runtime.state?.initialized) return renderSetupRequired();
+    if (runtime.onboardingComplete) return renderOnboardingComplete();
+    if (runtime.onboardingActive || !runtime.state?.initialized) return renderSetupRequired();
     const view = model();
     const titles = {
       overview: t('overview'), positions: t('positions'), history: t('tradeHistory'),
@@ -163,10 +167,23 @@
       <p>${t('independentChains')}</p><p>${t('paperOnly')}</p><p>${t('settingsAvailableLater')}</p>
       <label class="field onboarding-field"><span>${t('language')}</span><select class="select" id="onboarding-language" value="${esc(onboardingLanguage)}"><option value="zh-CN" ${onboardingLanguage === 'zh-CN' ? 'selected' : ''}>${t('chinese')}</option><option value="en" ${onboardingLanguage === 'en' ? 'selected' : ''}>${t('english')}</option></select></label>
       <label class="field onboarding-field"><span>${t('commonCapital')}</span><input class="input custom-balance" id="onboarding-balance" type="number" min="0.01" max="1000000000000000" step="any" value="10"></label>
+      <p class="onboarding-capital-note" id="onboarding-capital-note">${esc(Tango.I18n.t('onboardingCapitalAllocation', onboardingLanguage, { amount: 10 }))}</p>
       <button class="button primary onboarding-submit" id="complete-onboarding">${t('startPaperTrading')}</button>
       ${runtime.onboardingStatus ? `<p class="onboarding-status">${esc(t(runtime.onboardingStatus))}</p>` : ''}
     </section></div>`;
+    const updateCapitalNote = () => {
+      const amount = app.querySelector('#onboarding-balance')?.value || '10';
+      const language = app.querySelector('#onboarding-language')?.value || onboardingLanguage;
+      const note = app.querySelector('#onboarding-capital-note');
+      if (note) note.textContent = Tango.I18n.t('onboardingCapitalAllocation', language, { amount });
+    };
+    app.querySelector('#onboarding-balance')?.addEventListener('input', updateCapitalNote);
+    app.querySelector('#onboarding-language')?.addEventListener('change', updateCapitalNote);
     app.querySelector('#complete-onboarding')?.addEventListener('click', completeOnboarding);
+  }
+
+  function renderOnboardingComplete() {
+    app.innerHTML = `<div class="onboarding-page"><section class="onboarding card onboarding-complete"><h1>${t('onboardingComplete')}</h1><p>${t('onboardingCompleteHint')}</p></section></div>`;
   }
 
   function validCommonCapital(value) {
@@ -191,6 +208,7 @@
       render();
       return;
     }
+    runtime.onboardingActive = true;
     try {
       await Tango.Store.resetAllWithBalance(balanceNative, language);
       const persisted = await Tango.Store.getAll();
@@ -198,10 +216,12 @@
       runtime.state = persisted.state;
       runtime.settings = persisted.settings;
       runtime.onboardingStatus = '';
+      const opened = await global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_GMGN' });
+      if (!opened?.ok) throw new Error('openGmgnFailed');
+      runtime.onboardingActive = false;
+      runtime.onboardingComplete = true;
       global.close();
-      if (!global.closed) {
-        app.innerHTML = `<div class="onboarding-page"><section class="onboarding card onboarding-complete"><h1>${t('onboardingComplete')}</h1><p>${t('onboardingCompleteHint')}</p></section></div>`;
-      }
+      if (!global.closed) render();
     } catch {
       runtime.onboardingStatus = 'onboardingVerificationFailed';
       render();
@@ -441,7 +461,7 @@
     const chainId = runtime.selectedChain;
     const view = await selectedModel(chainId);
     if (!view) return;
-    if (name === 'open-gmgn') return global.chrome.tabs.create({ url: Tango.Chains.trenchUrl(chainId) });
+    if (name === 'open-gmgn') return global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_GMGN' });
     if (name === 'export-csv') return download(`tango-trades-${chainId}-${dateStamp()}.csv`, tradesCsv(chainId), 'text/csv;charset=utf-8');
     if (name === 'reset-chain') {
       const confirmed = global.confirm(label(

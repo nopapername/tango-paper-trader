@@ -6,6 +6,7 @@
   Tango.SETTINGS_KEY = 'tangoPaperTraderSettingsV1';
   Tango.QUOTE_STALE_MS = 15_000;
   Tango.MAX_TRADES = 10_000;
+  Tango.GMGN_ENTRY_URL = 'https://gmgn.ai/r/X9cuc5jd?chain=bsc';
 
   Tango.DEFAULT_SETTINGS = Object.freeze({
     enabled: true,

@@ -226,6 +226,14 @@ test('mutation processing batches affected roots while route changes fully recon
   assert.match(start, /syncQuickBuyButtons\(roots\)/);
 });
 
+test('quick-buy lifecycle has a cheap 750ms drift probe and observes presentation mutations', () => {
+  const start = between('async function start()', "document.addEventListener('input'");
+  assert.match(source, /function probeQuickBuyHealth\(\)/);
+  assert.match(source, /Tango\.GMGN\.quickBuyNeedsReconcile\?\.\(\)/);
+  assert.match(start, /setInterval\(probeQuickBuyHealth, 750\)/);
+  assert.match(start, /attributeFilter:\s*\['href', 'class', 'style', 'data-testid'\]/);
+});
+
 test('panel balance labels leave room for multichain native symbols', () => {
   assert.match(cssSource, /\.tango-title-balance\s*\{[^}]*max-width:\s*150px/s);
   assert.match(cssSource, /\.buy-title \.tango-title-balance\s*\{[^}]*max-width:\s*175px/s);

@@ -3,17 +3,18 @@
   window.__tangoGmgnQuoteTap = true;
 
   const paperActionDispatchAt = new Map();
-  const paperTradeEvents = ['pointerdown', 'mousedown', 'touchstart', 'pointerup', 'mouseup', 'touchend', 'click'];
+  const paperTradeEvents = ['pointerdown', 'mousedown', 'touchstart', 'pointerup', 'mouseup', 'touchend', 'click', 'keydown', 'keyup'];
   function paperActionTarget(event) {
     return event.composedPath().find((node) => node instanceof Element && node.matches?.('[data-tango-paper-action="quick-buy"]')) || null;
   }
   function blockGmgnPaperAction(event) {
     const button = paperActionTarget(event);
     if (!button) return;
+    if ((event.type === 'keydown' || event.type === 'keyup') && event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    if (event.type !== 'pointerup' && event.type !== 'click') return;
+    if (event.type !== 'pointerup' && event.type !== 'click' && event.type !== 'keydown') return;
     const actionId = button.dataset.tangoActionId;
     const lastDispatchAt = Number(paperActionDispatchAt.get(actionId) || 0);
     if (!actionId || Date.now() - lastDispatchAt < 700) return;

@@ -89,6 +89,8 @@ async function loadPopup({
   let getAllCalls = 0;
   const confirmations = [];
   const openedTabs = [];
+  const runtimeMessages = [];
+  const storageListeners = [];
   const calls = {
     saves: [], fullSaves: [], initialize: 0,
     resetChain: 0, resetChainArgs: [], resetAll: 0, resetAllWithBalance: []
@@ -181,9 +183,14 @@ async function loadPopup({
     chrome: {
       runtime: {
         getURL(value) { return `chrome-extension://test/${value}`; },
-        async sendMessage() { return { ok: true, price: 100, observedAt: 1 }; },
+        async sendMessage(message) {
+          runtimeMessages.push(message);
+          return message?.type === 'TANGO_OPEN_GMGN'
+            ? { ok: true } : { ok: true, price: 100, observedAt: 1 };
+        },
         openOptionsPage() {}
       },
+      storage: { onChanged: { addListener(listener) { storageListeners.push(listener); }, removeListener() {} } },
       tabs: { create({ url }) { openedTabs.push(url); } }
     }
   };
@@ -192,7 +199,12 @@ async function loadPopup({
   try { await startup; } catch (error) { startupError = error; }
   await new Promise((resolve) => setImmediate(resolve));
   return {
-    app, calls, confirmations, element, openedTabs, startupError,
+    app, calls, confirmations, element, openedTabs, runtimeMessages, storageListeners, startupError,
+    async applyExternalSettings(patch) {
+      persistedSettings = mergeSettingsPatch(persistedSettings, patch);
+      for (const listener of storageListeners) listener({}, 'local');
+      await new Promise((resolve) => setImmediate(resolve));
+    },
     get persistedSettings() { return persistedSettings; },
     get persistedState() { return persistedState; }
   };
@@ -351,7 +363,7 @@ test('Popup waits for pending settings before atomically changing common capital
   assert.equal(popup.persistedSettings.selectedChain, 'bsc');
 });
 
-test('Popup waits for a pending BSC selection before opening GMGN', async () => {
+test('Popup waits for a pending selection before opening the shared GMGN entry', async () => {
   const popup = await loadPopup();
   const selector = popup.element('#popup-chain');
   const gmgn = popup.element('#gmgn');
@@ -362,9 +374,20 @@ test('Popup waits for a pending BSC selection before opening GMGN', async () => 
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(popup.openedTabs, []);
+  assert.equal(popup.runtimeMessages.some((message) => message.type === 'TANGO_OPEN_GMGN'), false);
   popup.calls.saves[0].gate.resolve();
   await Promise.all([changing, opening]);
-  assert.deepEqual(popup.openedTabs, [Chains.trenchUrl('bsc')]);
+  assert.deepEqual(popup.openedTabs, []);
+  assert.equal(popup.runtimeMessages.at(-1).type, 'TANGO_OPEN_GMGN');
+});
+
+test('Popup master switch follows an external shortcut storage change while open', async () => {
+  const popup = await loadPopup();
+  assert.equal(popup.storageListeners.length, 1);
+  assert.equal(popup.element('#master-enabled').checked, true);
+  await popup.applyExternalSettings({ enabled: false });
+  assert.equal(popup.element('#master-enabled').checked, false);
+  assert.match(popup.app.innerHTML, />OFF</);
 });
 
 test('Popup rejected selection does not block a later common-capital reset', async () => {

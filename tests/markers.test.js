@@ -17,6 +17,8 @@ const labels = { entry: 'Paper Buy', exit: 'Paper Sell', hide: 'Hide line' };
 
 function loadChartBridge() {
   const listeners = new Map();
+  const clock = { now: 1_000 };
+  class FakeDate extends Date { static now() { return clock.now; } }
   const makeElement = () => {
     const children = [];
     return {
@@ -42,14 +44,17 @@ function loadChartBridge() {
       snapshot() {
         return {
           markerState, lastScaleMode, stableScale, stableSignature, renderedSignature,
-          markerPositions: [...markerPositions], overlayChildren: overlay?.childElementCount || 0
+          markerPositions: [...markerPositions], overlayChildren: overlay?.childElementCount || 0,
+          overlayTops: overlay?.children?.map((node) => node.style.top) || []
         };
-      }
+      },
+      record(context, text, x, y) { recordLabel(context, text, x, y); },
+      render: renderMarkers
     };
     setInterval(renderMarkers, 400);`
   );
   const context = {
-    console, Date, Map, WeakMap, Set, Math, Number,
+    console, Date: FakeDate, Map, WeakMap, Set, Math, Number,
     innerWidth: 1200, innerHeight: 800,
     document: {
       body: makeElement(), documentElement: makeElement(), createElement: makeElement
@@ -63,7 +68,15 @@ function loadChartBridge() {
   context.window.window = context.window;
   Object.assign(context.window, context);
   require('node:vm').runInNewContext(instrumented, context.window, { filename: 'src/content/chart-main.js' });
-  return { api: context.window.__chartTest, message: (data) => listeners.get('message')({ data }) };
+  const canvas = {
+    isConnected: true, width: 1_000, height: 700,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_200, height: 700 })
+  };
+  const canvasContext = { canvas, getTransform: () => ({ transformPoint: (point) => point }) };
+  return {
+    api: context.window.__chartTest, clock, canvasContext,
+    message: (data) => listeners.get('message')({ data })
+  };
 }
 
 test('returns the existing empty marker shape without a current token', () => {
@@ -215,6 +228,69 @@ test('an empty marker payload clears overlay and every cached chart placement', 
     stableSignature: '',
     renderedSignature: '',
     markerPositions: [],
-    overlayChildren: 0
+    overlayChildren: 0,
+    overlayTops: []
   });
+});
+
+test('chart bridge ignores axis labels older than 1.5 seconds instead of drawing a stale line', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5K', 400], ['$6K', 300], ['$7K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.clock.now += 1_501;
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: '0x1', currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('current right-axis labels place a $6.028K marker near the $6.02K scale', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1K', 650], ['$2K', 600], ['$3K', 550]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.clock.now += 1_501;
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: '0x1', currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  const top = Number.parseInt(chart.api.snapshot().overlayTops[0], 10);
+  assert.ok(top >= 270 && top <= 300, `expected current-scale y near 286, got ${top}`);
+});
+
+test('token switch rejects still-fresh axis labels captured for the previous token', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: '0xold', currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'old-buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.clock.now += 100;
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: '0xnew', currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'new-buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
 });
