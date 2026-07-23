@@ -392,6 +392,7 @@
   }
 
   async function performRefresh() {
+    const previousState = runtime.state;
     const previousSettings = runtime.settings;
     const chain = activeChain();
     const previousChainSettings = chain
@@ -404,9 +405,9 @@
     persistence.persistedChain = runtime.settings.selectedChain;
     persistence.dirty = persistence.desiredChain !== null
       && persistence.desiredChain !== persistence.persistedChain;
-    const becameEnabled = previousSettings?.enabled === false
-      && runtime.settings.enabled === true
-      && runtime.state.initialized === true;
+    const becameReady = runtime.settings.enabled === true
+      && runtime.state.initialized === true
+      && (previousSettings?.enabled === false || previousState?.initialized !== true);
     const currentChainSettings = chainSettings();
     const quickBuyConfigChanged = previousSettings && (
       previousSettings.enabled !== runtime.settings.enabled ||
@@ -419,9 +420,9 @@
       clearChartMarkers();
       runtime.current = null;
     }
-    if (becameEnabled) ensureRouteTokenContext();
+    if (becameReady) ensureRouteTokenContext();
     if (chain && runtime.settings.enabled) syncSelectedChainFromRoute();
-    if (becameEnabled) {
+    if (becameReady) {
       window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
       syncQuickBuyButtons();
       tickQuote();

@@ -793,6 +793,28 @@ test('OFF-to-ON settings refresh restores the detail route content lifecycle onc
   assert.equal(loaded.pageMessages.filter((message) => message.type === 'REQUEST_QUOTES').length, 1);
 });
 
+test('first-install initialization refresh activates trench quick buy while the master switch stays on', async () => {
+  let initialized = false;
+  const settings = defaultSettings();
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=bsc',
+    getAll: () => ({
+      state: { ...defaultState(), initialized },
+      settings
+    })
+  });
+
+  await loaded.api.performRefresh();
+  loaded.pageMessages.length = 0;
+  loaded.calls.discoverTokenCards = 0;
+  initialized = true;
+
+  await loaded.api.performRefresh();
+
+  assert.ok(loaded.calls.discoverTokenCards >= 1);
+  assert.equal(loaded.pageMessages.filter((message) => message.type === 'REQUEST_QUOTES').length, 1);
+});
+
 test('authoritative refresh reconciles an unchanged active GMGN route exactly once', async () => {
   const writeGate = deferred();
   const authoritativeSettings = { ...defaultSettings(), selectedChain: 'base' };
