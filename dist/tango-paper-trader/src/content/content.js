@@ -1999,11 +1999,6 @@
     await refresh();
     ensureRouteTokenContext();
     syncSelectedChainFromRoute(captureRoute());
-    await tickQuote();
-    runtime.quoteTimer = setInterval(tickQuote, 3000);
-    runtime.markerTimer = setInterval(syncChartMarkers, 1000);
-    runtime.routeTimer = setInterval(handleRouteChange, 150);
-    runtime.quickBuyProbeTimer = setInterval(probeQuickBuyHealth, 750);
     let mutationTimer;
     runtime.observer = new MutationObserver((records) => {
       if (location.href !== runtime.lastUrl) {
@@ -2048,6 +2043,11 @@
     document.addEventListener('input', handleQuickBuyAmountChange, true);
     document.addEventListener('change', handleQuickBuyAmountChange, true);
     Tango.Store.subscribe(refresh);
+    await tickQuote();
+    runtime.quoteTimer = setInterval(tickQuote, 3000);
+    runtime.markerTimer = setInterval(syncChartMarkers, 1000);
+    runtime.routeTimer = setInterval(handleRouteChange, 150);
+    runtime.quickBuyProbeTimer = setInterval(probeQuickBuyHealth, 750);
   }
 
   start().catch((error) => console.error('[Tango Paper Trader]', error));

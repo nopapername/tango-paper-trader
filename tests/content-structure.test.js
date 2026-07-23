@@ -230,7 +230,7 @@ test('quick-buy lifecycle has a cheap 750ms drift probe and observes presentatio
   const start = between('async function start()', "document.addEventListener('input'");
   assert.match(source, /function probeQuickBuyHealth\(\)/);
   assert.match(source, /Tango\.GMGN\.quickBuyNeedsReconcile\?\.\(\)/);
-  assert.match(start, /setInterval\(probeQuickBuyHealth, 750\)/);
+  assert.match(source, /setInterval\(probeQuickBuyHealth, 750\)/);
   assert.match(start, /attributeFilter:\s*\['href', 'class', 'style', 'data-testid'\]/);
 });
 

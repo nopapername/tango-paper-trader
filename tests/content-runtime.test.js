@@ -1196,6 +1196,24 @@ test('mutation observer batches targets, added nodes, and removed nodes into one
   assert.equal(loaded.api.runtime.pendingMutationRoots.size, 0);
 });
 
+test('startup observes the first trench render before the initial token read', async () => {
+  let observerReady = false;
+  class CapturingMutationObserver {
+    constructor() { observerReady = true; }
+    observe() {}
+  }
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=base',
+    MutationObserver: CapturingMutationObserver,
+    readCurrentToken: () => {
+      assert.equal(observerReady, true);
+      return null;
+    }
+  });
+
+  await loaded.api.start();
+});
+
 test('content mutations promote changed card descendants into real GMGN live-slot reconciliation', async () => {
   const original = {
     document: global.document, location: global.location, raf: global.requestAnimationFrame,
