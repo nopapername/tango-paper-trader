@@ -1993,12 +1993,6 @@
 
   async function start() {
     runtime.routeIdentity = currentRouteIdentity();
-    const session = await chrome.runtime.sendMessage({ type: 'TANGO_GET_SESSION_CONFIRM' }).catch(() => null);
-    runtime.suppressConfirmForSession = Boolean(session?.suppressed);
-    runtime.activeChainId = activeChain()?.id || null;
-    await refresh();
-    ensureRouteTokenContext();
-    syncSelectedChainFromRoute(captureRoute());
     let mutationTimer;
     runtime.observer = new MutationObserver((records) => {
       if (location.href !== runtime.lastUrl) {
@@ -2034,6 +2028,12 @@
       childList: true, subtree: true, attributes: true,
       attributeFilter: ['href', 'class', 'style', 'data-testid'], characterData: true
     });
+    const session = await chrome.runtime.sendMessage({ type: 'TANGO_GET_SESSION_CONFIRM' }).catch(() => null);
+    runtime.suppressConfirmForSession = Boolean(session?.suppressed);
+    runtime.activeChainId = activeChain()?.id || null;
+    await refresh();
+    ensureRouteTokenContext();
+    syncSelectedChainFromRoute(captureRoute());
     const handleQuickBuyAmountChange = (event) => {
       if (event.target?.closest?.('[data-sentry-component="BuyAmountInput"]')) {
         const root = event.target.closest('[data-sentry-component="TrenchColumn"], [class~="group/a"]') || event.target;

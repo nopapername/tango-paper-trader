@@ -1214,6 +1214,24 @@ test('startup observes the first trench render before the initial token read', a
   await loaded.api.start();
 });
 
+test('startup observes the first trench render before loading persisted paper state', async () => {
+  let observerReady = false;
+  class CapturingMutationObserver {
+    constructor() { observerReady = true; }
+    observe() {}
+  }
+  const loaded = loadContent({
+    href: 'https://gmgn.ai/?chain=base',
+    MutationObserver: CapturingMutationObserver,
+    getAll: () => {
+      assert.equal(observerReady, true);
+      return { state: defaultState(), settings: defaultSettings() };
+    }
+  });
+
+  await loaded.api.start();
+});
+
 test('content mutations promote changed card descendants into real GMGN live-slot reconciliation', async () => {
   const original = {
     document: global.document, location: global.location, raf: global.requestAnimationFrame,
