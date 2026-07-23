@@ -239,4 +239,3 @@ Compare every source file listed by `scripts/build.js` with its counterpart unde
 - [ ] **Step 6: Commit the release build**
 
 Commit: `git add scripts/validate-extension.js tests/validate-extension.test.js docs/multichain-smoke-test.md dist/tango-paper-trader && git commit -m "build: refresh safe GMGN extension package"`
-
