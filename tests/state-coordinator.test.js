@@ -34,6 +34,294 @@ function memoryPersistence(initialState, initialSettings) {
   };
 }
 
+test('coordinator preserves a coherent observed market cap on a structured-cloned unknown fallback', async () => {
+  const address = '0xa111111111111111111111111111111111111111';
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const settings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } }
+  });
+  const fallback = global.Tango.Supply.fallbackValuation({
+    chain: 'eth', launchpad: 'Unknown'
+  });
+  const amountNative = 1;
+  const executionNow = 20_000;
+  const marketCapObservedAt = 19_900;
+  const contentOrder = {
+    token: { chain: 'eth', address, symbol: 'FALLBACK' },
+    quote: {
+      ...fallback,
+      chain: 'eth', address,
+      marketCapUsd: 5_000,
+      priceUsd: 5_000 / 1_000_000_000,
+      marketCapDivisor: fallback.totalSupply,
+      provisionalSupply: fallback.totalSupply,
+      nativePriceUsd: 2_000,
+      observedAt: executionNow,
+      nativePriceObservedAt: executionNow,
+      source: 'TANGO_FALLBACK',
+      valuationMode: 'MARKET_CAP',
+      valuationSource: 'CARD_MARKET_CAP_FALLBACK_SUPPLY',
+      marketCapSource: 'GMGN_TRENCH',
+      marketCapObservedAt,
+      originalObservedAt: marketCapObservedAt,
+      priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+      syntheticTokenPrice: true,
+      provisional: true,
+      paperFallback: true
+    },
+    amountNative
+  };
+  const clonedOrder = structuredClone(contentOrder);
+  assert.equal(global.Tango.Supply.isInternalUnknownFallback(clonedOrder.quote), false);
+
+  for (const forgedPatch of [
+    {},
+    { provisionalSupplyProvenance: 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1' },
+    { internalFallback: true, fallbackNonce: 'caller-selected' }
+  ]) {
+    assert.throws(
+      () => Engine.executeBuy(
+        initial,
+        { ...clonedOrder, quote: { ...clonedOrder.quote, ...forgedPatch } },
+        settings,
+        executionNow
+      ),
+      /invalidQuote/
+    );
+  }
+
+  const persistence = memoryPersistence(initial, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => executionNow
+  });
+  const result = await coordinator.mutate(structuredClone({
+    type: 'EXECUTE_BUY', order: clonedOrder
+  }));
+  const key = Engine.positionKey('eth', address);
+
+  assert.equal(result.position.totalSupply, 1_000_000_000);
+  assert.equal(result.position.lastMarketCapUsd, 5_000);
+  assert.equal(result.position.lastPriceUsd, 5_000 / 1_000_000_000);
+  assert.equal(
+    result.position.quantity,
+    amountNative * contentOrder.quote.nativePriceUsd / (5_000 / 1_000_000_000)
+  );
+  assert.equal(result.position.supplySource, 'UNKNOWN_FALLBACK');
+  assert.equal(result.position.provisionalSupply, 1_000_000_000);
+  assert.equal(
+    result.position.provisionalSupplyProvenance,
+    'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1'
+  );
+  const persisted = await coordinator.getAll();
+  assert.equal(persisted.state.positions[key].quantity, result.position.quantity);
+  assert.doesNotThrow(() => State.normalizeState(
+    structuredClone(persisted.state), settings, { strict: true }
+  ));
+
+  const rejectedObservedMarketCaps = [
+    ['wrong valuation source', { valuationSource: 'UNKNOWN_INITIAL_MARKET_CAP' }],
+    ['wrong valuation mode', { valuationMode: 'PRICE' }],
+    ['untrusted market-cap source', { marketCapSource: 'DEXSCREENER' }],
+    ['cross-source market-cap provenance', { marketCapSource: 'GMGN_PRICE' }],
+    ['future observation', {
+      observedAt: executionNow + 1,
+      marketCapObservedAt: executionNow + 1,
+      originalObservedAt: executionNow + 1
+    }],
+    ['stale observation', { marketCapObservedAt: executionNow - 15_001 }],
+    ['unsafe observation', { marketCapObservedAt: Number.MAX_SAFE_INTEGER + 1 }],
+    ['non-finite market cap', { marketCapUsd: Infinity }],
+    ['non-positive market cap', { marketCapUsd: 0 }],
+    ['noncanonical total supply', { totalSupply: 2_000_000_000 }],
+    ['noncanonical market-cap divisor', { marketCapDivisor: 2_000_000_000 }],
+    ['noncanonical provisional supply', { provisionalSupply: 2_000_000_000 }],
+    ['forged caller source provenance', { source: 'TANGO_FALLBACK_CARD_MARKET_CAP' }],
+    ['forged durable provenance', {
+      provisionalSupplyProvenance: 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1'
+    }],
+    ['incoherent price', { priceUsd: 0.01 }]
+  ];
+  for (const [label, patch] of rejectedObservedMarketCaps) {
+    const rejectedPersistence = memoryPersistence(initial, settings);
+    const rejectedCoordinator = StateCoordinator.create({
+      readRaw: rejectedPersistence.readRaw,
+      writeRaw: rejectedPersistence.writeRaw,
+      now: () => executionNow
+    });
+    const rejected = await rejectedCoordinator.mutate({
+      type: 'EXECUTE_BUY',
+      order: structuredClone({
+        ...contentOrder,
+        quote: { ...contentOrder.quote, ...patch }
+      })
+    });
+    assert.equal(rejected.position.lastMarketCapUsd, 3_200, label);
+    assert.equal(rejected.position.lastPriceUsd, 3_200 / 1_000_000_000, label);
+    assert.equal(rejected.trade.quoteSource, 'TANGO_FALLBACK', label);
+    assert.equal(rejected.trade.quoteObservedAtOriginal, 0, label);
+    if (label === 'future observation') {
+      assert.equal(rejected.position.quoteObservedAt, executionNow, label);
+    }
+    assert.doesNotThrow(
+      () => State.normalizeState(structuredClone(rejected.state), settings, { strict: true }),
+      label
+    );
+  }
+});
+
+test('coordinator degrades a future factual-price narrowing to deterministic fallback', async () => {
+  const address = '0xa111111111111111111111111111111111111111';
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const settings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } }
+  });
+  const fallback = global.Tango.Supply.fallbackValuation({
+    chain: 'eth', launchpad: 'Unknown'
+  });
+  const executionNow = 20_000;
+  const futureObservedAt = executionNow + 1;
+  const persistence = memoryPersistence(initial, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => executionNow
+  });
+  const futureFactualQuote = {
+    ...fallback,
+    chain: 'eth', address,
+    priceUsd: 0.01,
+    marketCapUsd: 3_200,
+    totalSupply: 1_000_000_000,
+    marketCapDivisor: 1_000_000_000,
+    provisionalSupply: 1_000_000_000,
+    nativePriceUsd: 1,
+    observedAt: futureObservedAt,
+    priceObservedAt: futureObservedAt,
+    originalObservedAt: futureObservedAt,
+    nativePriceObservedAt: executionNow,
+    source: 'GMGN_NETWORK',
+    priceSource: 'GMGN_NETWORK',
+    priceObservationId: 'future-price-observation',
+    marketCapSource: 'TANGO_FALLBACK',
+    marketCapObservedAt: 0,
+    marketCapObservationId: '',
+    valuationMode: 'PRICE',
+    valuationSource: 'OBSERVED_PRICE',
+    priceProvenance: 'OBSERVED_PRICE',
+    syntheticTokenPrice: false,
+    provisional: false,
+    paperFallback: true
+  };
+
+  const result = await coordinator.mutate(structuredClone({
+    type: 'EXECUTE_BUY',
+    order: {
+      token: { chain: 'eth', address, symbol: 'PRICE_ONLY' },
+      quote: futureFactualQuote,
+      amountNative: 1
+    }
+  }));
+
+  assert.equal(result.state.accounts.eth.cashBalanceNative, 9);
+  assert.equal(Object.keys(result.state.positions).length, 1);
+  assert.equal(result.state.trades.length, 1);
+  assert.equal(result.position.lastMarketCapUsd, 3_200);
+  assert.equal(result.position.lastPriceUsd, 3_200 / 1_000_000_000);
+  assert.equal(result.position.quoteObservedAt, executionNow);
+  assert.equal(result.trade.quoteSource, 'TANGO_FALLBACK');
+  assert.equal(result.trade.quoteObservedAtOriginal, 0);
+  assert.equal(result.trade.syntheticTokenPrice, true);
+  assert.equal(result.trade.paperFallback, true);
+  assert.doesNotThrow(() => State.normalizeState(
+    structuredClone(result.state), settings, { strict: true }
+  ));
+
+  const sold = await coordinator.mutate(structuredClone({
+    type: 'EXECUTE_SELL',
+    order: {
+      token: { chain: 'eth', address, symbol: 'PRICE_ONLY' },
+      quote: futureFactualQuote,
+      percent: 100
+    }
+  }));
+  assert.equal(sold.trade.side, 'SELL');
+  assert.equal(sold.trade.quoteSource, 'TANGO_FALLBACK');
+  assert.equal(sold.trade.quoteObservedAtOriginal, 0);
+  assert.equal(sold.state.accounts.eth.cashBalanceNative, 10);
+  assert.equal(Object.keys(sold.state.positions).length, 0);
+  assert.doesNotThrow(() => State.normalizeState(
+    structuredClone(sold.state), settings, { strict: true }
+  ));
+});
+
+test('coordinator persists BUY and SELL with safe provenance when caller originals are unusable', async () => {
+  for (const [label, originalObservedAt, nativeOriginalObservedAt] of [
+    ['future', 20_001, 20_002],
+    ['malformed', Number.NaN, Number.POSITIVE_INFINITY]
+  ]) {
+    const address = '0xa111111111111111111111111111111111111111';
+    const initial = State.createInitialState({ now: 1 });
+    initial.initialized = true;
+    const settings = State.normalizeSettings({
+      slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } }
+    });
+    const persistence = memoryPersistence(initial, settings);
+    const coordinator = StateCoordinator.create({
+      readRaw: persistence.readRaw,
+      writeRaw: persistence.writeRaw,
+      now: () => 20_000
+    });
+    const orderQuote = {
+      priceUsd: 2,
+      marketCapUsd: 2_000_000,
+      nativePriceUsd: 2_000,
+      observedAt: 19_000,
+      nativePriceObservedAt: 18_900,
+      originalObservedAt,
+      nativeOriginalObservedAt,
+      source: 'GMGN_NETWORK',
+      valuationMode: 'PRICE',
+      priceProvenance: 'OBSERVED_PRICE'
+    };
+
+    const bought = await coordinator.mutate({
+      type: 'EXECUTE_BUY',
+      order: {
+        token: { chain: 'eth', address, symbol: 'SAFE' },
+        quote: orderQuote,
+        amountNative: 1
+      }
+    });
+    assert.equal(bought.trade.quoteObservedAtOriginal, 19_000, label);
+    assert.equal(bought.trade.nativePriceObservedAtOriginal, 18_900, label);
+    assert.equal(bought.position.quoteObservedAt, 19_000, label);
+
+    const sold = await coordinator.mutate({
+      type: 'EXECUTE_SELL',
+      order: {
+        token: { chain: 'eth', address, symbol: 'SAFE' },
+        quote: orderQuote,
+        percent: 50
+      }
+    });
+    assert.equal(sold.trade.quoteObservedAtOriginal, 19_000, label);
+    assert.equal(sold.trade.nativePriceObservedAtOriginal, 18_900, label);
+    assert.equal(sold.position.quoteObservedAt, 19_000, label);
+    assert.doesNotThrow(() => State.normalizeState(
+      structuredClone(sold.state), settings, { strict: true }
+    ), label);
+    assert.deepEqual(
+      persistence.values[global.Tango.STORAGE_KEY],
+      sold.state,
+      label
+    );
+  }
+});
+
 test('serializes buys from two contexts without losing either chain', async () => {
   const initial = State.createInitialState({ now: 1 });
   initial.initialized = true;

@@ -24,6 +24,10 @@ const REQUIRED_MAIN_ORDER = [
   'src/adapters/gmgn-quotes.js',
   'src/content/page-main.js'
 ];
+const REQUIRED_NATIVE_GUARD_ORDER = [
+  'src/shared/constants.js',
+  'src/content/native-quick-buy-guard.js'
+];
 const REQUIRED_PAGE_ORDER = REQUIRED_ISOLATED_ORDER.slice(0, 9);
 const REQUIRED_POPUP_ORDER = [...REQUIRED_PAGE_ORDER, 'src/content/chain-view.js', 'src/popup/model.js', 'src/popup/popup.js'];
 const REQUIRED_DASHBOARD_ORDER = [...REQUIRED_PAGE_ORDER, 'src/content/chain-view.js', 'src/dashboard/model.js', 'src/dashboard/dashboard.js'];
@@ -131,6 +135,34 @@ function paperOnlySafetyErrors(sources) {
   return errors;
 }
 
+function nativeQuickBuyGuardErrors(contentScripts) {
+  const scripts = contentScripts || [];
+  const guardIndex = scripts.findIndex((entry) =>
+    entry.js?.includes('src/content/native-quick-buy-guard.js')
+  );
+  if (guardIndex < 0) return ['Missing isolated native quick-buy guard'];
+  const guard = scripts[guardIndex];
+  if (guard.world != null && guard.world !== 'ISOLATED') {
+    return ['Native quick-buy guard must run in an isolated world'];
+  }
+  if (guard.run_at !== 'document_start') return ['Native quick-buy guard must run at document_start'];
+  if (guard.matches?.length !== 1 || guard.matches[0] !== 'https://gmgn.ai/*') {
+    return ['Native quick-buy guard must match only https://gmgn.ai/*'];
+  }
+  const exactOrder = guard.js?.length === REQUIRED_NATIVE_GUARD_ORDER.length
+    && REQUIRED_NATIVE_GUARD_ORDER.every((file, index) => guard.js[index] === file);
+  if (!exactOrder) {
+    return [`Invalid native quick-buy guard script order: ${REQUIRED_NATIVE_GUARD_ORDER.join(' -> ')}`];
+  }
+  const mainIndex = scripts.findIndex((entry) =>
+    entry.world === 'MAIN' && entry.js?.includes('src/content/page-main.js')
+  );
+  if (mainIndex >= 0 && guardIndex > mainIndex) {
+    return ['Native quick-buy guard must be declared before MAIN-world quick-buy handling'];
+  }
+  return [];
+}
+
 function releaseContractErrors({ manifest, constantsSource, backgroundSource, adapterSource } = {}) {
   const errors = [];
   if (manifest?.commands?.['toggle-paper-trading']?.suggested_key?.default !== 'Alt+Shift+P') {
@@ -212,6 +244,7 @@ function validateExtension(root = path.resolve(__dirname, '..')) {
   }));
   errors.push(...contentScriptOrderErrors(manifest.content_scripts));
   errors.push(...mainWorldScriptOrderErrors(manifest.content_scripts));
+  errors.push(...nativeQuickBuyGuardErrors(manifest.content_scripts));
   errors.push(...releaseContractErrors({
     manifest,
     constantsSource,
@@ -240,12 +273,14 @@ if (require.main === module) {
 module.exports = {
   REQUIRED_ISOLATED_ORDER,
   REQUIRED_MAIN_ORDER,
+  REQUIRED_NATIVE_GUARD_ORDER,
   REQUIRED_DASHBOARD_ORDER,
   REQUIRED_WORKER_IMPORT_ORDER,
   validateExtension,
   versionConsistencyErrors,
   contentScriptOrderErrors,
   mainWorldScriptOrderErrors,
+  nativeQuickBuyGuardErrors,
   htmlScriptOrderErrors,
   popupScriptOrderErrors,
   dashboardScriptOrderErrors,

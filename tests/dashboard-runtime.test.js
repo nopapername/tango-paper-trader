@@ -33,6 +33,7 @@ function stateFixture() {
 function settingsFixture() {
   return {
     selectedChain: 'eth', language: 'en', theme: 'dark', displayCurrency: 'NATIVE',
+    onboardingInitialized: false,
     sellPresets: [25, 50, 100], slippageBps: 50, platformFeeBps: 100,
     pnlBarPosition: 'bottom', fastMode: false, confirmationEnabled: true,
     soundEnabled: true, showListQuickBuy: true,
@@ -54,7 +55,9 @@ async function loadDashboard({
   deferThirdGetAll = false, failFirstGetAll = false, failAction = '',
   dashboardLocation = { hash: '', search: '' }, initialized = true,
   closeSucceeds = true, corruptResetReadback = false,
-  emitStorageDuringReset = false, failOpenGmgn = false
+  emitStorageDuringReset = false, failOpenGmgn = false, openGmgnFailures = 0,
+  deferResetAllWithBalance = false, deferOpenGmgn = false,
+  initialState = null, initialSettings = null
 } = {}) {
   const appElements = new Map();
   let document;
@@ -101,11 +104,14 @@ async function loadDashboard({
     querySelectorAll() { return []; }
   };
   const fileInput = createElement('#import-file');
-  let persistedState = stateFixture();
-  persistedState.initialized = initialized;
-  let persistedSettings = settingsFixture();
+  let persistedState = initialState ? structuredClone(initialState) : stateFixture();
+  if (!initialState) persistedState.initialized = initialized;
+  let persistedSettings = initialSettings ? structuredClone(initialSettings) : settingsFixture();
   const refreshedSettings = deferred();
+  const resetAllWithBalanceGate = deferred();
+  const openGmgnGate = deferred();
   let getAllCalls = 0;
+  let openGmgnAttempts = 0;
   let storageSubscriber = null;
   const calls = { getAll: 0, saves: [], fullSaves: [], resetChain: [], resetAll: 0, resetAllWithBalance: [], exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [], close: 0, sequence: [] };
   const anchors = [];
@@ -177,6 +183,11 @@ async function loadDashboard({
         return Promise.resolve({ state: persistedState, settings: persistedSettings });
       },
       patchSettings(patch) {
+        if (Object.hasOwn(patch, 'onboardingInitialized')) {
+          calls.saves.push({ patch, gate: null });
+          persistedSettings = mergeSettingsPatch(persistedSettings, patch);
+          return Promise.resolve(persistedSettings);
+        }
         const gate = deferred();
         calls.saves.push({ patch, gate });
         return gate.promise.then(() => {
@@ -199,6 +210,7 @@ async function loadDashboard({
         calls.sequence.push('reset');
         calls.resetAllWithBalance.push([balanceNative, language, settingsPatch]);
         if (failAction === 'reset-all-with-balance') throw new Error('write failed');
+        if (deferResetAllWithBalance) await resetAllWithBalanceGate.promise;
         persistedState = stateFixture();
         persistedState.initialized = true;
         persistedState.positions = {};
@@ -254,7 +266,9 @@ async function loadDashboard({
           calls.nativeMessages.push(message);
           if (message.type === 'TANGO_OPEN_GMGN') {
             calls.sequence.push('open');
-            return { ok: !failOpenGmgn };
+            openGmgnAttempts += 1;
+            if (deferOpenGmgn) await openGmgnGate.promise;
+            return { ok: !failOpenGmgn && openGmgnAttempts > openGmgnFailures };
           }
           return { ok: true, price: message.chain === 'eth' ? 2_000 : 100, observedAt: message.chain === 'eth' ? 111 : 222 };
         }
@@ -267,8 +281,12 @@ async function loadDashboard({
   let initialLoadError = null;
   try { await context.__dashboardTest.load(); } catch (error) { initialLoadError = error; }
   return {
-    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings, document, context, initialLoadError,
+    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings,
+    resetAllWithBalanceGate, openGmgnGate, document, context, initialLoadError,
+    async emitStorage() { return storageSubscriber?.(); },
     setConfirm(callback) { confirmImpl = callback; },
+    get persistedState() { return persistedState; },
+    set persistedState(value) { persistedState = value; },
     get persistedSettings() { return persistedSettings; },
     set persistedSettings(value) { persistedSettings = value; }
   };
@@ -578,7 +596,10 @@ test('Dashboard onboarding defaults to 10 and commits one verified six-chain res
   assert.deepEqual(dashboard.calls.sequence.slice(-4), ['reset', 'read', 'open', 'close']);
   assert.equal(dashboard.calls.nativeMessages.at(-1).type, 'TANGO_OPEN_GMGN');
   assert.equal(dashboard.context.closed, true);
-  assert.equal(dashboard.calls.saves.length, 0);
+  assert.equal(
+    JSON.stringify(dashboard.calls.saves.map((entry) => entry.patch)),
+    JSON.stringify([{ onboardingInitialized: true }])
+  );
 });
 
 test('Dashboard onboarding invalid or interrupted forms persist nothing', async () => {
@@ -610,7 +631,7 @@ test('Dashboard onboarding stays open when persisted read-back is not the reques
   assert.match(dashboard.app.innerHTML, /onboardingVerificationFailed/);
 });
 
-test('Dashboard onboarding storage refresh cannot exit setup before GMGN opens successfully', async () => {
+test('Dashboard onboarding keeps custom values and reports a distinct GMGN open failure', async () => {
   const dashboard = await loadDashboard({
     initialized: false,
     dashboardLocation: { hash: '', search: '?onboarding=1' },
@@ -618,13 +639,131 @@ test('Dashboard onboarding storage refresh cannot exit setup before GMGN opens s
     failOpenGmgn: true
   });
 
+  dashboard.element('#onboarding-balance').value = '12.5';
+  dashboard.element('#onboarding-language').value = 'zh-CN';
   await dashboard.element('#complete-onboarding').click();
 
   assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.deepEqual(dashboard.calls.resetAllWithBalance[0], [12.5, 'zh-CN', undefined]);
   assert.equal(dashboard.calls.close, 0);
   assert.match(dashboard.app.innerHTML, /onboardingCommonCapital/);
-  assert.match(dashboard.app.innerHTML, /onboardingVerificationFailed/);
+  assert.match(dashboard.app.innerHTML, /openGmgnFailed/);
+  assert.doesNotMatch(dashboard.app.innerHTML, /onboardingVerificationFailed/);
+  assert.equal(dashboard.element('#onboarding-balance').value, '12.5');
+  assert.equal(dashboard.element('#onboarding-language').value, 'zh-CN');
   assert.ok(dashboard.element('#complete-onboarding'));
+});
+
+test('Dashboard onboarding retry opens GMGN without resetting verified intervening paper state', async () => {
+  const dashboard = await loadDashboard({
+    initialized: false,
+    dashboardLocation: { hash: '', search: '?onboarding=1' },
+    openGmgnFailures: 1
+  });
+
+  dashboard.element('#onboarding-balance').value = '12.5';
+  dashboard.element('#onboarding-language').value = 'zh-CN';
+  await dashboard.element('#complete-onboarding').click();
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.equal(
+    dashboard.calls.nativeMessages.filter((message) => message.type === 'TANGO_OPEN_GMGN').length,
+    1
+  );
+
+  dashboard.persistedState.positions['eth:intervening'] = {
+    chain: 'eth', tokenAddress: 'intervening', quantity: 1
+  };
+  dashboard.persistedState.trades.unshift({
+    id: 'intervening', chain: 'eth', side: 'BUY', quantity: 1
+  });
+  await dashboard.element('#complete-onboarding').click();
+
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.equal(
+    dashboard.calls.nativeMessages.filter((message) => message.type === 'TANGO_OPEN_GMGN').length,
+    2
+  );
+  assert.equal(dashboard.persistedState.positions['eth:intervening'].quantity, 1);
+  assert.equal(dashboard.persistedState.trades[0].id, 'intervening');
+  assert.equal(dashboard.context.closed, true);
+});
+
+test('Dashboard onboarding overlapping double clicks reset once and open at most once', async () => {
+  const dashboard = await loadDashboard({
+    initialized: false,
+    dashboardLocation: { hash: '', search: '?onboarding=1' },
+    deferResetAllWithBalance: true
+  });
+
+  const first = dashboard.element('#complete-onboarding').click();
+  const second = dashboard.element('#complete-onboarding').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+
+  dashboard.resetAllWithBalanceGate.resolve();
+  await Promise.all([first, second]);
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.ok(
+    dashboard.calls.nativeMessages.filter((message) => message.type === 'TANGO_OPEN_GMGN').length <= 1
+  );
+});
+
+test('Dashboard onboarding open failure plus storage rerender retries open only', async () => {
+  const dashboard = await loadDashboard({
+    initialized: false,
+    dashboardLocation: { hash: '', search: '?onboarding=1' },
+    openGmgnFailures: 1
+  });
+
+  await dashboard.element('#complete-onboarding').click();
+  assert.equal(dashboard.persistedSettings.onboardingInitialized, true);
+  dashboard.persistedState.positions['eth:intervening'] = {
+    chain: 'eth', tokenAddress: 'intervening', quantity: 1
+  };
+  dashboard.persistedState.trades.unshift({
+    id: 'intervening', chain: 'eth', side: 'BUY', quantity: 1
+  });
+  await dashboard.emitStorage();
+  await dashboard.element('#complete-onboarding').click();
+
+  assert.equal(dashboard.calls.resetAllWithBalance.length, 1);
+  assert.equal(
+    dashboard.calls.nativeMessages.filter((message) => message.type === 'TANGO_OPEN_GMGN').length,
+    2
+  );
+  assert.equal(dashboard.persistedState.positions['eth:intervening'].quantity, 1);
+  assert.equal(dashboard.persistedState.trades[0].id, 'intervening');
+});
+
+test('Dashboard onboarding stale URL reload uses durable marker and skips reset', async () => {
+  const first = await loadDashboard({
+    initialized: false,
+    dashboardLocation: { hash: '', search: '?onboarding=1' },
+    failOpenGmgn: true
+  });
+  await first.element('#complete-onboarding').click();
+  assert.equal(first.persistedSettings.onboardingInitialized, true);
+  first.persistedState.positions['eth:intervening'] = {
+    chain: 'eth', tokenAddress: 'intervening', quantity: 1
+  };
+  first.persistedState.trades.unshift({
+    id: 'intervening', chain: 'eth', side: 'BUY', quantity: 1
+  });
+
+  const reloaded = await loadDashboard({
+    dashboardLocation: { hash: '', search: '?onboarding=1' },
+    initialState: first.persistedState,
+    initialSettings: first.persistedSettings
+  });
+  await reloaded.element('#complete-onboarding').click();
+
+  assert.equal(reloaded.calls.resetAllWithBalance.length, 0);
+  assert.equal(
+    reloaded.calls.nativeMessages.filter((message) => message.type === 'TANGO_OPEN_GMGN').length,
+    1
+  );
+  assert.equal(reloaded.persistedState.positions['eth:intervening'].quantity, 1);
+  assert.equal(reloaded.persistedState.trades[0].id, 'intervening');
 });
 
 test('Dashboard onboarding shows completion when the browser cannot close the tab', async () => {

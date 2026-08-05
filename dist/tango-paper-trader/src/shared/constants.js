@@ -13,6 +13,7 @@
     language: 'auto',
     displayCurrency: 'SOL',
     theme: 'auto',
+    onboardingInitialized: false,
     fastMode: false,
     confirmationEnabled: true,
     soundEnabled: true,

@@ -8,6 +8,8 @@ const source = fs.readFileSync(path.resolve(__dirname, '../src/content/content.j
 const cssSource = fs.readFileSync(path.resolve(__dirname, '../src/content/content.css'), 'utf8');
 const i18nSource = fs.readFileSync(path.resolve(__dirname, '../src/shared/i18n.js'), 'utf8');
 const root = path.resolve(__dirname, '..');
+const safetyCssPath = path.join(root, 'src/content/quick-buy-safety.css');
+const safetyCssSource = fs.existsSync(safetyCssPath) ? fs.readFileSync(safetyCssPath, 'utf8') : '';
 
 function between(startText, endText) {
   const start = source.indexOf(startText);
@@ -17,12 +19,12 @@ function between(startText, endText) {
   return source.slice(start, end);
 }
 
-test('chart frames are checked before a marker payload scans trades', () => {
+test('syncChartMarkers caches the current payload before returning when no chart frame exists', () => {
   const block = between('function syncChartMarkers(', 'function renderModal(');
   const query = block.indexOf('const frames = chartFrames();');
   const guard = block.indexOf('if (!frames.length) return;');
   const payload = block.indexOf('chartMarkerPayload()');
-  assert.ok(query >= 0 && guard > query && payload > guard);
+  assert.ok(query >= 0 && payload > query && guard > payload);
 });
 
 test('render computes one portfolio summary and passes it to the drawer', () => {
@@ -121,6 +123,7 @@ test('header balance is read from the active account', () => {
 
 test('paper execution paths contain no quote wait, pending intent, or network await', () => {
   const resolver = between('function resolvePaperTradeQuote(', 'function requireExecutableQuote(');
+  const commitQuote = between('function resolveCommitPaperTradeQuote(', 'function previewBuy(');
   const execution = between('async function buy(', 'function showToast(');
   const quickBuy = between('async function handleQuickBuy(', 'async function buy(');
   const buy = between('async function buy(', 'function previewBuy(');
@@ -132,6 +135,8 @@ test('paper execution paths contain no quote wait, pending intent, or network aw
   assert.doesNotMatch(resolver, /await|setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote/);
   assert.match(resolver, /fallbackValuation\(/);
   assert.doesNotMatch(resolver, /historicalPrice \|\| 1/);
+  assert.doesNotMatch(commitQuote, /await|setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote|sendMessage/);
+  assert.match(commitQuote, /readVerifiedCurrentTokenSnapshot/);
   const blockingQuoteWork = /setTimeout|requestWithTimeout|sharedQuoteRequest|waitForGmgnQuote|latestCardMarketCap/;
   assert.doesNotMatch(quickBuy, blockingQuoteWork);
   assert.doesNotMatch(buy, blockingQuoteWork);
@@ -223,7 +228,10 @@ test('mutation processing batches affected roots while route changes fully recon
   assert.match(start, /record\.target/);
   assert.match(start, /record\.addedNodes/);
   assert.match(start, /pendingMutationRoots\.clear\(\)/);
-  assert.match(start, /syncQuickBuyButtons\(roots\)/);
+  assert.match(
+    start,
+    /syncQuickBuyButtons\(roots,\s*\{\s*fast:\s*false,\s*addedRoots:\s*\[\],\s*removedRoots:\s*\[\],\s*policyKey:\s*quickBuyPolicyKey\(\)\s*\}\)/
+  );
 });
 
 test('quick-buy lifecycle has a cheap 750ms drift probe and observes presentation mutations', () => {
@@ -232,6 +240,152 @@ test('quick-buy lifecycle has a cheap 750ms drift probe and observes presentatio
   assert.match(source, /Tango\.GMGN\.quickBuyNeedsReconcile\?\.\(\)/);
   assert.match(source, /setInterval\(probeQuickBuyHealth, 750\)/);
   assert.match(start, /attributeFilter:\s*\['href', 'class', 'style', 'data-testid'\]/);
+});
+
+test('paper quick-buy content fills the GMGN-owned outer control without imposing profile geometry', () => {
+  const buttonRule = cssSource.match(/(?:^|\n)\.tango-list-quick-buy\s*\{([^}]*)\}/)?.[1] || '';
+  const wrapperRule = cssSource.match(/\.tango-quick-buy-content\s*\{([^}]*)\}/)?.[1] || '';
+  const hintRule = cssSource.match(/\.tango-paper-hint\s*\{([^}]*)\}/)?.[1] || '';
+  const amountRule = cssSource.match(/\.tango-buy-amount\s*\{([^}]*)\}/)?.[1] || '';
+  const iconRule = cssSource.match(/\.tango-buy-amount svg\s*\{([^}]*)\}/)?.[1] || '';
+  assert.ok(buttonRule && wrapperRule && hintRule && amountRule && iconRule);
+  assert.match(wrapperRule, /\bfont-size:\s*var\(--tango-quick-buy-display-text,\s*11px\)\s*!important/);
+  assert.match(wrapperRule, /\bline-height:\s*\.9\s*!important/);
+  assert.match(wrapperRule, /\bpadding:\s*0\s+2px\s*!important/);
+  assert.match(wrapperRule, /\bwidth:\s*100%\s*!important/);
+  assert.match(wrapperRule, /\bheight:\s*100%\s*!important/);
+  assert.match(wrapperRule, /\bmax-width:\s*100%\s*!important/);
+  assert.match(wrapperRule, /\bmax-height:\s*100%\s*!important/);
+  assert.match(wrapperRule, /\bmin-height:\s*0\s*!important/);
+  assert.match(wrapperRule, /\bdisplay:\s*inline-flex\s*!important/);
+  assert.match(wrapperRule, /\bflex-direction:\s*column\s*!important/);
+  assert.match(wrapperRule, /\bpointer-events:\s*none\s*!important/);
+  assert.match(wrapperRule, /\bgap:\s*0\s*!important/);
+  assert.match(wrapperRule, /\bjustify-content:\s*center\s*!important/);
+  assert.doesNotMatch(wrapperRule, /--tango-quick-buy-height/);
+  assert.match(hintRule, /\bfont-size:\s*var\(--tango-quick-buy-label-text,\s*8px\)\s*!important/);
+  assert.match(hintRule, /\bline-height:\s*\.9\s*!important/);
+  assert.match(amountRule, /\bfont-size:\s*1em\s*!important/);
+  assert.match(amountRule, /\bline-height:\s*\.9\s*!important/);
+  assert.match(iconRule, /\b(?:width|height):\s*1em/);
+});
+
+test('paper quick-buy paints the GMGN theme on its full-size text layer while the outer hit area stays transparent', () => {
+  const buttonRule = cssSource.match(/(?:^|\n)\.tango-list-quick-buy\s*\{([^}]*)\}/)?.[1] || '';
+  const wrapperRule = cssSource.match(/\.tango-quick-buy-content\s*\{([^}]*)\}/)?.[1] || '';
+  const hoverRule = cssSource.match(/\.tango-list-quick-buy:hover\s+\.tango-quick-buy-content\s*\{([^}]*)\}/)?.[1] || '';
+  const fallbackRule = cssSource.match(/\.tango-quick-buy-fallback\s*\{([^}]*)\}/)?.[1] || '';
+  assert.ok(buttonRule && wrapperRule && hoverRule && fallbackRule);
+  assert.match(
+    wrapperRule,
+    /background:\s*color-mix\(in srgb,\s*var\(--customize-button-ultra-color,\s*#7dd3fc\)\s*16%,\s*transparent\)\s*!important/i
+  );
+  assert.match(
+    hoverRule,
+    /background:\s*color-mix\(in srgb,\s*var\(--customize-button-ultra-color,\s*#7dd3fc\)\s*24%,\s*transparent\)\s*!important/i
+  );
+  assert.match(buttonRule, /background:\s*transparent\s*!important/i);
+  assert.match(wrapperRule, /\bwidth:\s*100%\s*!important/);
+  assert.match(wrapperRule, /\bheight:\s*100%\s*!important/);
+  assert.match(wrapperRule, /\bmax-width:\s*100%\s*!important/);
+  assert.doesNotMatch(buttonRule, /(?:^|;)\s*opacity\s*:/);
+  assert.doesNotMatch(wrapperRule, /(?:^|;)\s*opacity\s*:/);
+  assert.doesNotMatch(hoverRule, /(?:^|;)\s*opacity\s*:/);
+  assert.doesNotMatch(fallbackRule, /background\s*:/);
+});
+
+test('paper quick-buy leaves GMGN slot and action-host geometry under GMGN control', () => {
+  const slotRule = cssSource.match(/\.BuyButton-continer\.tango-native-buy-overridden\s*\{([^}]*)\}/)?.[1] || '';
+  const hostRule = cssSource.match(/\.BuyButton-continer\.tango-native-buy-overridden\s+\[class~=["']group\/btn["']\]\s*\{([^}]*)\}/)?.[1] || '';
+  const buttonRule = cssSource.match(/(?:^|\n)\.tango-list-quick-buy\s*\{([^}]*)\}/)?.[1] || '';
+  const wrapperRule = cssSource.match(/\.tango-quick-buy-content\s*\{([^}]*)\}/)?.[1] || '';
+  assert.ok(slotRule && buttonRule && wrapperRule);
+  assert.doesNotMatch(slotRule, /\b(?:display|align-items|height|min-height|flex)\s*:/);
+  assert.doesNotMatch(hostRule, /\b(?:align-self|height|min-height|width|min-width|padding|flex)\s*:/);
+  assert.doesNotMatch(`${slotRule}\n${buttonRule}\n${wrapperRule}`, /(?:height|min-height):\s*var\(--tango-quick-buy-height/);
+});
+
+test('fallback paper quick-buy keeps outer geometry owned while allowing its inner canonical variables', () => {
+  const fallbackRule = cssSource.match(/\.tango-quick-buy-fallback\s*\{([^}]*)\}/)?.[1] || '';
+  assert.ok(fallbackRule);
+  assert.doesNotMatch(fallbackRule, /\b(?:font-size|line-height|width|height|min-width|min-height)\s*:\s*\d+(?:\.\d+)?px/);
+  assert.doesNotMatch(fallbackRule, /\bmin-(?:width|height)\s*:/);
+  assert.doesNotMatch(fallbackRule, /\bpadding(?:-[\w-]+)?\s*:/);
+  assert.doesNotMatch(fallbackRule, /\bborder(?:-[\w-]+)?\s*:/);
+  assert.doesNotMatch(fallbackRule, /customize-button-ultra-color/);
+  assert.doesNotMatch(fallbackRule, /background\s*:/);
+  assert.match(fallbackRule, /color:\s*inherit/);
+  assert.doesNotMatch(fallbackRule, /color:\s*#07110e/);
+});
+
+test('quick-buy activation fail-closes any live GMGN native leaf until the paper shell takes over', () => {
+  const sync = between('function syncQuickBuyButtons(', 'function clearQuickBuyButtons()');
+  const clear = between('function clearQuickBuyButtons()', 'function queueQuickBuySync(root)');
+  const safetyRule = cssSource.match(
+    /html\.tango-paper-quick-buy-active\s+\[data-testid=["']quickbuy["']\]\s*\{([^}]*)\}/
+  )?.[1] || '';
+  assert.match(sync, /document\.documentElement\?\.classList\?\.add\('tango-paper-quick-buy-active'\)/);
+  assert.match(clear, /document\.documentElement\?\.classList\?\.remove\('tango-paper-quick-buy-active'\)/);
+  assert.doesNotMatch(
+    cssSource,
+    /html\.tango-paper-quick-buy-active\s+\.BuyButton-continer\s+\[data-testid=["']quickbuy["']\]/
+  );
+  assert.match(safetyRule, /\bpointer-events:\s*none\s*!important/);
+  assert.match(safetyRule, /\bvisibility:\s*hidden\s*!important/);
+});
+
+test('document-start safety CSS hides native quick buy unless settings explicitly allow it', () => {
+  const guardedRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\[data-testid=["']quickbuy["']\]\s*\{([^}]*)\}/
+  )?.[1] || '';
+  const slotRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\.BuyButton-continer\s*\{([^}]*)\}/
+  )?.[1] || '';
+  const buyButtonsRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\[data-sentry-component=["']BuyButtons["']\]\s*\{([^}]*)\}/
+  )?.[1] || '';
+  const slotPaperRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\.BuyButton-continer\[data-tango-quick-buy=["']1["']\]\s+\.tango-list-quick-buy\s*\{([^}]*)\}/
+  )?.[1] || '';
+  const protectedSlotRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\.BuyButton-continer\[data-tango-quick-buy=["']1["']\]\s*\{([^}]*)\}/
+  )?.[1] || '';
+  const buyButtonsPaperRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\[data-sentry-component=["']BuyButtons["']\]\s+\.tango-list-quick-buy\s*\{([^}]*)\}/
+  )?.[1] || '';
+  assert.match(guardedRule, /\bpointer-events:\s*none\s*!important/);
+  assert.match(guardedRule, /\bvisibility:\s*hidden\s*!important/);
+  assert.match(slotRule, /\bpointer-events:\s*none\s*!important/);
+  assert.match(slotRule, /\bvisibility:\s*hidden\s*!important/);
+  assert.match(buyButtonsRule, /\bpointer-events:\s*none\s*!important/);
+  assert.match(buyButtonsRule, /\bvisibility:\s*hidden\s*!important/);
+  assert.match(slotPaperRule, /\bpointer-events:\s*auto\s*!important/);
+  assert.match(slotPaperRule, /\bvisibility:\s*visible\s*!important/);
+  assert.match(buyButtonsPaperRule, /\bpointer-events:\s*auto\s*!important/);
+  assert.match(buyButtonsPaperRule, /\bvisibility:\s*visible\s*!important/);
+  for (const rule of [protectedSlotRule, slotPaperRule, buyButtonsPaperRule]) {
+    assert.doesNotMatch(rule, /\b(?:display|align-items|align-self|height|min-height|width|min-width|padding|flex)\s*:/);
+  }
+  assert.doesNotMatch(safetyCssSource, /--tango-quick-buy-height/);
+  assert.doesNotMatch(safetyCssSource, /\.BuyButton-continer:not\(\.tango-native-buy-overridden\)/);
+});
+
+test('document-start safety CSS keeps a bound slot in the hit path while native leaves stay hidden', () => {
+  const boundSlotRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\.BuyButton-continer\[data-tango-quick-buy=["']1["']\]\s*\{([^}]*)\}/
+  )?.[1] || '';
+  const boundNativeLeafRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\.BuyButton-continer\[data-tango-quick-buy=["']1["']\]\s+:where\(button,\s*\[role=["']button["']\],\s*a\[href\],\s*\[data-testid=["']quickbuy["']\]\):not\(\.tango-list-quick-buy\)\s*\{([^}]*)\}/
+  )?.[1] || '';
+  const boundPaperRule = safetyCssSource.match(
+    /html:not\(\.tango-paper-native-quick-buy-allowed\)\s+\.BuyButton-continer\[data-tango-quick-buy=["']1["']\]\s+\.tango-list-quick-buy\s*\{([^}]*)\}/
+  )?.[1] || '';
+  assert.match(boundSlotRule, /\bpointer-events:\s*auto\s*!important/);
+  assert.match(boundSlotRule, /\bvisibility:\s*visible\s*!important/);
+  assert.match(boundNativeLeafRule, /\bpointer-events:\s*none\s*!important/);
+  assert.match(boundNativeLeafRule, /\bvisibility:\s*hidden\s*!important/);
+  assert.match(boundPaperRule, /\bpointer-events:\s*auto\s*!important/);
+  assert.match(boundPaperRule, /\bvisibility:\s*visible\s*!important/);
 });
 
 test('panel balance labels leave room for multichain native symbols', () => {

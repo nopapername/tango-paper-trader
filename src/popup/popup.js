@@ -7,6 +7,7 @@
   let nativePriceObservedAt = {};
   let selectedChainRevision = 0;
   let visibleSelectedChain = 'sol';
+  let activeTabChain = '';
   let selectionPending = null;
   let settingsWrite = Promise.resolve();
   let loadError = false;
@@ -37,11 +38,20 @@
     return Tango.PopupModel.build(state, settings, visibleSelectedChain, nativePrices);
   }
 
+  async function activeGmgnChain() {
+    try {
+      const [tab] = await global.chrome?.tabs?.query?.({ active: true, currentWindow: true }) || [];
+      return Tango.Chains.fromUrl(tab?.url || '')?.id || '';
+    } catch {
+      return '';
+    }
+  }
+
   async function reload() {
     ({ state, settings } = await Tango.Store.getAll());
     const hasSelectionIntent = selectionPending?.revision === selectedChainRevision;
     if (!hasSelectionIntent) {
-      visibleSelectedChain = Tango.Chains.get(settings?.selectedChain)?.id || 'sol';
+      visibleSelectedChain = activeTabChain || Tango.Chains.get(settings?.selectedChain)?.id || 'sol';
     }
   }
 
@@ -75,6 +85,7 @@
   }
 
   function saveSelectedChain(chainId) {
+    activeTabChain = '';
     const selected = Tango.Chains.get(chainId);
     if (!selected) return Promise.resolve(settings);
     const revision = ++selectedChainRevision;
@@ -256,5 +267,6 @@
     });
   });
 
+  activeTabChain = await activeGmgnChain();
   await loadInitial();
 })(globalThis);

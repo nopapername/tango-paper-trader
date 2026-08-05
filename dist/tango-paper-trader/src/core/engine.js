@@ -3,11 +3,27 @@
   const METADATA_SOURCE_RANK = Object.freeze({ GMGN_TRENCH: 20, GMGN_DETAIL: 30, GMGN_NETWORK: 40 });
   const MARKET_CAP_PROVENANCE = 'SOLANA_PUMP_TRENCH_V1';
   const CANONICAL_PUMP_SUPPLY = 1_000_000_000;
+  const UNKNOWN_FALLBACK_SOURCE = 'UNKNOWN_FALLBACK';
+  const UNKNOWN_FALLBACK_PROVENANCE = 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1';
   const TRUSTED_SUPPLY_SOURCES = Object.freeze([
-    'GMGN_EXACT', 'GMGN_RATIO', 'LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE'
+    'GMGN_EXACT', 'GMGN_RATIO', 'LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE',
+    UNKNOWN_FALLBACK_SOURCE
   ]);
   const MAX_QUOTE_AGE_MS = 5 * 60_000;
   const MAX_FUTURE_SKEW_MS = 5_000;
+  const LOCAL_LAUNCHPAD_RULES = Object.freeze([
+    Object.freeze({ chain: 'sol', aliases: Object.freeze(['pump', 'pumpfun']), launchMode: 'mayhem', totalSupply: 2_000_000_000 }),
+    Object.freeze({ chain: 'sol', aliases: Object.freeze(['pump', 'pumpfun']), launchMode: '', totalSupply: CANONICAL_PUMP_SUPPLY }),
+    Object.freeze({ chain: 'bsc', aliases: Object.freeze(['fourmeme']), launchMode: '', totalSupply: CANONICAL_PUMP_SUPPLY }),
+    Object.freeze({ chain: 'bsc', aliases: Object.freeze(['flap']), launchMode: '', totalSupply: CANONICAL_PUMP_SUPPLY }),
+    Object.freeze({ chain: 'base', aliases: Object.freeze(['zora', 'zoracoins']), launchMode: '', totalSupply: CANONICAL_PUMP_SUPPLY }),
+    Object.freeze({ chain: 'xlayer', aliases: Object.freeze(['dyor']), launchMode: '', totalSupply: CANONICAL_PUMP_SUPPLY }),
+    Object.freeze({ chain: 'xlayer', aliases: Object.freeze(['bow', 'bowfun']), launchMode: '', totalSupply: CANONICAL_PUMP_SUPPLY }),
+    Object.freeze({ chain: 'base', aliases: Object.freeze(['bankr', 'bankrbot', 'banker']), launchMode: '', totalSupply: 100_000_000_000 }),
+    Object.freeze({ chain: 'robinhood', aliases: Object.freeze(['bankr', 'bankrbot', 'banker']), launchMode: '', totalSupply: 100_000_000_000 }),
+    Object.freeze({ chain: 'base', aliases: Object.freeze(['clanker']), launchMode: '', totalSupply: 100_000_000_000 }),
+    Object.freeze({ chain: 'robinhood', aliases: Object.freeze(['clanker']), launchMode: '', totalSupply: 100_000_000_000 })
+  ]);
   const finite = (value) => Number.isFinite(Number(value));
   const finiteBetween = (value, minimum, maximum) => finite(value)
     && Number(value) >= minimum && Number(value) <= maximum;
@@ -109,16 +125,9 @@
     const id = Tango.Chains?.get?.(chain)?.id || '';
     const platform = cleanRuleIdentity(launchpad);
     const mode = cleanRuleIdentity(launchMode);
-    if (id === 'sol' && ['pump', 'pumpfun'].includes(platform)) {
-      return mode.includes('mayhem') ? 2_000_000_000 : CANONICAL_PUMP_SUPPLY;
-    }
-    if (['bankr', 'clanker'].includes(platform) && ['base', 'robinhood'].includes(id)) {
-      return 100_000_000_000;
-    }
-    if (id === 'bsc' && ['fourmeme', 'flap'].includes(platform)) return CANONICAL_PUMP_SUPPLY;
-    if (id === 'base' && ['zora', 'zoracoins'].includes(platform)) return CANONICAL_PUMP_SUPPLY;
-    if (id === 'xlayer' && ['dyor', 'bow', 'bowfun'].includes(platform)) return CANONICAL_PUMP_SUPPLY;
-    return 0;
+    const matches = LOCAL_LAUNCHPAD_RULES.filter((rule) => rule.chain === id && rule.aliases.includes(platform));
+    return (matches.find((rule) => rule.launchMode === mode)
+      || matches.find((rule) => !rule.launchMode))?.totalSupply || 0;
   }
 
   function ruleSupply(context) {
@@ -137,8 +146,8 @@
       observationId: context?.observationId,
       priceObservationId: context?.priceObservationId,
       marketCapObservationId: context?.marketCapObservationId,
-      priceObservedAt: context?.priceObservedAt || context?.originalObservedAt || context?.observedAt,
-      marketCapObservedAt: context?.marketCapObservedAt || context?.originalObservedAt || context?.observedAt,
+      priceObservedAt: context?.priceObservedAt ?? context?.originalObservedAt ?? context?.observedAt,
+      marketCapObservedAt: context?.marketCapObservedAt ?? context?.originalObservedAt ?? context?.observedAt,
       priceSource: context?.priceSource || context?.source,
       marketCapSource: context?.marketCapSource || context?.source,
       priceProvenance: context?.priceProvenance
@@ -177,12 +186,55 @@
     return positiveFinite(inferred) && Math.abs(inferred - supply) <= supply * 0.001;
   }
 
+  function coherentUnknownFallbackIdentity(context, totalSupply) {
+    const supply = Number(totalSupply);
+    const durableProvenance = context?.provisionalSupplyProvenance
+      === UNKNOWN_FALLBACK_PROVENANCE;
+    const internalCreation = Tango.Supply?.isInternalUnknownFallback?.(context) === true;
+    const marketCap = Number(context?.marketCapUsd ?? context?.lastMarketCapUsd);
+    const price = Number(context?.priceUsd ?? context?.observedPriceUsd ?? context?.lastPriceUsd);
+    const quoteSource = String(context?.source || context?.quoteSource || '').toUpperCase();
+    const marketCapSource = String(context?.marketCapSource || '').toUpperCase();
+    const priceSource = String(context?.priceSource || context?.source || '').toUpperCase();
+    const coherentSupplyDimension = supply === CANONICAL_PUMP_SUPPLY
+      && Number(context?.marketCapDivisor) === CANONICAL_PUMP_SUPPLY
+      && Number(context?.provisionalSupply) === CANONICAL_PUMP_SUPPLY;
+    if (!coherentSupplyDimension) return false;
+    if (durableProvenance) return true;
+    const canonicalSyntheticFallback = ['TANGO_FALLBACK', 'TANGO_FALLBACK_CARD_MARKET_CAP'].includes(quoteSource)
+      && context?.syntheticTokenPrice === true
+      && context?.provisional === true
+      && context?.paperFallback === true
+      && positiveFinite(marketCap)
+      && positiveFinite(price)
+      && Math.abs(marketCap / price - supply) <= supply * 0.001;
+    const nativeOnlyProvisional = context?.provisional === true
+      && context?.syntheticTokenPrice !== true
+      && context?.syntheticNativePrice === true
+      && Number(context?.nativePriceUsd ?? context?.lastNativePriceUsd) === 1
+      && Number(context?.nativeOriginalObservedAt || 0) === 0;
+    const factualPriceWithSyntheticMarketCap = context?.syntheticTokenPrice !== true
+      && (context?.provisional !== true || nativeOnlyProvisional)
+      && context?.paperFallback === true
+      && (quoteSource === 'GMGN' || quoteSource.startsWith('GMGN_') || quoteSource === 'DEXSCREENER')
+      && priceSource === quoteSource
+      && marketCapSource === 'TANGO_FALLBACK'
+      && Number(context?.marketCapObservedAt || 0) === 0
+      && String(context?.marketCapObservationId || '') === ''
+      && positiveFinite(marketCap)
+      && positiveFinite(price);
+    return internalCreation && (canonicalSyntheticFallback || factualPriceWithSyntheticMarketCap);
+  }
+
   function validSupplyForSource(context, totalSupply, source) {
     const supply = Number(totalSupply);
     if (!positiveFinite(supply) || !isTrustedSupplySource(source)) return false;
     if (source === 'GMGN_EXACT') return true;
     if (source === 'GMGN_RATIO') return ratioSupplyMatches(context, supply);
     if (source === 'LAUNCHPAD_RULE') return ruleSupply(context) === supply;
+    if (source === UNKNOWN_FALLBACK_SOURCE) {
+      return coherentUnknownFallbackIdentity(context, supply);
+    }
     return source === 'LEGACY_PUMP_RULE'
       && coherentPumpIdentity(context)
       && context?.marketCapProvenance === MARKET_CAP_PROVENANCE
@@ -240,7 +292,8 @@
       GMGN_EXACT: 40,
       GMGN_RATIO: 30,
       LAUNCHPAD_RULE: 20,
-      LEGACY_PUMP_RULE: 10
+      LEGACY_PUMP_RULE: 10,
+      UNKNOWN_FALLBACK: 5
     }[String(source || '')] || 0;
   }
 
@@ -254,8 +307,8 @@
       observationId: quote?.observationId,
       priceObservationId: quote?.priceObservationId,
       marketCapObservationId: quote?.marketCapObservationId,
-      priceObservedAt: quote?.priceObservedAt || quote?.originalObservedAt || quote?.observedAt,
-      marketCapObservedAt: quote?.marketCapObservedAt || quote?.originalObservedAt || quote?.observedAt,
+      priceObservedAt: quote?.priceObservedAt ?? quote?.originalObservedAt ?? quote?.observedAt,
+      marketCapObservedAt: quote?.marketCapObservedAt ?? quote?.originalObservedAt ?? quote?.observedAt,
       priceSource: quote?.priceSource || quote?.source,
       marketCapSource: quote?.marketCapSource || quote?.source,
       priceProvenance: quote?.priceProvenance
@@ -271,6 +324,8 @@
         ? Number(quote.marketCapDivisor)
         : 0);
     return trustedSupply({
+      ...quote,
+      provisionalSupplyProvenance: undefined,
       chain: context?.chain,
       totalSupply: declaredSupply,
       marketCapUsd: quote?.marketCapUsd,
@@ -278,13 +333,19 @@
       observationId: quote?.observationId,
       priceObservationId: quote?.priceObservationId,
       marketCapObservationId: quote?.marketCapObservationId,
-      priceObservedAt: quote?.priceObservedAt || quote?.originalObservedAt || quote?.observedAt,
-      marketCapObservedAt: quote?.marketCapObservedAt || quote?.originalObservedAt || quote?.observedAt,
+      priceObservedAt: quote?.priceObservedAt ?? quote?.originalObservedAt ?? quote?.observedAt,
+      marketCapObservedAt: quote?.marketCapObservedAt ?? quote?.originalObservedAt ?? quote?.observedAt,
       priceSource: quote?.priceSource || quote?.source,
       marketCapSource: quote?.marketCapSource || quote?.source,
       priceProvenance: quote?.priceProvenance,
       supplySource: trustedDeclaredSource ? declaredSource : (legacyPump ? 'LEGACY_PUMP_RULE' : ''),
       marketCapDivisor: quote?.marketCapDivisor,
+      provisionalSupply: quote?.provisionalSupply,
+      syntheticTokenPrice: quote?.syntheticTokenPrice,
+      provisional: quote?.provisional,
+      paperFallback: quote?.paperFallback,
+      source: quote?.source,
+      quoteSource: quote?.quoteSource,
       marketCapProvenance: legacyPump ? MARKET_CAP_PROVENANCE : undefined,
       launchpad: context?.launchpad,
       launchMode: context?.launchMode,
@@ -381,8 +442,10 @@
     const declaredSupplySource = String(quote?.supplySource || '');
     const invalidTrustedSupplyClaim = isTrustedSupplySource(declaredSupplySource)
       && !resolvedQuoteSupply;
-    const fallbackSupplyDimension = quote?.valuationMode === 'MARKET_CAP'
-      && ['LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE'].includes(String(resolvedQuoteSupply?.source || ''));
+    const resolvedSupplySource = String(resolvedQuoteSupply?.source || '');
+    const fallbackSupplyDimension = (quote?.valuationMode === 'MARKET_CAP'
+      && ['LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE'].includes(resolvedSupplySource))
+      || (quote?.valuationMode === 'PRICE' && resolvedSupplySource === UNKNOWN_FALLBACK_SOURCE);
     const provenance = String(quote?.priceProvenance || '').toUpperCase();
     const syntheticTokenPrice = quote?.syntheticTokenPrice === true
       || quote?.provisionalTokenPrice === true
@@ -419,6 +482,36 @@
       return { ok: false, reason: 'staleQuote' };
     }
     return { ok: true };
+  }
+
+  function safeDurableObservedAt(value, boundary) {
+    return typeof value === 'number'
+      && Number.isSafeInteger(value)
+      && value >= 0
+      && value <= boundary
+      ? value
+      : null;
+  }
+
+  function durableOriginalObservedAt(quote, boundary) {
+    const explicit = quote?.originalObservedAt != null;
+    const selected = explicit ? quote.originalObservedAt : quote?.observedAt;
+    const durable = safeDurableObservedAt(selected, boundary);
+    if (durable != null) return durable;
+    const malformedExplicitFallback = explicit
+      && safeDurableObservedAt(selected, Number.MAX_SAFE_INTEGER) == null
+      && quote?.paperFallback === true
+      && quote?.syntheticTokenPrice === true;
+    if (malformedExplicitFallback) throw new Error('invalidQuote');
+    return safeDurableObservedAt(quote?.observedAt, boundary);
+  }
+
+  function durableNativeOriginalObservedAt(quote, boundary) {
+    const selected = quote?.nativeOriginalObservedAt == null
+      ? quote?.nativePriceObservedAt
+      : quote.nativeOriginalObservedAt;
+    return safeDurableObservedAt(selected, boundary)
+      ?? safeDurableObservedAt(quote?.nativePriceObservedAt, boundary);
   }
 
   function feeFor(amountNative, settings) {
@@ -460,6 +553,7 @@
       || existing?.provisionalNativePrice
       || quote?.syntheticTokenPrice
       || quote?.syntheticNativePrice
+      || supply?.supplySource === UNKNOWN_FALLBACK_SOURCE
       || resolvedFallbackSupply
     );
   }
@@ -484,7 +578,7 @@
       return { status: 'NOOP', state };
     }
 
-    const newPriceUsd = effectiveQuotePrice(quote, existing, existing);
+    const newPriceUsd = effectiveQuotePrice(quote, existing, validationContext);
     const newNativePriceUsd = Number(quote.nativePriceUsd || existing.lastNativePriceUsd);
     const oldSupply = trustedSupply(existing);
     const observedLaunchpad = validationContext.launchpad;
@@ -492,8 +586,6 @@
     const observedSupply = quoteSupply(quote, {
       ...existing, launchpad: observedLaunchpad, launchMode: observedLaunchMode
     });
-    const priceCorrection = existing.provisionalTokenPrice === true
-      && quote.syntheticTokenPrice !== true;
     const nativeCorrection = existing.provisionalNativePrice === true
       && quote.syntheticNativePrice !== true;
     const sameRankModeCorrection = oldSupply?.source === 'LAUNCHPAD_RULE'
@@ -506,6 +598,13 @@
       && (supplyRank(observedSupply.source) > supplyRank(oldSupply.source) || sameRankModeCorrection)
       && Math.abs(observedSupply.totalSupply - oldSupply.totalSupply)
         > oldSupply.totalSupply * Number.EPSILON;
+    const marketCapMoved = positiveFinite(existing.lastMarketCapUsd)
+      && positiveFinite(quote.marketCapUsd)
+      && Math.abs(Number(quote.marketCapUsd) - Number(existing.lastMarketCapUsd))
+        > Number(existing.lastMarketCapUsd) * Number.EPSILON;
+    const priceCorrection = existing.provisionalTokenPrice === true
+      && quote.syntheticTokenPrice !== true
+      && (!supplyCorrection || marketCapMoved);
     const reason = calibrationReason(priceCorrection, nativeCorrection, supplyCorrection);
     if (!reason) return { status: 'NOOP', state };
 
@@ -515,8 +614,34 @@
     if (![newPriceUsd, newNativePriceUsd].every(positiveFinite)) {
       return { status: 'FAILED', state, reason: 'calibrationFailed' };
     }
+    const neutralDimensionCorrection = supplyCorrection || nativeCorrection;
+    const supplyRatio = supplyCorrection
+      ? observedSupply.totalSupply / oldSupply.totalSupply : 1;
+    const oldNativePriceUsd = Number(existing.lastNativePriceUsd || newNativePriceUsd);
+    const nativeRatio = nativeCorrection ? newNativePriceUsd / oldNativePriceUsd : 1;
+    const nextQuantity = Number(existing.quantity) * supplyRatio * nativeRatio;
+    let roundedNextQuantity;
+    try {
+      roundedNextQuantity = checkedRound(nextQuantity, 'positive');
+    } catch {
+      return { status: 'FAILED', state, reason: 'invalidArithmetic' };
+    }
+    const nextAverageEntryPriceUsd = neutralDimensionCorrection
+      ? Number(existing.costBasisNative) * newNativePriceUsd / roundedNextQuantity
+      : Number(existing.averageEntryPriceUsd);
+    const selectedTotalSupply = Number(
+      selectedSupply?.totalSupply || existing.totalSupply || existing.marketCapDivisor || 0
+    );
+    const nextAverageEntryMarketCap = neutralDimensionCorrection && selectedTotalSupply > 0
+      ? nextAverageEntryPriceUsd * selectedTotalSupply
+      : Number(existing.averageEntryMarketCap || 0);
+    if (![roundedNextQuantity, nextAverageEntryPriceUsd].every(positiveFinite)
+      || !finiteBetween(nextAverageEntryMarketCap, 0, Number.MAX_VALUE)) {
+      return { status: 'FAILED', state, reason: 'invalidArithmetic' };
+    }
 
-    const nextProvisionalTokenPrice = existing.provisionalTokenPrice === true && !priceCorrection;
+    const nextProvisionalTokenPrice = existing.provisionalTokenPrice === true
+      && !priceCorrection && !supplyCorrection;
     const nextProvisionalNativePrice = existing.provisionalNativePrice === true && !nativeCorrection;
     const unresolvedFallbackSupply = existing.needsCalibration === true
       && Boolean(oldSupply)
@@ -528,17 +653,25 @@
     const nextState = structuredCloneSafe(state);
     nextState.positions[key] = {
       ...nextState.positions[key],
+      quantity: roundedNextQuantity,
+      averageEntryPriceUsd: nextAverageEntryPriceUsd,
+      averageEntryMarketCap: nextAverageEntryMarketCap,
       lastPriceUsd: newPriceUsd,
       lastMarketCapUsd: Number(quote.marketCapUsd || existing.lastMarketCapUsd || 0),
       lastNativePriceUsd: newNativePriceUsd,
       quoteObservedAt: Number(quote.observedAt),
       updatedAt: Number(now),
       lastPriceProvenance: priceProvenanceForQuote(quote, existing),
-      totalSupply: Number(selectedSupply?.totalSupply || existing.totalSupply || existing.marketCapDivisor || 0),
+      totalSupply: selectedTotalSupply,
       supplySource: String(selectedSupply?.source || existing.supplySource || ''),
+      provisionalSupply: selectedSupply?.source === UNKNOWN_FALLBACK_SOURCE
+        ? selectedTotalSupply : 0,
+      ...(selectedSupply?.source === UNKNOWN_FALLBACK_SOURCE
+        ? { provisionalSupplyProvenance: UNKNOWN_FALLBACK_PROVENANCE }
+        : {}),
       launchpad: String(observedLaunchpad || existing.launchpad || ''),
       launchMode: String(observedLaunchMode || existing.launchMode || ''),
-      marketCapDivisor: Number(selectedSupply?.totalSupply || existing.marketCapDivisor || 0),
+      marketCapDivisor: selectedTotalSupply,
       needsCalibration,
       provisional: nextProvisionalTokenPrice || nextProvisionalNativePrice,
       syntheticTokenPrice: nextProvisionalTokenPrice,
@@ -552,6 +685,9 @@
     if (selectedSupply?.source !== 'LEGACY_PUMP_RULE') {
       delete nextState.positions[key].marketCapProvenance;
     }
+    if (selectedSupply?.source !== UNKNOWN_FALLBACK_SOURCE) {
+      delete nextState.positions[key].provisionalSupplyProvenance;
+    }
     const event = {
       id: cryptoId(Number(now)),
       chain: existing.chain,
@@ -564,7 +700,7 @@
       fromSupply: Number(oldSupply?.totalSupply || existing.totalSupply || existing.marketCapDivisor || 0),
       toSupply: Number(selectedSupply?.totalSupply || oldSupply?.totalSupply || 0),
       quantityBefore: Number(existing.quantity),
-      quantityAfter: Number(existing.quantity),
+      quantityAfter: roundedNextQuantity,
       costBasisNative: Number(existing.costBasisNative),
       createdAt: Number(now)
     };
@@ -576,30 +712,45 @@
     return calibratePositionResult(state, token, quote, now).state;
   }
 
-  function executeBuy(state, order, settings, now = Date.now()) {
-    const registered = Tango.Chains?.get(order?.token?.chain);
-    if (!registered) throw new Error('unsupportedChain');
-    const chain = registered.id;
-    const tokenAddress = Tango.Chains.normalizeAddress(chain, order?.token?.address);
-    const key = positionKey(chain, tokenAddress);
-    const originalPosition = state.positions[key];
-    const callerSupplyContext = callerTokenSupplyContext(order.token, chain, tokenAddress);
-    const executionSettings = validatedExecutionSettings(settings, chain);
-    const originalTrustContext = originalPosition || callerSupplyContext;
-    const quoteValidation = validateQuote(
-      order.quote, now, order.staleMs, originalPosition || callerSupplyContext, originalTrustContext
-    );
-    if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
-    const calibration = originalPosition
-      ? calibratePositionResult(state, order.token, order.quote, now)
+  function preparePositionForExecution(state, token, quote, now, staleMs) {
+    const chain = Tango.Chains.require(token?.chain).id;
+    const key = positionKey(chain, token?.address);
+    const existing = state.positions?.[key] || null;
+    const caller = callerTokenSupplyContext(token, chain,
+      Tango.Chains.normalizeAddress(chain, token.address));
+    const baseContext = existing || caller;
+    const mergedContext = verifiedLaunchContext(baseContext, token);
+    const first = validateQuote(quote, now, staleMs, baseContext, mergedContext);
+    if (!first.ok) throw new Error(first.reason);
+
+    const calibration = existing
+      ? calibratePositionResult(state, token, quote, now)
       : { status: 'NOOP', state };
     if (calibration.status === 'FAILED') throw new Error(calibration.reason);
-    const workingState = calibration.state;
-    const account = chainAccount(workingState, chain);
-    const existing = workingState.positions[key];
-    const trustContext = existing || callerSupplyContext;
-    const amountNative = Number(order.amountNative);
+    const position = calibration.state.positions?.[key] || null;
+    const trustContext = verifiedLaunchContext(position || caller, token);
+    const second = validateQuote(quote, now, staleMs, position || caller, trustContext);
+    if (!second.ok) throw new Error(second.reason);
+    return {
+      state: calibration.state, key, position, trustContext,
+      calibrationStatus: calibration.status
+    };
+  }
+
+  function executeBuy(state, order, settings, now = Date.now()) {
+    const chain = Tango.Chains.require(order?.token?.chain).id;
+    const tokenAddress = Tango.Chains.normalizeAddress(chain, order?.token?.address);
+    const executionSettings = validatedExecutionSettings(settings, chain);
+    const amountNative = Number(order?.amountNative);
     if (!finiteBetween(amountNative, Number.EPSILON, Number.MAX_VALUE)) throw new Error('invalidAmount');
+    const prepared = preparePositionForExecution(
+      state, order?.token, order?.quote, now, order?.staleMs
+    );
+    const key = prepared.key;
+    const workingState = prepared.state;
+    const account = chainAccount(workingState, chain);
+    const existing = prepared.position;
+    const trustContext = prepared.trustContext;
     const cashBalanceNative = checkedArithmetic(account.cashBalanceNative, 'nonnegative');
     if (amountNative > cashBalanceNative + 1e-12) throw new Error('insufficientBalance');
 
@@ -610,23 +761,28 @@
     if (netInvestmentNative <= 0) throw new Error('invalidAmount');
 
     const trustedMarketCap = trustedMarketCapQuote(order.quote, trustContext);
-    const valuationMode = existing
+    const factualPriceOnly = order.quote?.valuationMode === 'PRICE'
+      && positiveFinite(order.quote?.priceUsd)
+      && order.quote?.syntheticTokenPrice !== true;
+    const positionValuationMode = existing
       ? (usesMarketCapValuation(existing) ? 'MARKET_CAP' : 'PRICE')
       : (trustedMarketCap && trustedMarketCap.source !== 'GMGN_RATIO' ? 'MARKET_CAP' : 'PRICE');
-    const provenanceContext = existing || callerSupplyContext;
+    const tradeObservationMode = factualPriceOnly ? 'PRICE' : positionValuationMode;
+    const provenanceContext = existing || trustContext;
     const executionSupply = supplyIdentity(order.quote, provenanceContext);
     const executionTotalSupply = checkedArithmetic(executionSupply.totalSupply, 'nonnegative');
     const marketCapDivisor = checkedArithmetic(
       executionTotalSupply || existing?.marketCapDivisor || 0, 'nonnegative'
     );
-    const valuationContext = existing || (valuationMode === 'MARKET_CAP'
+    const valuationContext = existing || (positionValuationMode === 'MARKET_CAP'
       ? {
-        ...callerSupplyContext, ...executionSupply, valuationMode, marketCapDivisor,
+        ...trustContext, ...executionSupply,
+        valuationMode: positionValuationMode, marketCapDivisor,
         ...(executionSupply.supplySource === 'LEGACY_PUMP_RULE'
           ? { marketCapProvenance: MARKET_CAP_PROVENANCE }
           : {})
       }
-      : callerSupplyContext);
+      : trustContext);
     const priceProvenance = priceProvenanceForQuote(order.quote, existing || valuationContext, trustedMarketCap);
     const observedPriceUsd = checkedArithmetic(
       effectiveQuotePrice(order.quote, valuationContext, trustContext), 'positive'
@@ -668,6 +824,7 @@
       || order.quote.syntheticNativePrice === true;
     const needsCalibration = calibrationStillNeeded(existing, order.quote, executionSupply);
     const legacyExecutionSupply = executionSupply.supplySource === 'LEGACY_PUMP_RULE';
+    const unknownFallbackSupply = executionSupply.supplySource === UNKNOWN_FALLBACK_SOURCE;
     const existingEntryProvenance = existing?.averageEntryPriceProvenance
       || (existing ? (usesMarketCapValuation(existing) ? 'MARKET_CAP_DERIVED' : 'OBSERVED_PRICE') : '');
     const existingRealizedPnlNative = checkedArithmetic(existing?.realizedPnlNative ?? 0);
@@ -682,6 +839,9 @@
     const roundedNextCost = checkedRound(nextCost, 'positive');
     const roundedAverageEntryPriceUsd = checkedRound(averageEntryPriceUsd, 'positive');
     const roundedAverageEntryMarketCap = checkedRound(averageEntryMarketCap, 'nonnegative');
+    const quoteObservedAtOriginal = durableOriginalObservedAt(order.quote, now);
+    const nativePriceObservedAtOriginal = durableNativeOriginalObservedAt(order.quote, now);
+    const positionQuoteObservedAt = safeDurableObservedAt(order.quote.observedAt, now);
 
     const trade = {
       id: cryptoId(now), chain, tokenAddress, symbol: positionSymbol, name: positionName, logoUrl: positionLogoUrl,
@@ -690,17 +850,23 @@
       marketCapUsd: quoteMarketCapUsd, liquidityUsd: quoteLiquidityUsd, nativePriceUsd,
       nativeSymbol: nativeSymbol(chain), slippageBps: executionSettings.slippageBps,
       platformFeeNative: roundedPlatformFeeNative, networkFeeNative: roundedNetworkFeeNative,
-      realizedPnlNative: 0, realizedPnlUsd: 0, valuationMode, priceProvenance,
+      realizedPnlNative: 0, realizedPnlUsd: 0,
+      valuationMode: tradeObservationMode, priceProvenance,
       quoteSource: String(order.quote.source || ''), paperFallback: order.quote.paperFallback === true,
       provisional: order.quote.provisional === true,
       syntheticTokenPrice: order.quote.syntheticTokenPrice === true,
       syntheticNativePrice: order.quote.syntheticNativePrice === true,
       totalSupply: executionTotalSupply,
       supplySource: String(executionSupply.supplySource),
+      ...(unknownFallbackSupply ? {
+        marketCapDivisor: executionTotalSupply,
+        provisionalSupply: executionTotalSupply,
+        provisionalSupplyProvenance: UNKNOWN_FALLBACK_PROVENANCE
+      } : {}),
       launchpad: executionSupply.launchpad,
       launchMode: executionSupply.launchMode,
-      quoteObservedAtOriginal: Number(order.quote.originalObservedAt || order.quote.observedAt),
-      nativePriceObservedAtOriginal: Number(order.quote.nativeOriginalObservedAt || order.quote.nativePriceObservedAt),
+      ...(quoteObservedAtOriginal == null ? {} : { quoteObservedAtOriginal }),
+      ...(nativePriceObservedAtOriginal == null ? {} : { nativePriceObservedAtOriginal }),
       ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {}),
       sourceUrl: order.sourceUrl || '', executedAt: now
     };
@@ -714,48 +880,61 @@
       averageEntryPriceUsd: roundedAverageEntryPriceUsd,
       averageEntryMarketCap: roundedAverageEntryMarketCap, realizedPnlNative: existingRealizedPnlNative,
       lastPriceUsd: observedPriceUsd, lastMarketCapUsd: quoteMarketCapUsd,
-      lastNativePriceUsd: nativePriceUsd, quoteObservedAt: Number(order.quote.observedAt), openedAt: existing?.openedAt || now,
-      updatedAt: now, valuationMode, marketCapDivisor, lastPriceProvenance: priceProvenance,
+      lastNativePriceUsd: nativePriceUsd, openedAt: existing?.openedAt || now,
+      ...(positionQuoteObservedAt == null ? {} : { quoteObservedAt: positionQuoteObservedAt }),
+      updatedAt: now, valuationMode: positionValuationMode,
+      marketCapDivisor, lastPriceProvenance: priceProvenance,
       provisional: order.quote.provisional === true,
       syntheticTokenPrice: order.quote.syntheticTokenPrice === true,
       syntheticNativePrice: order.quote.syntheticNativePrice === true,
       totalSupply: executionTotalSupply, supplySource: String(executionSupply.supplySource),
       launchpad: executionSupply.launchpad, launchMode: executionSupply.launchMode,
+      provisionalSupply: unknownFallbackSupply ? executionTotalSupply : 0,
+      ...(unknownFallbackSupply
+        ? { provisionalSupplyProvenance: UNKNOWN_FALLBACK_PROVENANCE }
+        : {}),
+      quoteSource: String(order.quote.source || existing?.quoteSource || ''),
+      paperFallback: order.quote.paperFallback === true || existing?.paperFallback === true,
       needsCalibration, provisionalTokenPrice, provisionalNativePrice,
       averageEntryPriceProvenance: existingQuantity > 0 && existingEntryProvenance !== priceProvenance
         ? 'MIXED_DERIVED'
         : existingEntryProvenance || priceProvenance,
       ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {})
     };
+    if (positionQuoteObservedAt == null) delete nextState.positions[key].quoteObservedAt;
     if (!legacyExecutionSupply) delete nextState.positions[key].marketCapProvenance;
+    if (!unknownFallbackSupply) delete nextState.positions[key].provisionalSupplyProvenance;
     nextState.trades = [trade, ...(workingState.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
     return { state: nextState, trade, position: nextState.positions[key] };
   }
 
   function executeSell(state, order, settings, now = Date.now()) {
-    const registered = Tango.Chains?.get(order?.token?.chain);
-    if (!registered) throw new Error('unsupportedChain');
-    const chain = registered.id;
+    const chain = Tango.Chains.require(order?.token?.chain).id;
     const tokenAddress = Tango.Chains.normalizeAddress(chain, order?.token?.address);
     const key = positionKey(chain, tokenAddress);
-    const originalPosition = state.positions[key];
+    const originalPosition = state.positions?.[key];
     if (!originalPosition || !(Number(originalPosition.quantity) > 0)) throw new Error('noPosition');
     const executionSettings = validatedExecutionSettings(settings, chain);
-    const quoteValidation = validateQuote(order.quote, now, order.staleMs, originalPosition);
-    if (!quoteValidation.ok) throw new Error(quoteValidation.reason);
-    const calibration = calibratePositionResult(state, order.token, order.quote, now);
-    if (calibration.status === 'FAILED') throw new Error(calibration.reason);
-    const workingState = calibration.state;
+    const percent = Number(order?.percent || 0);
+    const requestedOrderQuantity = order?.quantity == null ? null : Number(order.quantity);
+    if (requestedOrderQuantity == null) {
+      if (!finiteBetween(percent, Number.EPSILON, 100)) throw new Error('invalidAmount');
+    } else if (!finiteBetween(requestedOrderQuantity, Number.EPSILON, Number.MAX_VALUE)) {
+      throw new Error('invalidAmount');
+    }
+    const prepared = preparePositionForExecution(
+      state, order?.token, order?.quote, now, order?.staleMs
+    );
+    const workingState = prepared.state;
+    const existing = prepared.position;
+    if (!existing || !(Number(existing.quantity) > 0)) throw new Error('noPosition');
     const account = chainAccount(workingState, chain);
-    const existing = workingState.positions[key];
 
-    const percent = Number(order.percent || 0);
-    if (order.quantity == null && !finiteBetween(percent, Number.EPSILON, 100)) throw new Error('invalidAmount');
     const existingQuantity = checkedArithmetic(existing.quantity, 'positive');
-    const fullClose = order.quantity == null && percent === 100;
-    const requestedQuantity = order.quantity == null
+    const fullClose = requestedOrderQuantity == null && percent === 100;
+    const requestedQuantity = requestedOrderQuantity == null
       ? (fullClose ? existingQuantity : checkedArithmetic(existingQuantity * percent / 100, 'positive'))
-      : Number(order.quantity);
+      : requestedOrderQuantity;
     const quantity = fullClose ? existingQuantity : Math.min(existingQuantity, requestedQuantity);
     if (!finiteBetween(requestedQuantity, Number.EPSILON, Number.MAX_VALUE)
       || !finiteBetween(quantity, Number.EPSILON, Number.MAX_VALUE)) throw new Error('invalidAmount');
@@ -763,11 +942,17 @@
     const slippage = executionSettings.slippageBps / 10_000;
     const observedPriceUsd = checkedArithmetic(effectiveQuotePrice(order.quote, existing), 'positive');
     const executionPriceUsd = checkedArithmetic(observedPriceUsd * (1 - slippage), 'positive');
-    const valuationMode = usesMarketCapValuation(existing) ? 'MARKET_CAP' : 'PRICE';
     const trustedMarketCap = trustedMarketCapQuote(order.quote, existing);
+    const factualPriceOnly = order.quote?.valuationMode === 'PRICE'
+      && positiveFinite(order.quote?.priceUsd)
+      && order.quote?.syntheticTokenPrice !== true;
+    const valuationMode = factualPriceOnly
+      ? 'PRICE'
+      : (usesMarketCapValuation(existing) ? 'MARKET_CAP' : 'PRICE');
     const priceProvenance = priceProvenanceForQuote(order.quote, existing, trustedMarketCap);
     const executionSupply = supplyIdentity(order.quote, existing);
     const legacyExecutionSupply = executionSupply.supplySource === 'LEGACY_PUMP_RULE';
+    const unknownFallbackSupply = executionSupply.supplySource === UNKNOWN_FALLBACK_SOURCE;
     const executionTotalSupply = checkedArithmetic(executionSupply.totalSupply, 'nonnegative');
     const marketCapDivisor = checkedArithmetic(
       executionTotalSupply || existing.marketCapDivisor || 0, 'nonnegative'
@@ -842,6 +1027,9 @@
     const roundedNextPositionRealizedPnlNative = checkedRound(nextPositionRealizedPnlNative);
     const roundedNextDayNative = checkedRound(nextDayNative);
     const roundedNextDayUsdAtExecution = checkedRound(nextDayUsdAtExecution);
+    const quoteObservedAtOriginal = durableOriginalObservedAt(order.quote, now);
+    const nativePriceObservedAtOriginal = durableNativeOriginalObservedAt(order.quote, now);
+    const positionQuoteObservedAt = safeDurableObservedAt(order.quote.observedAt, now);
 
     const trade = {
       id: cryptoId(now), chain, tokenAddress, symbol: existing.symbol, name: existing.name, logoUrl: existing.logoUrl || '',
@@ -860,10 +1048,15 @@
       syntheticNativePrice: order.quote.syntheticNativePrice === true,
       totalSupply: executionTotalSupply,
       supplySource: String(executionSupply.supplySource),
+      ...(unknownFallbackSupply ? {
+        marketCapDivisor: executionTotalSupply,
+        provisionalSupply: executionTotalSupply,
+        provisionalSupplyProvenance: UNKNOWN_FALLBACK_PROVENANCE
+      } : {}),
       launchpad: executionSupply.launchpad,
       launchMode: executionSupply.launchMode,
-      quoteObservedAtOriginal: Number(order.quote.originalObservedAt || order.quote.observedAt),
-      nativePriceObservedAtOriginal: Number(order.quote.nativeOriginalObservedAt || order.quote.nativePriceObservedAt),
+      ...(quoteObservedAtOriginal == null ? {} : { quoteObservedAtOriginal }),
+      ...(nativePriceObservedAtOriginal == null ? {} : { nativePriceObservedAtOriginal }),
       ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {})
     };
 
@@ -877,7 +1070,8 @@
         ...existing, quantity: roundedRemainingQuantity, costBasisNative: roundedRemainingCost,
         realizedPnlNative: roundedNextPositionRealizedPnlNative,
         lastPriceUsd: observedPriceUsd, lastMarketCapUsd: quoteMarketCapUsd,
-        lastNativePriceUsd: nativePriceUsd, quoteObservedAt: Number(order.quote.observedAt), updatedAt: now,
+        lastNativePriceUsd: nativePriceUsd, updatedAt: now,
+        ...(positionQuoteObservedAt == null ? {} : { quoteObservedAt: positionQuoteObservedAt }),
         lastPriceProvenance: priceProvenance,
         provisional: order.quote.provisional === true,
         syntheticTokenPrice: order.quote.syntheticTokenPrice === true,
@@ -885,12 +1079,20 @@
         totalSupply: executionTotalSupply, supplySource: String(executionSupply.supplySource),
         launchpad: executionSupply.launchpad, launchMode: executionSupply.launchMode,
         marketCapDivisor,
+        provisionalSupply: unknownFallbackSupply ? executionTotalSupply : 0,
+        ...(unknownFallbackSupply
+          ? { provisionalSupplyProvenance: UNKNOWN_FALLBACK_PROVENANCE }
+          : {}),
+        quoteSource: String(order.quote.source || existing.quoteSource || ''),
+        paperFallback: order.quote.paperFallback === true || existing.paperFallback === true,
         needsCalibration: calibrationStillNeeded(existing, order.quote, executionSupply),
         provisionalTokenPrice: existing.provisionalTokenPrice === true || order.quote.syntheticTokenPrice === true,
         provisionalNativePrice: existing.provisionalNativePrice === true || order.quote.syntheticNativePrice === true,
         ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {})
       };
+      if (positionQuoteObservedAt == null) delete nextState.positions[key].quoteObservedAt;
       if (!legacyExecutionSupply) delete nextState.positions[key].marketCapProvenance;
+      if (!unknownFallbackSupply) delete nextState.positions[key].provisionalSupplyProvenance;
     }
     nextState.trades = [trade, ...(workingState.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
     nextState.dailyRealizedByChain[chain][dayKey] = {
@@ -1018,6 +1220,11 @@
       totalSupply: Number(executionSupply.totalSupply), supplySource: String(executionSupply.supplySource),
       launchpad: executionSupply.launchpad, launchMode: executionSupply.launchMode,
       marketCapDivisor: Number(executionSupply.totalSupply || existing.marketCapDivisor || 0),
+      provisionalSupply: executionSupply.supplySource === UNKNOWN_FALLBACK_SOURCE
+        ? Number(executionSupply.totalSupply) : 0,
+      ...(executionSupply.supplySource === UNKNOWN_FALLBACK_SOURCE
+        ? { provisionalSupplyProvenance: UNKNOWN_FALLBACK_PROVENANCE }
+        : {}),
       needsCalibration, provisional,
       ...(executionSupply.supplySource === 'LEGACY_PUMP_RULE'
         ? { marketCapProvenance: MARKET_CAP_PROVENANCE }
@@ -1025,6 +1232,9 @@
     };
     if (executionSupply.supplySource !== 'LEGACY_PUMP_RULE') {
       delete nextState.positions[key].marketCapProvenance;
+    }
+    if (executionSupply.supplySource !== UNKNOWN_FALLBACK_SOURCE) {
+      delete nextState.positions[key].provisionalSupplyProvenance;
     }
     return nextState;
   }
@@ -1072,7 +1282,7 @@
   Tango.Engine = {
     round, positionKey, validateQuote, executeBuy, executeSell, executeCloseAll, markPosition,
     portfolioSummary, chainUsdSummary, globalUsdSummary, updatePositionQuote, updatePositionMetadata, breakevenSellPercent,
-    usesMarketCapValuation, calibratePosition
+    usesMarketCapValuation, calibratePosition, ruleSupply
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Engine;
 })(globalThis);

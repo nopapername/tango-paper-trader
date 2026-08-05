@@ -1,5 +1,6 @@
 (function initSupply(global) {
   const Tango = global.Tango = global.Tango || {};
+  const INTERNAL_UNKNOWN_FALLBACK = Symbol('TangoInternalUnknownFallback');
   const SOURCES = Object.freeze({
     EXACT: 'GMGN_EXACT',
     RATIO: 'GMGN_RATIO',
@@ -20,7 +21,7 @@
       source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
     }),
     Object.freeze({
-      chain: 'base', aliases: Object.freeze(['bankr']), launchMode: '',
+      chain: 'base', aliases: Object.freeze(['bankr', 'bankrbot', 'banker']), launchMode: '',
       totalSupply: 100_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
       source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
     }),
@@ -30,7 +31,7 @@
       source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
     }),
     Object.freeze({
-      chain: 'robinhood', aliases: Object.freeze(['bankr']), launchMode: '',
+      chain: 'robinhood', aliases: Object.freeze(['bankr', 'bankrbot', 'banker']), launchMode: '',
       totalSupply: 100_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
       source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
     }),
@@ -55,7 +56,12 @@
       source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
     }),
     Object.freeze({
-      chain: 'xlayer', aliases: Object.freeze(['dyor', 'bow', 'bowfun']), launchMode: '',
+      chain: 'xlayer', aliases: Object.freeze(['dyor']), launchMode: '',
+      totalSupply: 1_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
+      source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
+    }),
+    Object.freeze({
+      chain: 'xlayer', aliases: Object.freeze(['bow', 'bowfun']), launchMode: '',
       totalSupply: 1_000_000_000, initialMarketCapUsd: UNKNOWN_INITIAL_MARKET_CAP_USD,
       source: SOURCES.RULE, provenance: 'VERIFIED_LAUNCHPAD'
     })
@@ -119,13 +125,19 @@
     const rule = launchpadRule(observation.chain, observation.launchpad, observation.launchMode);
     const totalSupply = rule?.totalSupply || UNKNOWN_TOTAL_SUPPLY;
     const marketCapUsd = rule?.initialMarketCapUsd || UNKNOWN_INITIAL_MARKET_CAP_USD;
-    return {
+    const valuation = {
       totalSupply,
       marketCapUsd,
       priceUsd: marketCapUsd / totalSupply,
       supplySource: rule?.source || 'UNKNOWN_FALLBACK',
       valuationSource: rule ? 'LAUNCHPAD_INITIAL_MARKET_CAP' : 'UNKNOWN_INITIAL_MARKET_CAP'
     };
+    if (!rule) valuation[INTERNAL_UNKNOWN_FALLBACK] = true;
+    return valuation;
+  }
+
+  function isInternalUnknownFallback(value) {
+    return Boolean(value?.[INTERNAL_UNKNOWN_FALLBACK]);
   }
 
   function resolve(observation = {}) {
@@ -158,7 +170,7 @@
   Tango.Supply = {
     SOURCES, LAUNCHPAD_RULES, UNKNOWN_INITIAL_MARKET_CAP_USD, UNKNOWN_TOTAL_SUPPLY,
     launchpadRule, fallbackValuation, resolve, ruleSupply,
-    isTrustedSource, coherentRatioObservation, ratioSupplyMatches
+    isTrustedSource, isInternalUnknownFallback, coherentRatioObservation, ratioSupplyMatches
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Supply;
 })(globalThis);

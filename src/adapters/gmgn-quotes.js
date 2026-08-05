@@ -1,10 +1,12 @@
 (function initGmgnQuotes(global) {
   const Tango = global.Tango = global.Tango || {};
   const ADDRESS_KEYS = ['address', 'token_address', 'tokenAddress', 'mint', 'mint_address', 'contract_address', 'contractAddress', 'ca'];
-  const PRICE_KEYS = ['price_usd', 'priceUsd', 'usd_price', 'usdPrice', 'price'];
+  const EXPLICIT_PRICE_KEYS = ['price_usd', 'priceUsd', 'usd_price', 'usdPrice'];
+  const GENERIC_PRICE_KEYS = ['price'];
   const MC_KEYS = ['market_cap', 'marketCap', 'market_cap_usd', 'marketCapUsd', 'mc', 'fdv'];
   const LIQUIDITY_KEYS = ['liquidity_usd', 'liquidityUsd', 'liquidity'];
-  const SUPPLY_KEYS = ['total_supply', 'totalSupply', 'supply'];
+  const EXPLICIT_SUPPLY_KEYS = ['total_supply', 'totalSupply'];
+  const GENERIC_SUPPLY_KEYS = ['supply'];
   const SYMBOL_KEYS = ['symbol', 'token_symbol', 'tokenSymbol', 'ticker'];
   const NAME_KEYS = ['name', 'token_name', 'tokenName'];
   const LOGO_KEYS = ['logo', 'logo_url', 'logoUrl', 'image', 'image_url', 'imageUrl'];
@@ -33,6 +35,46 @@
       if (object?.[key] != null) return object[key];
     }
     return null;
+  }
+
+  function firstField(object, keys) {
+    for (const key of keys) {
+      if (object?.[key] != null) return { key, value: object[key] };
+    }
+    return { key: '', value: null };
+  }
+
+  function explicitSupplyField(object) {
+    const matches = EXPLICIT_SUPPLY_KEYS
+      .filter((key) => object?.[key] != null)
+      .map((key) => ({ key, value: numberFrom(object[key]) }))
+      .filter((match) => match.value > 0);
+    const values = new Set(matches.map((match) => match.value));
+    return {
+      ...(matches[0] || { key: '', value: 0 }),
+      ambiguous: values.size > 1
+    };
+  }
+
+  function objectAddress(object, chain) {
+    const addresses = ADDRESS_KEYS
+      .filter((key) => object?.[key] != null && Tango.Chains.validateAddress(chain.id, object[key]))
+      .map((key) => Tango.Chains.normalizeAddress(chain.id, object[key]));
+    const unique = [...new Set(addresses)];
+    return { address: unique[0] || '', conflicting: unique.length > 1 };
+  }
+
+  function coherentValuationTriple(priceUsd, marketCapUsd, totalSupply) {
+    return priceUsd > 0 && marketCapUsd > 0 && totalSupply > 0
+      && Math.abs(priceUsd * totalSupply - marketCapUsd) <= marketCapUsd * 0.001;
+  }
+
+  function trustedMajorCoinPriceUrl(value) {
+    let parsed;
+    try { parsed = new URL(String(value || '')); } catch { return false; }
+    return parsed.protocol === 'https:'
+      && (parsed.hostname === 'gmgn.ai' || parsed.hostname.endsWith('.gmgn.ai'))
+      && parsed.pathname === '/api/v1/major_coin_prices';
   }
 
   function metadataText(value, maxLength) {
@@ -87,6 +129,55 @@
     };
   }
 
+  function newerSupply(previous, next, fallbackTime) {
+    const candidate = (value) => {
+      const totalSupply = Number(value?.totalSupply || 0);
+      const observedAt = Number(value?.totalSupplyObservedAt || (
+        totalSupply > 0 || value?.totalSupplyAmbiguous === true ? value?.observedAt : 0
+      ) || 0);
+      const source = factualObservationSource(value?.totalSupplyObservationSource || value?.source);
+      const sourceName = metadataText(value?.totalSupplySource, 64);
+      const rank = Number(value?.totalSupplyTrustRank || (
+        sourceName === 'GMGN_NETWORK_EXACT' || totalSupply > 0 ? 2 : 0
+      ));
+      return {
+        valid: Number.isFinite(totalSupply) && totalSupply > 0
+          && Boolean(source) && validObservationTime(observedAt),
+        totalSupply,
+        observedAt,
+        source,
+        sourceName,
+        rank,
+        field: metadataText(value?.totalSupplyField, 64),
+        ambiguous: value?.totalSupplyAmbiguous === true,
+        selected: value
+      };
+    };
+    const before = candidate(previous);
+    const after = candidate({ ...next, observedAt: next?.observedAt || fallbackTime });
+    if (after.ambiguous && (!before.valid || after.observedAt >= before.observedAt)) return after;
+    if (before.ambiguous && (!after.valid || after.observedAt <= before.observedAt)) return before;
+    if (!before.valid) return after.valid || after.ambiguous ? after : before;
+    if (!after.valid) return before;
+    if (after.rank > before.rank) return after;
+    if (after.rank < before.rank) return before;
+    if (after.observedAt > before.observedAt) return after;
+    if (after.observedAt < before.observedAt) return before;
+    if (Math.abs(after.totalSupply - before.totalSupply)
+      <= Math.max(after.totalSupply, before.totalSupply) * Number.EPSILON) return after;
+    return {
+      valid: false,
+      totalSupply: 0,
+      observedAt: after.observedAt,
+      source: '',
+      sourceName: '',
+      rank: after.rank,
+      field: '',
+      ambiguous: true,
+      selected: null
+    };
+  }
+
   function newerText(previous, next, field, timeField, sourceField, fallbackTime, maxLength) {
     const clean = field === 'symbol' ? symbolText : (value) => metadataText(value, maxLength);
     const previousValue = clean(previous?.[field]);
@@ -127,9 +218,49 @@
     const price = newerPositive(previous, next, 'priceUsd', 'priceObservedAt', 'priceSource', nextObservedAt);
     const marketCap = newerPositive(previous, next, 'marketCapUsd', 'marketCapObservedAt', 'marketCapSource', nextObservedAt);
     const liquidity = newerPositive(previous, next, 'liquidityUsd', 'liquidityObservedAt', 'liquiditySource', nextObservedAt);
-    const totalSupply = newerPositive(
-      previous, next, 'totalSupply', 'totalSupplyObservedAt', 'totalSupplyObservationSource', nextObservedAt
+    const totalSupply = newerSupply(previous, next, nextObservedAt);
+    let priceObservationId = metadataText(
+      price.selected?.priceObservationId || price.selected?.observationId, 128
     );
+    let marketCapObservationId = metadataText(
+      marketCap.selected?.marketCapObservationId || marketCap.selected?.observationId, 128
+    );
+    let totalSupplyObservationId = metadataText(
+      totalSupply.selected?.totalSupplyObservationId || totalSupply.selected?.observationId, 128
+    );
+    const sameValuationSource = Boolean(price.source)
+      && price.source === marketCap.source && price.source === totalSupply.source;
+    const sameValuationObservationId = Boolean(
+      priceObservationId && priceObservationId === marketCapObservationId
+      && priceObservationId === totalSupplyObservationId
+    );
+    const sameValuationObservedAt = price.observedAt > 0
+      && price.observedAt === marketCap.observedAt
+      && price.observedAt === totalSupply.observedAt;
+    const contradictoryTriple = sameValuationSource
+      && (sameValuationObservationId || sameValuationObservedAt)
+      && price.value > 0 && marketCap.value > 0 && totalSupply.valid
+      && !coherentValuationTriple(price.value, marketCap.value, totalSupply.totalSupply);
+    if (contradictoryTriple) {
+      const ambiguityObservedAt = Math.max(
+        price.observedAt, marketCap.observedAt, totalSupply.observedAt
+      );
+      Object.assign(price, { value: 0, observedAt: 0, source: '', selected: null });
+      Object.assign(marketCap, { value: 0, observedAt: 0, source: '', selected: null });
+      Object.assign(totalSupply, {
+        valid: false,
+        totalSupply: 0,
+        observedAt: ambiguityObservedAt,
+        source: '',
+        sourceName: '',
+        field: '',
+        ambiguous: true,
+        selected: null
+      });
+      priceObservationId = '';
+      marketCapObservationId = '';
+      totalSupplyObservationId = '';
+    }
     const symbol = newerText(previous, next, 'symbol', 'symbolObservedAt', 'symbolSource', nextObservedAt, 32);
     const name = newerText(previous, next, 'name', 'nameObservedAt', 'nameSource', nextObservedAt, 100);
     const logoUrl = newerText(previous, next, 'logoUrl', 'logoUrlObservedAt', 'logoUrlSource', nextObservedAt, 1000);
@@ -141,11 +272,11 @@
     const observedAt = price.value > 0 ? price.observedAt
       : marketCap.value > 0 ? marketCap.observedAt
         : liquidity.value > 0 ? liquidity.observedAt
-          : totalSupply.value > 0 ? totalSupply.observedAt : metadataObservedAt;
+          : totalSupply.totalSupply > 0 || totalSupply.ambiguous ? totalSupply.observedAt : metadataObservedAt;
     const source = price.value > 0 ? price.source
       : marketCap.value > 0 ? marketCap.source
         : liquidity.value > 0 ? liquidity.source
-          : totalSupply.value > 0 ? totalSupply.source
+          : totalSupply.totalSupply > 0 ? totalSupply.source
             : symbol.source || name.source || logoUrl.source || launchpad.source || launchMode.source;
     return {
       chain: next.chain,
@@ -153,11 +284,15 @@
       priceUsd: price.value,
       marketCapUsd: marketCap.value,
       liquidityUsd: liquidity.value,
-      totalSupply: totalSupply.value,
-      totalSupplySource: totalSupply.value > 0
-        ? (totalSupply.fromNext ? metadataText(next.totalSupplySource, 64) : metadataText(previous?.totalSupplySource, 64)) || 'GMGN_NETWORK_EXACT'
-        : '',
+      totalSupply: totalSupply.totalSupply,
+      totalSupplySource: totalSupply.valid ? totalSupply.sourceName || 'GMGN_NETWORK_EXACT' : '',
       totalSupplyObservationSource: totalSupply.source,
+      ...(priceObservationId ? { priceObservationId } : {}),
+      ...(marketCapObservationId ? { marketCapObservationId } : {}),
+      ...(totalSupplyObservationId ? { totalSupplyObservationId } : {}),
+      ...(totalSupply.field ? { totalSupplyField: totalSupply.field } : {}),
+      ...(totalSupply.rank > 0 ? { totalSupplyTrustRank: totalSupply.rank } : {}),
+      ...(totalSupply.ambiguous ? { totalSupplyAmbiguous: true } : {}),
       ...(price.value > 0 && metadataText(price.selected?.priceProvenance, 64)
         ? { priceProvenance: metadataText(price.selected.priceProvenance, 64) } : {}),
       symbol: symbol.value,
@@ -206,19 +341,35 @@
         value.slice(0, 500).forEach((item) => queue.push(item));
         continue;
       }
-      const rawAddress = firstValue(value, ADDRESS_KEYS);
-      if (Tango.Chains.validateAddress(chain.id, rawAddress)) {
-        const address = Tango.Chains.normalizeAddress(chain.id, rawAddress);
-        const priceUsd = numberFrom(firstValue(value, PRICE_KEYS));
-        const marketCapUsd = numberFrom(firstValue(value, MC_KEYS));
+      const identity = objectAddress(value, chain);
+      if (identity.address && !identity.conflicting) {
+        const address = identity.address;
+        const explicitPrice = firstField(value, EXPLICIT_PRICE_KEYS);
+        const genericPrice = firstField(value, GENERIC_PRICE_KEYS);
+        const marketCap = firstField(value, MC_KEYS);
+        const supply = explicitSupplyField(value);
+        const genericSupply = firstField(value, GENERIC_SUPPLY_KEYS);
+        const rawPriceUsd = numberFrom(explicitPrice.value ?? genericPrice.value);
+        const rawMarketCapUsd = numberFrom(marketCap.value);
+        const rawTotalSupply = supply.ambiguous ? 0 : supply.value;
+        const hasTriple = rawPriceUsd > 0 && rawMarketCapUsd > 0 && rawTotalSupply > 0;
+        const coherentTriple = hasTriple
+          && coherentValuationTriple(rawPriceUsd, rawMarketCapUsd, rawTotalSupply);
+        const contradictoryTriple = hasTriple && !coherentTriple;
+        const priceUsd = contradictoryTriple ? 0
+          : explicitPrice.key ? rawPriceUsd
+            : coherentTriple ? rawPriceUsd : 0;
+        const marketCapUsd = contradictoryTriple ? 0 : rawMarketCapUsd;
         const liquidityUsd = numberFrom(firstValue(value, LIQUIDITY_KEYS));
-        const totalSupply = numberFrom(firstValue(value, SUPPLY_KEYS));
+        const totalSupply = contradictoryTriple ? 0 : rawTotalSupply;
         const symbol = symbolText(firstValue(value, SYMBOL_KEYS));
         const name = metadataText(firstValue(value, NAME_KEYS), 100);
         const logoUrl = metadataText(firstValue(value, LOGO_KEYS), 1000);
         const launchpad = metadataText(firstValue(value, LAUNCHPAD_KEYS), 100);
         const launchMode = metadataText(firstValue(value, LAUNCH_MODE_KEYS), 100);
+        const totalSupplyAmbiguous = supply.ambiguous || contradictoryTriple;
         if (priceUsd > 0 || marketCapUsd > 0 || liquidityUsd > 0 || totalSupply > 0
+          || totalSupplyAmbiguous
           || symbol || name || logoUrl || launchpad || launchMode) {
           const previous = found.get(address) || null;
           found.set(address, mergeObservation(previous, {
@@ -229,6 +380,10 @@
             liquidityUsd,
             totalSupply,
             totalSupplySource: totalSupply > 0 ? 'GMGN_NETWORK_EXACT' : '',
+            totalSupplyField: totalSupply > 0 ? supply.key : '',
+            totalSupplyTrustRank: totalSupply > 0 ? 2 : 0,
+            totalSupplyAmbiguous,
+            genericSupplyField: genericSupply.key,
             symbol,
             name,
             logoUrl,
@@ -237,6 +392,8 @@
             observedAt,
             priceObservedAt: priceUsd > 0 ? observedAt : 0,
             priceSource: priceUsd > 0 ? 'GMGN_NETWORK' : '',
+            ...(priceUsd > 0 && !explicitPrice.key
+              ? { priceProvenance: 'OBSERVED_PRICE' } : {}),
             marketCapObservedAt: marketCapUsd > 0 ? observedAt : 0,
             marketCapSource: marketCapUsd > 0 ? 'GMGN_NETWORK' : '',
             liquidityObservedAt: liquidityUsd > 0 ? observedAt : 0,
@@ -265,7 +422,8 @@
     return [...found.values()];
   }
 
-  function extractNativePrices(payload, observedAt) {
+  function extractNativePrices(payload, observedAt, context = {}) {
+    const allowGenericPrice = trustedMajorCoinPriceUrl(context?.requestUrl);
     const nativeSymbols = new Set((Tango.Chains?.all?.() || []).map((chain) => chain.nativeSymbol));
     const found = new Map();
     const queue = [payload];
@@ -282,7 +440,12 @@
         continue;
       }
       const symbol = metadataText(firstValue(value, SYMBOL_KEYS), 32);
-      const priceUsd = numberFrom(firstValue(value, PRICE_KEYS));
+      const explicitPrice = firstField(value, EXPLICIT_PRICE_KEYS);
+      const genericPrice = firstField(value, GENERIC_PRICE_KEYS);
+      const tokenShaped = ADDRESS_KEYS.some((key) => value?.[key] != null);
+      const priceUsd = numberFrom(explicitPrice.key
+        ? explicitPrice.value
+        : allowGenericPrice && !tokenShaped ? genericPrice.value : null);
       if (nativeSymbols.has(symbol) && priceUsd > 0 && !found.has(symbol)) {
         found.set(symbol, { symbol, priceUsd, observedAt, source: 'GMGN_MAJOR_COIN' });
       }

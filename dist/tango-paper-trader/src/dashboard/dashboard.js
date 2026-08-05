@@ -23,7 +23,11 @@
     filters: { search: '', side: 'ALL', result: 'ALL', date: '' },
     onboardingActive: searchParams.get('onboarding') === '1',
     onboardingComplete: false,
+    onboardingSetupVerified: false,
+    onboardingCompletion: null,
     onboardingStatus: '',
+    onboardingBalance: '10',
+    onboardingLanguage: '',
     toast: '',
     loadError: ''
   };
@@ -46,6 +50,8 @@
       runtime.state = data.state;
       const startupChain = !runtime.startupChainApplied ? runtime.startupChain : '';
       runtime.settings = startupChain ? { ...data.settings, selectedChain: startupChain } : data.settings;
+      runtime.onboardingSetupVerified = runtime.onboardingSetupVerified
+        || data.settings?.onboardingInitialized === true;
       runtime.loadError = '';
       const hasSelectionIntent = runtime.selectionPending?.revision === runtime.selectedChainRevision;
       if (!hasSelectionIntent) runtime.selectedChain = startupChain
@@ -160,14 +166,18 @@
   }
 
   function renderSetupRequired() {
-    const onboardingLanguage = Tango.I18n.resolveLanguage(runtime.settings?.language);
+    const onboardingLanguage = Tango.I18n.resolveLanguage(
+      runtime.onboardingLanguage || runtime.settings?.language
+    );
+    const onboardingBalance = runtime.onboardingBalance;
+    runtime.onboardingLanguage = onboardingLanguage;
     app.innerHTML = `<div class="onboarding-page"><section class="onboarding card">
       <div class="brand" style="justify-content:center;padding:0"><span class="dot"></span>TANGO <span class="badge">${t('paper')}</span></div>
       <h1>${t('setup')}</h1><p>${t('onboardingCommonCapital')}</p>
       <p>${t('independentChains')}</p><p>${t('paperOnly')}</p><p>${t('settingsAvailableLater')}</p>
       <label class="field onboarding-field"><span>${t('language')}</span><select class="select" id="onboarding-language" value="${esc(onboardingLanguage)}"><option value="zh-CN" ${onboardingLanguage === 'zh-CN' ? 'selected' : ''}>${t('chinese')}</option><option value="en" ${onboardingLanguage === 'en' ? 'selected' : ''}>${t('english')}</option></select></label>
-      <label class="field onboarding-field"><span>${t('commonCapital')}</span><input class="input custom-balance" id="onboarding-balance" type="number" min="0.01" max="1000000000000000" step="any" value="10"></label>
-      <p class="onboarding-capital-note" id="onboarding-capital-note">${esc(Tango.I18n.t('onboardingCapitalAllocation', onboardingLanguage, { amount: 10 }))}</p>
+      <label class="field onboarding-field"><span>${t('commonCapital')}</span><input class="input custom-balance" id="onboarding-balance" type="number" min="0.01" max="1000000000000000" step="any" value="${esc(onboardingBalance)}"></label>
+      <p class="onboarding-capital-note" id="onboarding-capital-note">${esc(Tango.I18n.t('onboardingCapitalAllocation', onboardingLanguage, { amount: onboardingBalance }))}</p>
       <button class="button primary onboarding-submit" id="complete-onboarding">${t('startPaperTrading')}</button>
       ${runtime.onboardingStatus ? `<p class="onboarding-status">${esc(t(runtime.onboardingStatus))}</p>` : ''}
     </section></div>`;
@@ -177,8 +187,14 @@
       const note = app.querySelector('#onboarding-capital-note');
       if (note) note.textContent = Tango.I18n.t('onboardingCapitalAllocation', language, { amount });
     };
-    app.querySelector('#onboarding-balance')?.addEventListener('input', updateCapitalNote);
-    app.querySelector('#onboarding-language')?.addEventListener('change', updateCapitalNote);
+    app.querySelector('#onboarding-balance')?.addEventListener('input', (event) => {
+      runtime.onboardingBalance = event.target.value;
+      updateCapitalNote();
+    });
+    app.querySelector('#onboarding-language')?.addEventListener('change', (event) => {
+      runtime.onboardingLanguage = event.target.value;
+      updateCapitalNote();
+    });
     app.querySelector('#complete-onboarding')?.addEventListener('click', completeOnboarding);
   }
 
@@ -200,32 +216,58 @@
     ));
   }
 
-  async function completeOnboarding() {
-    const balanceNative = Number(app.querySelector('#onboarding-balance')?.value);
-    const language = app.querySelector('#onboarding-language')?.value;
+  async function runOnboardingCompletion() {
+    const balanceInput = app.querySelector('#onboarding-balance');
+    runtime.onboardingBalance = balanceInput?.value ?? runtime.onboardingBalance;
+    runtime.onboardingLanguage = app.querySelector('#onboarding-language')?.value
+      || runtime.onboardingLanguage;
+    const balanceNative = Number(runtime.onboardingBalance);
+    const language = runtime.onboardingLanguage;
     if (!validCommonCapital(balanceNative)) {
       runtime.onboardingStatus = 'invalidCommonCapital';
       render();
       return;
     }
     runtime.onboardingActive = true;
-    try {
-      await Tango.Store.resetAllWithBalance(balanceNative, language);
-      const persisted = await Tango.Store.getAll();
-      if (!verifiedCommonCapital(persisted, balanceNative)) throw new Error('onboardingVerificationFailed');
+    if (!runtime.onboardingSetupVerified) {
+      let persisted;
+      try {
+        await Tango.Store.resetAllWithBalance(balanceNative, language);
+        persisted = await Tango.Store.getAll();
+        if (!verifiedCommonCapital(persisted, balanceNative)) throw new Error('onboardingVerificationFailed');
+        persisted.settings = await Tango.Store.patchSettings({ onboardingInitialized: true });
+      } catch {
+        runtime.onboardingStatus = 'onboardingVerificationFailed';
+        render();
+        return;
+      }
       runtime.state = persisted.state;
       runtime.settings = persisted.settings;
-      runtime.onboardingStatus = '';
-      const opened = await global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_GMGN' });
-      if (!opened?.ok) throw new Error('openGmgnFailed');
-      runtime.onboardingActive = false;
-      runtime.onboardingComplete = true;
-      global.close();
-      if (!global.closed) render();
-    } catch {
-      runtime.onboardingStatus = 'onboardingVerificationFailed';
-      render();
+      runtime.onboardingSetupVerified = true;
     }
+    let opened;
+    try {
+      opened = await global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_GMGN' });
+    } catch {}
+    if (!opened?.ok) {
+      runtime.onboardingStatus = 'openGmgnFailed';
+      render();
+      return;
+    }
+    runtime.onboardingStatus = '';
+    runtime.onboardingActive = false;
+    runtime.onboardingComplete = true;
+    global.close();
+    if (!global.closed) render();
+  }
+
+  function completeOnboarding() {
+    if (runtime.onboardingCompletion) return runtime.onboardingCompletion;
+    const completion = runOnboardingCompletion().finally(() => {
+      if (runtime.onboardingCompletion === completion) runtime.onboardingCompletion = null;
+    });
+    runtime.onboardingCompletion = completion;
+    return completion;
   }
 
   function renderTab(view) {

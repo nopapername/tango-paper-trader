@@ -38,6 +38,79 @@ function validPosition(overrides = {}) {
   };
 }
 
+test('strict state rejects durable observation provenance later than its owning boundary', () => {
+  const settings = State.normalizeSettings({});
+  for (const field of ['quoteObservedAtOriginal', 'nativePriceObservedAtOriginal']) {
+    const value = State.createInitialState({ now: 1 });
+    value.trades = [validTrade({ [field]: 1_001 })];
+    assert.throws(
+      () => State.normalizeState(value, settings, { strict: true }),
+      /invalidTrade/,
+      field
+    );
+  }
+
+  const positionState = State.createInitialState({ now: 1 });
+  positionState.positions[`eth:${EVM_ADDRESS}`] = validPosition({
+    updatedAt: 1_000,
+    quoteObservedAt: 1_001
+  });
+  assert.throws(
+    () => State.normalizeState(positionState, settings, { strict: true }),
+    /invalidPosition/
+  );
+});
+
+function unknownFallbackHistoryFixture() {
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const token = { chain: 'eth', address: EVM_ADDRESS, symbol: 'FALLBACK' };
+  const fallback = global.Tango.Supply.fallbackValuation({
+    chain: 'eth', launchpad: 'Unknown'
+  });
+  const settings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } }
+  });
+  const quote = {
+    ...fallback,
+    chain: 'eth', address: EVM_ADDRESS,
+    marketCapDivisor: fallback.totalSupply,
+    provisionalSupply: fallback.totalSupply,
+    nativePriceUsd: 2_000,
+    observedAt: 1_000,
+    nativePriceObservedAt: 1_000,
+    source: 'TANGO_FALLBACK',
+    valuationMode: 'MARKET_CAP',
+    priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+    syntheticTokenPrice: true,
+    provisional: true,
+    paperFallback: true
+  };
+  const bought = Engine.executeBuy(
+    initial, { token, quote, amountNative: 1 }, settings, 1_000
+  );
+  return { token, quote, settings, bought };
+}
+
+function launderUnknownFallbackOrigin(state) {
+  const laundered = JSON.parse(JSON.stringify(state));
+  const origin = laundered.trades.find((trade) => (
+    trade.side === 'BUY'
+    && trade.supplySource === 'UNKNOWN_FALLBACK'
+    && trade.provisionalSupplyProvenance === 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1'
+  ));
+  assert.ok(origin);
+  assert.equal(origin.paperFallback, true);
+  assert.equal(origin.provisional, true);
+  assert.equal(origin.syntheticTokenPrice, true);
+  Object.assign(origin, {
+    marketCapUsd: 1_000_000,
+    observedPriceUsd: 0.001,
+    executionPriceUsd: 0.001
+  });
+  return laundered;
+}
+
 function validLegacyTrade(overrides = {}) {
   return {
     id: 'legacy-trade-1', chain: 'sol', tokenAddress: PUMP_ADDRESS, side: 'BUY',
@@ -101,6 +174,360 @@ test('schema v2 preserves provisional supply provenance and calibration audit ev
   const normalized = State.normalizeState(state, State.normalizeSettings({}), { strict: true });
   assert.equal(normalized.positions[`base:${EVM_ADDRESS}`].needsCalibration, true);
   assert.equal(normalized.calibrations[0].reason, 'PRICE_AND_NATIVE');
+});
+
+test('strict state round-trips only a coherent internal unknown fallback supply identity', () => {
+  const state = State.createInitialState({ now: 1 });
+  state.initialized = true;
+  const key = `eth:${EVM_ADDRESS}`;
+  state.positions[key] = {
+    chain: 'eth', tokenAddress: EVM_ADDRESS, symbol: 'FALLBACK', name: 'Fallback',
+    quantity: 625_000_000, costBasisNative: 1, realizedPnlNative: 0,
+    averageEntryPriceUsd: 3_200 / 1_000_000_000,
+    averageEntryMarketCap: 3_200,
+    lastPriceUsd: 3_200 / 1_000_000_000,
+    lastMarketCapUsd: 3_200,
+    lastNativePriceUsd: 2_000,
+    openedAt: 1_000, updatedAt: 1_000, quoteObservedAt: 1_000,
+    valuationMode: 'MARKET_CAP',
+    marketCapDivisor: 1_000_000_000,
+    totalSupply: 1_000_000_000,
+    provisionalSupply: 1_000_000_000,
+    provisionalSupplyProvenance: 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1',
+    supplySource: 'UNKNOWN_FALLBACK',
+    lastPriceProvenance: 'SYNTHETIC_PRICE',
+    averageEntryPriceProvenance: 'SYNTHETIC_PRICE',
+    quoteSource: 'TANGO_FALLBACK',
+    paperFallback: true,
+    provisional: true,
+    syntheticTokenPrice: true,
+    syntheticNativePrice: false,
+    needsCalibration: true,
+    provisionalTokenPrice: true,
+    provisionalNativePrice: false
+  };
+  state.trades = [validTrade({
+    id: 'fallback-entry',
+    quantity: 625_000_000,
+    observedPriceUsd: 3_200 / 1_000_000_000,
+    executionPriceUsd: 3_200 / 1_000_000_000,
+    marketCapUsd: 3_200,
+    valuationMode: 'MARKET_CAP',
+    priceProvenance: 'SYNTHETIC_PRICE',
+    quoteSource: 'TANGO_FALLBACK',
+    paperFallback: true,
+    provisional: true,
+    syntheticTokenPrice: true,
+    syntheticNativePrice: false,
+    totalSupply: 1_000_000_000,
+    marketCapDivisor: 1_000_000_000,
+    provisionalSupply: 1_000_000_000,
+    provisionalSupplyProvenance: 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1',
+    supplySource: 'UNKNOWN_FALLBACK'
+  })];
+
+  const normalized = State.normalizeState(state, State.normalizeSettings({}), { strict: true });
+  assert.equal(normalized.positions[key].supplySource, 'UNKNOWN_FALLBACK');
+  assert.equal(normalized.positions[key].provisionalSupply, 1_000_000_000);
+  assert.deepEqual(
+    State.normalizeState(normalized, State.normalizeSettings({}), { strict: true }),
+    normalized
+  );
+
+  for (const patch of [
+    { totalSupply: 42 },
+    { marketCapDivisor: 42 },
+    { provisionalSupply: 42 },
+    { provisionalSupplyProvenance: '' }
+  ]) {
+    const malformed = structuredClone(state);
+    Object.assign(malformed.positions[key], patch);
+    assert.throws(
+      () => State.normalizeState(malformed, State.normalizeSettings({}), { strict: true }),
+      /invalidPosition/
+    );
+  }
+
+  const nonStrictMalformed = structuredClone(state);
+  nonStrictMalformed.positions[key].provisionalSupply = 42;
+  const sanitized = State.normalizeState(
+    nonStrictMalformed, State.normalizeSettings({}), { strict: false }
+  );
+  assert.notEqual(sanitized.positions[key].supplySource, 'UNKNOWN_FALLBACK');
+});
+
+test('strict state accepts only a canonical unknown fallback card-market-cap origin', () => {
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const settings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } }
+  });
+  const fallback = global.Tango.Supply.fallbackValuation({
+    chain: 'eth', launchpad: 'Unknown'
+  });
+  const bought = Engine.executeBuy(initial, {
+    token: { chain: 'eth', address: EVM_ADDRESS, symbol: 'CARD' },
+    quote: {
+      ...fallback,
+      chain: 'eth', address: EVM_ADDRESS,
+      marketCapUsd: 5_000,
+      priceUsd: 5_000 / 1_000_000_000,
+      marketCapDivisor: 1_000_000_000,
+      provisionalSupply: 1_000_000_000,
+      nativePriceUsd: 2_000,
+      observedAt: 1_000,
+      nativePriceObservedAt: 1_000,
+      originalObservedAt: 900,
+      source: 'TANGO_FALLBACK_CARD_MARKET_CAP',
+      valuationMode: 'MARKET_CAP',
+      valuationSource: 'CARD_MARKET_CAP_FALLBACK_SUPPLY',
+      priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+      syntheticTokenPrice: true,
+      provisional: true,
+      paperFallback: true
+    },
+    amountNative: 1
+  }, settings, 1_000);
+  const clean = JSON.parse(JSON.stringify(bought.state));
+  const origin = clean.trades.find((trade) => trade.side === 'BUY');
+
+  assert.equal(origin.quoteSource, 'TANGO_FALLBACK_CARD_MARKET_CAP');
+  assert.equal(origin.quoteObservedAtOriginal, 900);
+  assert.doesNotThrow(() => State.normalizeState(clean, settings, { strict: true }));
+
+  for (const [label, patch] of [
+    ['forged source', { quoteSource: 'TANGO_FALLBACK' }],
+    ['missing source', { quoteSource: '' }],
+    ['zero original time', { quoteObservedAtOriginal: 0 }],
+    ['future original time', { quoteObservedAtOriginal: 1_001 }],
+    ['wrong ratio', { marketCapUsd: 5_100 }],
+    ['non-positive market cap', { marketCapUsd: 0 }],
+    ['non-positive price', { observedPriceUsd: 0 }]
+  ]) {
+    const forged = structuredClone(clean);
+    Object.assign(forged.trades.find((trade) => trade.side === 'BUY'), patch);
+    assert.throws(
+      () => State.normalizeState(forged, settings, { strict: true }),
+      /invalidTrade/,
+      label
+    );
+  }
+});
+
+test('strict state rejects a forged unknown fallback identity without canonical entry provenance', () => {
+  const state = State.createInitialState({ now: 1 });
+  state.initialized = true;
+  const key = `eth:${EVM_ADDRESS}`;
+  state.positions[key] = validPosition({
+    valuationMode: 'MARKET_CAP',
+    totalSupply: 1_000_000_000,
+    marketCapDivisor: 1_000_000_000,
+    provisionalSupply: 1_000_000_000,
+    supplySource: 'UNKNOWN_FALLBACK',
+    averageEntryPriceUsd: 3_200 / 1_000_000_000,
+    averageEntryMarketCap: 3_200,
+    lastPriceUsd: 3_200 / 1_000_000_000,
+    lastMarketCapUsd: 3_200,
+    quoteSource: 'TANGO_FALLBACK',
+    paperFallback: true,
+    provisional: true,
+    syntheticTokenPrice: true,
+    needsCalibration: true,
+    provisionalTokenPrice: true
+  });
+  assert.throws(
+    () => State.normalizeState(state, State.normalizeSettings({}), { strict: true }),
+    /invalidPosition/
+  );
+});
+
+test('strict state rejects laundering the canonical fallback entry into an arbitrary one-billion ratio', () => {
+  const initial = State.createInitialState({ now: 1 });
+  initial.initialized = true;
+  const fallback = global.Tango.Supply.fallbackValuation({
+    chain: 'eth', launchpad: 'Unknown'
+  });
+  const settings = State.normalizeSettings({
+    slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } }
+  });
+  const bought = Engine.executeBuy(initial, {
+    token: { chain: 'eth', address: EVM_ADDRESS, symbol: 'FALLBACK' },
+    quote: {
+      ...fallback,
+      chain: 'eth', address: EVM_ADDRESS,
+      marketCapDivisor: fallback.totalSupply,
+      provisionalSupply: fallback.totalSupply,
+      nativePriceUsd: 2_000,
+      observedAt: 1_000,
+      nativePriceObservedAt: 1_000,
+      source: 'TANGO_FALLBACK',
+      valuationMode: 'MARKET_CAP',
+      priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+      syntheticTokenPrice: true,
+      provisional: true,
+      paperFallback: true
+    },
+    amountNative: 1
+  }, settings, 1_000);
+  const laundered = JSON.parse(JSON.stringify(bought.state));
+  const key = `eth:${EVM_ADDRESS}`;
+  Object.assign(laundered.positions[key], {
+    averageEntryMarketCap: 1_000_000,
+    averageEntryPriceUsd: 0.001,
+    lastMarketCapUsd: 1_000_000,
+    lastPriceUsd: 0.001
+  });
+  const entry = laundered.trades.find((trade) => trade.side === 'BUY');
+  Object.assign(entry, {
+    marketCapUsd: 1_000_000,
+    observedPriceUsd: 0.001,
+    executionPriceUsd: 0.001
+  });
+
+  assert.equal(
+    laundered.positions[key].provisionalSupplyProvenance,
+    'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1'
+  );
+  assert.equal(
+    entry.provisionalSupplyProvenance,
+    'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1'
+  );
+  assert.throws(
+    () => State.normalizeState(laundered, settings, { strict: true }),
+    /invalidTrade/
+  );
+});
+
+test('strict state rejects laundering canonical unknown fallback origin after exact supply correction', () => {
+  const { token, settings, bought } = unknownFallbackHistoryFixture();
+  const corrected = Engine.updatePositionQuote(bought.state, token, {
+    chain: 'eth', address: EVM_ADDRESS,
+    priceUsd: 3_200 / 100_000_000_000,
+    marketCapUsd: 3_200,
+    totalSupply: 100_000_000_000,
+    marketCapDivisor: 100_000_000_000,
+    supplySource: 'GMGN_EXACT',
+    nativePriceUsd: 2_000,
+    observedAt: 2_000,
+    priceObservedAt: 2_000,
+    marketCapObservedAt: 2_000,
+    nativePriceObservedAt: 2_000,
+    source: 'GMGN_NETWORK',
+    valuationMode: 'MARKET_CAP',
+    priceProvenance: 'MARKET_CAP_DERIVED',
+    syntheticTokenPrice: false,
+    provisional: false,
+    paperFallback: false
+  }, 2_000);
+  const clean = JSON.parse(JSON.stringify(corrected));
+  const normalized = State.normalizeState(clean, settings, { strict: true });
+
+  assert.equal(normalized.positions[`eth:${EVM_ADDRESS}`].supplySource, 'GMGN_EXACT');
+  assert.deepEqual(
+    State.normalizeState(normalized, settings, { strict: true }),
+    normalized
+  );
+  assert.throws(
+    () => State.normalizeState(
+      launderUnknownFallbackOrigin(corrected), settings, { strict: true }
+    ),
+    /invalidTrade/
+  );
+});
+
+test('strict state rejects laundering canonical unknown fallback origin after full close', () => {
+  const { token, quote, settings, bought } = unknownFallbackHistoryFixture();
+  const closed = Engine.executeSell(bought.state, {
+    token,
+    quote: {
+      ...quote,
+      observedAt: 2_000,
+      nativePriceObservedAt: 2_000
+    },
+    percent: 100
+  }, settings, 2_000).state;
+  const clean = JSON.parse(JSON.stringify(closed));
+  const normalized = State.normalizeState(clean, settings, { strict: true });
+
+  assert.equal(normalized.positions[`eth:${EVM_ADDRESS}`], undefined);
+  assert.deepEqual(
+    State.normalizeState(normalized, settings, { strict: true }),
+    normalized
+  );
+  assert.throws(
+    () => State.normalizeState(
+      launderUnknownFallbackOrigin(closed), settings, { strict: true }
+    ),
+    /invalidTrade/
+  );
+});
+
+test('strict fallback history allows later factual PRICE buys and sells after the canonical origin', () => {
+  const { token, settings, bought } = unknownFallbackHistoryFixture();
+  const factualPrice = {
+    chain: 'eth', address: EVM_ADDRESS,
+    priceUsd: 3_200 / 1_000_000_000 * 2,
+    nativePriceUsd: 2_000,
+    observedAt: 2_000,
+    priceObservedAt: 2_000,
+    nativePriceObservedAt: 2_000,
+    source: 'GMGN_NETWORK',
+    valuationMode: 'PRICE',
+    priceProvenance: 'OBSERVED_PRICE',
+    syntheticTokenPrice: false,
+    provisional: false,
+    paperFallback: false
+  };
+  const sold = Engine.executeSell(bought.state, {
+    token,
+    quote: {
+      ...factualPrice,
+      observedAt: 3_000,
+      priceObservedAt: 3_000,
+      nativePriceObservedAt: 3_000
+    },
+    percent: 25
+  }, settings, 3_000);
+  const origin = bought.state.trades.find((trade) => trade.side === 'BUY');
+  const factualBuy = {
+    ...structuredClone(origin),
+    id: 'later-factual-price-buy',
+    observedPriceUsd: factualPrice.priceUsd,
+    executionPriceUsd: factualPrice.priceUsd,
+    marketCapUsd: 0,
+    valuationMode: 'PRICE',
+    priceProvenance: 'OBSERVED_PRICE',
+    quoteSource: 'GMGN_NETWORK',
+    paperFallback: false,
+    provisional: false,
+    syntheticTokenPrice: false,
+    quoteObservedAtOriginal: 2_000,
+    nativePriceObservedAtOriginal: 2_000,
+    executedAt: 2_000
+  };
+  const clean = JSON.parse(JSON.stringify({
+    ...sold.state,
+    trades: [sold.trade, factualBuy, origin]
+  }));
+  const normalized = State.normalizeState(clean, settings, { strict: true });
+  const factualTrades = normalized.trades.filter((trade) => trade.quoteSource === 'GMGN_NETWORK');
+
+  assert.deepEqual(factualTrades.map((trade) => trade.side), ['SELL', 'BUY']);
+  assert.ok(factualTrades.every((trade) => trade.valuationMode === 'PRICE'));
+  assert.ok(factualTrades.every((trade) => trade.marketCapUsd === 0));
+  assert.deepEqual(
+    State.normalizeState(normalized, settings, { strict: true }),
+    normalized
+  );
+});
+
+test('settings normalize a durable onboarding initialization marker as a strict boolean', () => {
+  assert.equal(State.normalizeSettings({}).onboardingInitialized, false);
+  assert.equal(State.normalizeSettings({ onboardingInitialized: true }).onboardingInitialized, true);
+  assert.throws(
+    () => State.normalizeSettings({ onboardingInitialized: 'true' }, { strict: true }),
+    /invalidSettings/
+  );
 });
 
 test('trusted Base market-cap fills survive strict state roundtrip', () => {

@@ -48,7 +48,7 @@ function mergeSettingsPatch(settings, patch) {
 
 async function loadPopup({
   failFirstGetAll = false, failAction = '', initialized = true,
-  accountBalances = {}, settingBalances = {}, confirmResult = true
+  accountBalances = {}, settingBalances = {}, confirmResult = true, activeTabUrl = ''
 } = {}) {
   const elements = new Map();
   let document;
@@ -93,7 +93,7 @@ async function loadPopup({
   const storageListeners = [];
   const calls = {
     saves: [], fullSaves: [], initialize: 0,
-    resetChain: 0, resetChainArgs: [], resetAll: 0, resetAllWithBalance: []
+    resetChain: 0, resetChainArgs: [], resetAll: 0, resetAllWithBalance: [], tabQueries: []
   };
   const Tango = {
     Chains,
@@ -191,7 +191,13 @@ async function loadPopup({
         openOptionsPage() {}
       },
       storage: { onChanged: { addListener(listener) { storageListeners.push(listener); }, removeListener() {} } },
-      tabs: { create({ url }) { openedTabs.push(url); } }
+      tabs: {
+        create({ url }) { openedTabs.push(url); },
+        async query(query) {
+          calls.tabQueries.push(query);
+          return activeTabUrl ? [{ url: activeTabUrl }] : [];
+        }
+      }
     }
   };
   const startup = vm.runInNewContext(popupSource, context, { filename: 'src/popup/popup.js' });
@@ -388,6 +394,29 @@ test('Popup master switch follows an external shortcut storage change while open
   await popup.applyExternalSettings({ enabled: false });
   assert.equal(popup.element('#master-enabled').checked, false);
   assert.match(popup.app.innerHTML, />OFF</);
+});
+
+test('Popup uses the active GMGN tab chain until an explicit selector choice persists', async () => {
+  const popup = await loadPopup({ activeTabUrl: 'https://gmgn.ai/?chain=robinhood' });
+
+  assert.equal(popup.persistedSettings.selectedChain, 'eth');
+  assert.equal(popup.element('#popup-chain').value, 'robinhood');
+  assert.deepEqual(popup.calls.saves, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(popup.calls.tabQueries)), [{ active: true, currentWindow: true }]);
+
+  await popup.applyExternalSettings({ enabled: false });
+  assert.equal(popup.element('#popup-chain').value, 'robinhood');
+
+  const selector = popup.element('#popup-chain');
+  selector.value = 'bsc';
+  const changing = selector.emit('change');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(JSON.stringify(popup.calls.saves.map(({ patch }) => patch)), JSON.stringify([{ selectedChain: 'bsc' }]));
+  popup.calls.saves[0].gate.resolve();
+  await changing;
+
+  assert.equal(popup.persistedSettings.selectedChain, 'bsc');
+  assert.equal(popup.element('#popup-chain').value, 'bsc');
 });
 
 test('Popup rejected selection does not block a later common-capital reset', async () => {

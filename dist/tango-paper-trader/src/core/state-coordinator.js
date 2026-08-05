@@ -1,5 +1,153 @@
 (function initStateCoordinator(global) {
   const Tango = global.Tango = global.Tango || {};
+  const TRUSTED_METADATA_SOURCES = new Set(['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK']);
+
+  function canonicalizeFallbackOrder(order, executionNow) {
+    const quote = order?.quote;
+    const token = order?.token;
+    const chain = Tango.Chains.get(token?.chain);
+    const declaredSupply = String(quote?.supplySource || '');
+    const fallbackIntent = quote?.paperFallback === true
+      && quote?.syntheticTokenPrice === true
+      && (String(quote?.source || '').toUpperCase() === 'TANGO_FALLBACK'
+        || String(quote?.priceProvenance || '').toUpperCase().startsWith('FALLBACK_'))
+      && (!declaredSupply || declaredSupply === 'UNKNOWN_FALLBACK');
+    const quoteSource = String(quote?.source || '').toUpperCase();
+    const quotePriceSource = String(quote?.priceSource || quote?.source || '').toUpperCase();
+    const nativeOnlyProvisional = quote?.provisional === true
+      && quote?.syntheticTokenPrice !== true
+      && quote?.syntheticNativePrice === true
+      && Number(quote?.nativePriceUsd) === 1
+      && Number(quote?.nativeOriginalObservedAt || 0) === 0;
+    const factualPriceFallbackShape = quote?.paperFallback === true
+      && (quote?.provisional !== true || nativeOnlyProvisional)
+      && quote?.syntheticTokenPrice !== true
+      && quote?.valuationMode === 'PRICE'
+      && quote?.valuationSource === 'OBSERVED_PRICE'
+      && quote?.priceProvenance === 'OBSERVED_PRICE'
+      && declaredSupply === 'UNKNOWN_FALLBACK'
+      && ['GMGN', 'GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'].includes(quoteSource)
+      && quotePriceSource === quoteSource
+      && String(quote?.marketCapSource || '').toUpperCase() === 'TANGO_FALLBACK'
+      && Number(quote?.marketCapObservedAt || 0) === 0
+      && String(quote?.marketCapObservationId || '') === ''
+      && Number(quote?.marketCapUsd) === Number(Tango.Supply?.UNKNOWN_INITIAL_MARKET_CAP_USD || 3_200)
+      && Number(quote?.totalSupply) === Number(Tango.Supply?.UNKNOWN_TOTAL_SUPPLY || 1_000_000_000)
+      && Number(quote?.marketCapDivisor) === Number(Tango.Supply?.UNKNOWN_TOTAL_SUPPLY || 1_000_000_000)
+      && Number(quote?.provisionalSupply) === Number(Tango.Supply?.UNKNOWN_TOTAL_SUPPLY || 1_000_000_000)
+      && Number.isFinite(Number(quote?.priceUsd)) && Number(quote.priceUsd) > 0;
+    const candidatePriceObservedAt = Number(
+      quote?.priceObservedAt ?? quote?.originalObservedAt ?? quote?.observedAt
+    );
+    const coherentFactualPriceFallback = factualPriceFallbackShape
+      && Number.isSafeInteger(candidatePriceObservedAt)
+      && candidatePriceObservedAt > 0
+      && candidatePriceObservedAt <= executionNow
+      && executionNow - candidatePriceObservedAt <= Number(Tango.QUOTE_STALE_MS || 15_000);
+    if (!chain || (!fallbackIntent && !factualPriceFallbackShape)) return order;
+
+    const trustedMetadata = token?.metadataVerified === true
+      && TRUSTED_METADATA_SOURCES.has(String(token?.metadataSource || '').toUpperCase());
+    const launchpad = trustedMetadata ? String(token?.launchpad || '') : '';
+    const launchMode = trustedMetadata ? String(token?.launchMode || '') : '';
+    const fallback = Tango.Supply.fallbackValuation({
+      chain: chain.id, launchpad, launchMode
+    });
+    const unknownFallback = fallback.supplySource === 'UNKNOWN_FALLBACK';
+    if (coherentFactualPriceFallback && unknownFallback) {
+      const canonicalQuote = {
+        ...quote,
+        ...fallback,
+        chain: chain.id,
+        address: token?.address,
+        launchpad,
+        launchMode,
+        totalSupply: fallback.totalSupply,
+        marketCapDivisor: fallback.totalSupply,
+        provisionalSupply: fallback.totalSupply,
+        marketCapUsd: fallback.marketCapUsd,
+        priceUsd: Number(quote.priceUsd),
+        marketCapSource: 'TANGO_FALLBACK',
+        marketCapObservedAt: 0,
+        marketCapObservationId: '',
+        observedAt: executionNow,
+        priceObservedAt: candidatePriceObservedAt,
+        originalObservedAt: candidatePriceObservedAt,
+        source: quoteSource,
+        priceSource: quotePriceSource,
+        valuationMode: 'PRICE',
+        valuationSource: 'OBSERVED_PRICE',
+        priceProvenance: 'OBSERVED_PRICE',
+        syntheticTokenPrice: false,
+        provisional: nativeOnlyProvisional,
+        paperFallback: true
+      };
+      delete canonicalQuote.provisionalSupplyProvenance;
+      return { ...order, quote: canonicalQuote };
+    }
+    const candidateMarketCapUsd = Number(quote?.marketCapUsd);
+    const candidatePriceUsd = Number(quote?.priceUsd);
+    const candidateMarketCapSource = String(quote?.marketCapSource || '').toUpperCase();
+    const candidateMarketCapObservedAt = Number(
+      quote?.marketCapObservedAt || quote?.originalObservedAt || 0
+    );
+    const coherentObservedMarketCap = quote?.valuationSource === 'CARD_MARKET_CAP_FALLBACK_SUPPLY'
+      && quote?.valuationMode === 'MARKET_CAP'
+      && String(quote?.source || '').toUpperCase() === 'TANGO_FALLBACK'
+      && quote?.provisionalSupplyProvenance == null
+      && ['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'].includes(candidateMarketCapSource)
+      && Number.isSafeInteger(candidateMarketCapObservedAt)
+      && candidateMarketCapObservedAt > 0
+      && candidateMarketCapObservedAt <= executionNow
+      && executionNow - candidateMarketCapObservedAt <= Number(Tango.QUOTE_STALE_MS || 15_000)
+      && Number.isFinite(candidateMarketCapUsd) && candidateMarketCapUsd > 0
+      && Number(quote?.totalSupply) === fallback.totalSupply
+      && Number(quote?.marketCapDivisor) === fallback.totalSupply
+      && Number(quote?.provisionalSupply) === fallback.totalSupply
+      && Number.isFinite(candidatePriceUsd) && candidatePriceUsd > 0
+      && Math.abs(candidatePriceUsd - candidateMarketCapUsd / fallback.totalSupply)
+        <= Math.max(Number.EPSILON, candidatePriceUsd * 1e-9);
+    const executionMarketCapUsd = coherentObservedMarketCap
+      ? candidateMarketCapUsd : fallback.marketCapUsd;
+    const canonicalQuote = {
+      ...quote,
+      ...fallback,
+      chain: chain.id,
+      address: token?.address,
+      launchpad,
+      launchMode,
+      totalSupply: fallback.totalSupply,
+      marketCapDivisor: fallback.totalSupply,
+      provisionalSupply: unknownFallback ? fallback.totalSupply : 0,
+      marketCapUsd: executionMarketCapUsd,
+      priceUsd: executionMarketCapUsd / fallback.totalSupply,
+      observedAt: executionNow,
+      priceObservedAt: coherentObservedMarketCap
+        ? candidateMarketCapObservedAt : executionNow,
+      priceSource: coherentObservedMarketCap
+        ? candidateMarketCapSource : 'TANGO_FALLBACK',
+      priceObservationId: coherentObservedMarketCap
+        ? String(quote?.priceObservationId || '') : '',
+      marketCapSource: coherentObservedMarketCap
+        ? candidateMarketCapSource : 'TANGO_FALLBACK',
+      marketCapObservedAt: coherentObservedMarketCap ? candidateMarketCapObservedAt : 0,
+      marketCapObservationId: coherentObservedMarketCap
+        ? String(quote?.marketCapObservationId || '') : '',
+      observationId: coherentObservedMarketCap ? String(quote?.observationId || '') : '',
+      source: coherentObservedMarketCap
+        ? 'TANGO_FALLBACK_CARD_MARKET_CAP' : 'TANGO_FALLBACK',
+      valuationMode: 'MARKET_CAP',
+      valuationSource: coherentObservedMarketCap
+        ? 'CARD_MARKET_CAP_FALLBACK_SUPPLY' : fallback.valuationSource,
+      originalObservedAt: coherentObservedMarketCap ? candidateMarketCapObservedAt : 0,
+      priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+      syntheticTokenPrice: true,
+      provisional: true,
+      paperFallback: true
+    };
+    delete canonicalQuote.provisionalSupplyProvenance;
+    return { ...order, quote: canonicalQuote };
+  }
 
   function create({ readRaw, writeRaw, now = () => Date.now() } = {}) {
     if (typeof readRaw !== 'function' || typeof writeRaw !== 'function') {
@@ -154,11 +302,24 @@
         }
         let result;
         if (command?.type === 'EXECUTE_BUY') {
-          result = Tango.Engine.executeBuy(state, command.order, settings, now());
+          const executionNow = now();
+          result = Tango.Engine.executeBuy(
+            state, canonicalizeFallbackOrder(command.order, executionNow), settings, executionNow
+          );
         } else if (command?.type === 'EXECUTE_SELL') {
-          result = Tango.Engine.executeSell(state, command.order, settings, now());
+          const executionNow = now();
+          result = Tango.Engine.executeSell(
+            state, canonicalizeFallbackOrder(command.order, executionNow), settings, executionNow
+          );
         } else if (command?.type === 'EXECUTE_CLOSE_ALL') {
-          result = Tango.Engine.executeCloseAll(state, command.chain, command.orders, settings, now());
+          const executionNow = now();
+          result = Tango.Engine.executeCloseAll(
+            state,
+            command.chain,
+            (command.orders || []).map((order) => canonicalizeFallbackOrder(order, executionNow)),
+            settings,
+            executionNow
+          );
         } else if (command?.type === 'UPDATE_POSITION_QUOTE') {
           result = { state: Tango.Engine.updatePositionQuote(state, command.token, command.quote, now()) };
         } else if (command?.type === 'UPDATE_POSITION_METADATA') {

@@ -1,8 +1,10 @@
 (function initTangoChartBridge() {
   if (window === window.top || window.__tangoPaperChartBridge) return;
   try {
-    if (window.frameElement?.title && window.frameElement.title !== 'Financial Chart') return;
-  } catch {}
+    const frame = window.frameElement;
+    const trustedContainer = frame?.closest?.('[data-sentry-component="TradingView"]');
+    if (frame?.title && !['Financial Chart', 'TradingView'].includes(frame.title) && !trustedContainer) return;
+  } catch { return; }
   window.__tangoPaperChartBridge = true;
 
   const SUBSCRIPT = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
@@ -25,6 +27,7 @@
   let renderedSignature = '';
   const hiddenMarkerIds = new Set();
   const markerPositions = new Map();
+  const markerEconomicCoordinates = new Map();
 
   function parseNumber(text) {
     const source = String(text || '').trim();
@@ -65,7 +68,8 @@
     if (!(clientX > innerWidth - 180) || clientY < 35 || clientY > innerHeight - 55) return;
     const id = canvasId(canvas);
     const clearedAt = canvasClearedAt.get(canvas) || 0;
-    let records = labelsByCanvas.get(id) || new Map();
+    const entry = labelsByCanvas.get(id);
+    let records = entry?.records || new Map();
     if (clearedAt && canvasConsumedClearAt.get(canvas) !== clearedAt) {
       records = new Map();
       canvasConsumedClearAt.set(canvas, clearedAt);
@@ -78,7 +82,48 @@
       const oldest = [...records.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt).slice(0, records.size - 100);
       oldest.forEach(([key]) => records.delete(key));
     }
-    labelsByCanvas.set(id, records);
+    labelsByCanvas.set(id, { canvas, records });
+  }
+
+  function clearsAxisSnapshot(context, x, y, width, height) {
+    const canvas = context.canvas;
+    const clearX = Number(x);
+    const clearY = Number(y);
+    const clearWidth = Number(width);
+    const clearHeight = Number(height);
+    const clearsMostCanvas = clearWidth * clearHeight > canvas.width * canvas.height * 0.45;
+    if (clearsMostCanvas) return true;
+    const canvasWidth = Number(canvas.width);
+    const canvasHeight = Number(canvas.height);
+    let transform;
+    try {
+      const { a, b, c, d, e, f } = context.getTransform();
+      transform = { a, b, c, d, e, f };
+    } catch { return false; }
+    const hasFiniteBounds = [
+      clearX, clearY, clearWidth, clearHeight, canvasWidth, canvasHeight,
+      transform.a, transform.b, transform.c, transform.d, transform.e, transform.f
+    ].every(Number.isFinite);
+    if (!hasFiniteBounds || transform.b !== 0 || transform.c !== 0) return false;
+    const transformedX1 = transform.a * clearX + transform.e;
+    const transformedX2 = transform.a * (clearX + clearWidth) + transform.e;
+    const transformedY1 = transform.d * clearY + transform.f;
+    const transformedY2 = transform.d * (clearY + clearHeight) + transform.f;
+    if (![transformedX1, transformedX2, transformedY1, transformedY2].every(Number.isFinite)) return false;
+    const clearLeft = Math.min(transformedX1, transformedX2);
+    const clearRight = Math.max(transformedX1, transformedX2);
+    const clearTop = Math.min(transformedY1, transformedY2);
+    const clearBottom = Math.max(transformedY1, transformedY2);
+    const clippedVerticalCoverage = Math.max(0, Math.min(clearBottom, canvasHeight) - Math.max(clearTop, 0));
+    const clearsRightAxis = canvasWidth > 0
+      && canvasHeight > 0
+      && clearWidth > 0
+      && clearHeight > 0
+      && clearLeft < canvasWidth
+      && clearRight > 0
+      && clippedVerticalCoverage >= canvasHeight * 0.7
+      && clearRight >= canvasWidth * 0.8;
+    return clearsRightAxis;
   }
 
   const proto = window.CanvasRenderingContext2D?.prototype;
@@ -95,8 +140,16 @@
       return originalStrokeText.call(this, text, x, y, ...rest);
     };
     proto.clearRect = function tangoClearRect(x, y, width, height) {
-      if (this.canvas && Number(width) * Number(height) > this.canvas.width * this.canvas.height * 0.45) {
-        canvasClearedAt.set(this.canvas, ++clearSequence);
+      if (this.canvas && clearsAxisSnapshot(this, x, y, width, height)) {
+        const clearedAt = ++clearSequence;
+        canvasClearedAt.set(this.canvas, clearedAt);
+        canvasConsumedClearAt.set(this.canvas, clearedAt);
+        const id = canvasIds.get(this.canvas);
+        if (id) labelsByCanvas.delete(id);
+        if (id && stableScale?.points?.some((point) => point.id === id)) {
+          stableScale = null;
+          stableSignature = '';
+        }
       }
       return originalClearRect.call(this, x, y, width, height);
     };
@@ -146,18 +199,34 @@
     return inliers.length >= 3 ? linearFit(inliers, logarithmic) : null;
   }
 
-  function selectScale() {
+  function discardDisconnectedCanvasRecords() {
+    labelsByCanvas.forEach((entry, id) => {
+      if (entry.canvas?.isConnected) return;
+      labelsByCanvas.delete(id);
+      if (stableScale?.points?.some((point) => point.id === id)) {
+        stableScale = null;
+        stableSignature = '';
+      }
+    });
+  }
+
+  function selectScale(visibleMarkers = markerState?.markers || []) {
     if (!markerState) return null;
     const now = Date.now();
-    const groups = [...labelsByCanvas.values()].map((records) => [...records.values()])
-      .map((points) => {
-        const deduped = new Map();
+    const groups = [...labelsByCanvas.values()].map(({ records }) => [...records.values()])
+      .flatMap((points) => {
         const latestGeneration = Math.max(0, ...points.map((point) => Number(point.generation || 0)));
-        points.filter((point) => Number(point.sequence || 0) > markerAxisSequenceFloor
-          && now - point.updatedAt <= AXIS_LABEL_FRESH_MS
-          && Number(point.generation || 0) === latestGeneration)
-          .forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
-        return [...deduped.values()].sort((a, b) => a.y - b.y);
+        const afterBoundary = points.filter((point) => Number(point.sequence || 0) > markerAxisSequenceFloor);
+        const eligibleGroups = [
+          afterBoundary.filter((point) => now - point.updatedAt <= AXIS_LABEL_FRESH_MS
+            || Number(point.generation || 0) === latestGeneration),
+          afterBoundary.filter((point) => now - point.updatedAt <= AXIS_LABEL_FRESH_MS)
+        ];
+        return eligibleGroups.map((eligible) => {
+          const deduped = new Map();
+          eligible.forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
+          return [...deduped.values()].sort((a, b) => a.y - b.y);
+        });
       }).filter((points) => points.length >= 3 && new Set(points.map((point) => point.value)).size >= 3)
       .map((points) => {
         const linear = robustFit(points, false);
@@ -168,10 +237,22 @@
         return { points, fit, tickSpacing };
       }).filter((group) => group.fit);
     const modes = [];
-    if (Number(markerState.currentPrice) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(markerState.currentPrice) });
-    if (Number(markerState.currentMarketCap) > 0) {
-      [1, 1e3, 1e6, 1e9].forEach((factor) => modes.push({ type: 'MARKET_CAP', factor, current: Number(markerState.currentMarketCap) / factor }));
-    }
+    const addPriceMode = (value) => {
+      if (Number(value) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(value) });
+    };
+    const addMarketCapModes = (value) => {
+      if (Number(value) > 0) {
+        [1, 1e3, 1e6, 1e9].forEach((factor) => modes.push({
+          type: 'MARKET_CAP', factor, current: Number(value) / factor
+        }));
+      }
+    };
+    addPriceMode(markerState.currentPrice);
+    addMarketCapModes(markerState.currentMarketCap);
+    visibleMarkers.forEach((marker) => {
+      addPriceMode(marker.price);
+      addMarketCapModes(marker.marketCap);
+    });
     const candidates = [];
     groups.forEach(({ points, fit }) => modes.forEach((mode) => {
       const nearest = Math.min(...points.map((point) => Math.abs(Math.log(point.value / mode.current))));
@@ -180,7 +261,8 @@
       candidates.push({ ...mode, points, fit, score });
     }));
     const best = candidates.sort((a, b) => a.score - b.score)[0];
-    if (!best || best.score >= 1.6) {
+    if (!best) return stableScale;
+    if (best.score >= 1.6) {
       stableScale = null;
       stableSignature = '';
       return null;
@@ -219,14 +301,23 @@
   }
 
   function renderMarkers() {
+    discardDisconnectedCanvasRecords();
     const root = ensureOverlay();
-    const visibleMarkers = (markerState?.markers || []).filter((marker) => !hiddenMarkerIds.has(marker.id));
+    const markers = markerState?.markers || [];
+    const markerIds = new Set(markers.map((marker) => marker.id));
+    markerPositions.forEach((_, id) => {
+      if (!markerIds.has(id)) markerPositions.delete(id);
+    });
+    markerEconomicCoordinates.forEach((_, id) => {
+      if (!markerIds.has(id)) markerEconomicCoordinates.delete(id);
+    });
+    const visibleMarkers = markers.filter((marker) => !hiddenMarkerIds.has(marker.id));
     if (!visibleMarkers.length) {
       if (root.childElementCount) root.replaceChildren();
       renderedSignature = '';
       return;
     }
-    const scale = selectScale();
+    const scale = selectScale(visibleMarkers);
     if (!scale) {
       if (root.childElementCount) root.replaceChildren();
       renderedSignature = '';
@@ -248,8 +339,11 @@
       const targetY = scale.fit.slope * fitX + scale.fit.intercept;
       if (!Number.isFinite(targetY) || targetY < 35 || targetY > innerHeight - 55) return;
       const previousY = markerPositions.get(marker.id);
-      const y = Number.isFinite(previousY) && Math.abs(previousY - targetY) < 3 ? previousY : targetY;
+      const economicCoordinate = `${scale.type}:${scale.factor}:${rawValue}`;
+      const sameEconomicCoordinate = markerEconomicCoordinates.get(marker.id) === economicCoordinate;
+      const y = sameEconomicCoordinate && Number.isFinite(previousY) && Math.abs(previousY - targetY) < 3 ? previousY : targetY;
       markerPositions.set(marker.id, y);
+      markerEconomicCoordinates.set(marker.id, economicCoordinate);
       const line = document.createElement('div');
       const color = marker.side === 'SELL' ? '#ff6673' : '#42e797';
       Object.assign(line.style, {
@@ -287,12 +381,140 @@
     renderedSignature = nextSignature;
   }
 
+  const supportedTokenChains = new Set(['sol', 'eth', 'bsc', 'base', 'robinhood', 'xlayer']);
+  const evmTokenChains = new Set(['eth', 'bsc', 'base', 'robinhood', 'xlayer']);
+  const base58Alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+  function decodedBase58Length(value) {
+    const bytes = [0];
+    for (const character of value) {
+      let carry = base58Alphabet.indexOf(character);
+      if (carry < 0) return -1;
+      for (let index = 0; index < bytes.length; index += 1) {
+        carry += bytes[index] * 58;
+        bytes[index] = carry & 0xff;
+        carry >>= 8;
+      }
+      while (carry > 0) {
+        bytes.push(carry & 0xff);
+        carry >>= 8;
+      }
+    }
+    let leadingZeroBytes = 0;
+    while (value[leadingZeroBytes] === '1') leadingZeroBytes += 1;
+    const significantBytes = bytes.length === 1 && bytes[0] === 0 ? 0 : bytes.length;
+    return leadingZeroBytes + significantBytes;
+  }
+
+  function normalizedTokenIdentity(chainValue, addressValue) {
+    const chain = String(chainValue || '').trim().toLowerCase();
+    const address = String(addressValue || '').trim();
+    if (!supportedTokenChains.has(chain) || !address) return null;
+    if (evmTokenChains.has(chain)) {
+      return /^0x[a-fA-F0-9]{40}$/.test(address)
+        ? { chain, address: address.toLowerCase() }
+        : null;
+    }
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)
+      && decodedBase58Length(address) === 32
+      ? { chain, address }
+      : null;
+  }
+
+  function validMarker(marker) {
+    if (!marker || typeof marker !== 'object' || Array.isArray(marker)) return false;
+    const validText = (value) => typeof value === 'string' && value.trim().length > 0;
+    const validCoordinate = (value) => typeof value === 'number'
+      && Number.isFinite(value) && value >= 0;
+    return validText(marker.id)
+      && ['BUY', 'SELL'].includes(marker.side)
+      && validCoordinate(marker.marketCap)
+      && validCoordinate(marker.price)
+      && (marker.marketCap > 0 || marker.price > 0)
+      && validText(marker.label)
+      && (!Object.prototype.hasOwnProperty.call(marker, 'closeLabel')
+        || validText(marker.closeLabel));
+  }
+
+  function tokenIdentityFromUrl(value) {
+    let parsed;
+    try { parsed = new URL(value); } catch { return null; }
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    let chain = '';
+    let address = '';
+    const tokenIndex = parts.findIndex((part) => part.toLowerCase() === 'token');
+    if (tokenIndex > 0 && tokenIndex + 1 < parts.length) {
+      chain = parts[tokenIndex - 1].toLowerCase();
+      try { address = decodeURIComponent(parts[tokenIndex + 1]); } catch { return null; }
+    } else {
+      chain = String(parsed.searchParams.get('chain') || parsed.searchParams.get('network') || '').toLowerCase();
+      address = String(
+        parsed.searchParams.get('address') || parsed.searchParams.get('tokenAddress')
+        || parsed.searchParams.get('token_address') || parsed.searchParams.get('token')
+        || parsed.searchParams.get('mint') || parsed.searchParams.get('ca') || ''
+      );
+    }
+    return normalizedTokenIdentity(chain, address);
+  }
+
+  function childTokenIdentity() {
+    const direct = tokenIdentityFromUrl(window.location.href);
+    if (direct) return direct;
+    let topHref;
+    try { topHref = window.top.location.href; } catch { return null; }
+    let topUrl;
+    try { topUrl = new URL(topHref); } catch {}
+    if (topUrl?.protocol === 'https:' && topUrl.hostname.toLowerCase() === 'gmgn.ai') {
+      const topIdentity = tokenIdentityFromUrl(topUrl.href);
+      if (topIdentity) return topIdentity;
+    }
+    let referrer;
+    try { referrer = new URL(document.referrer); } catch { return null; }
+    if (referrer.protocol !== 'https:' || referrer.hostname.toLowerCase() !== 'gmgn.ai') return null;
+    return tokenIdentityFromUrl(referrer.href);
+  }
+
+  function announceReady(probeId = '') {
+    const message = { source: 'TANGO_PAPER_CHART', type: 'READY' };
+    if (probeId) message.probeId = probeId;
+    const identity = childTokenIdentity();
+    if (identity) message.identity = identity;
+    window.parent.postMessage(message, '*');
+  }
+
   window.addEventListener('message', (event) => {
-    if (event.data?.source !== 'TANGO_PAPER_PARENT' || event.data?.type !== 'CHART_MARKERS') return;
-    const nextState = event.data.payload || null;
-    const identityChanged = Boolean(markerState)
+    if (event.source !== window.parent
+      || !event.data || typeof event.data !== 'object' || Array.isArray(event.data)
+      || event.data.source !== 'TANGO_PAPER_PARENT') return;
+    if (event.data.type === 'CHART_READY_PROBE') {
+      const probeId = typeof event.data.probeId === 'string' ? event.data.probeId : '';
+      if (probeId) announceReady(probeId);
+      return;
+    }
+    if (event.data.type !== 'CHART_MARKERS') return;
+    const payload = event.data.payload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+      || !Array.isArray(payload.markers)
+      || payload.markers.some((marker) => !validMarker(marker))) {
+      return;
+    }
+    const hasChainField = Object.prototype.hasOwnProperty.call(payload, 'chain');
+    const hasAddressField = Object.prototype.hasOwnProperty.call(payload, 'tokenAddress');
+    let nextState = payload;
+    if (hasChainField || hasAddressField) {
+      const payloadIdentity = normalizedTokenIdentity(payload.chain, payload.tokenAddress);
+      const childIdentity = childTokenIdentity();
+      if (!payloadIdentity || !childIdentity
+        || payloadIdentity.chain !== childIdentity.chain
+        || payloadIdentity.address !== childIdentity.address) return;
+      nextState = { ...payload, chain: payloadIdentity.chain, tokenAddress: payloadIdentity.address };
+    } else if (payload.markers.length || Object.keys(payload).length !== 1) return;
+    const hasTokenIdentity = (state) => Boolean(state?.chain && state?.tokenAddress);
+    const identityChanged = hasTokenIdentity(markerState)
+      && hasTokenIdentity(nextState)
       && (markerState?.chain !== nextState?.chain || markerState?.tokenAddress !== nextState?.tokenAddress);
-    if (identityChanged) markerAxisSequenceFloor = axisLabelSequence;
+    const clearsIdentifiedToken = hasTokenIdentity(markerState) && !nextState?.markers?.length;
+    if (identityChanged || clearsIdentifiedToken) markerAxisSequenceFloor = axisLabelSequence;
     if (!nextState?.markers?.length
       || identityChanged) {
       lastScaleMode = null;
@@ -301,16 +523,19 @@
       renderedSignature = '';
       hiddenMarkerIds.clear();
       markerPositions.clear();
+      markerEconomicCoordinates.clear();
     }
     markerState = nextState;
     renderMarkers();
   });
-  window.parent.postMessage({ source: 'TANGO_PAPER_CHART', type: 'READY' }, '*');
+  announceReady();
   window.addEventListener('resize', () => {
+    markerAxisSequenceFloor = axisLabelSequence;
     stableScale = null;
     stableSignature = '';
     renderedSignature = '';
     markerPositions.clear();
+    markerEconomicCoordinates.clear();
     renderMarkers();
   }, { passive: true });
   setInterval(renderMarkers, 400);

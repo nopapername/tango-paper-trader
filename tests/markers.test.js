@@ -13,12 +13,39 @@ const { buildPayload } = require('../src/content/markers.js');
 const chartSource = fs.readFileSync(path.resolve(__dirname, '../src/content/chart-main.js'), 'utf8');
 
 const ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
+const BSC_ADDRESS = '0x1111111111111111111111111111111111111111';
+const BSC_OTHER_ADDRESS = '0x2222222222222222222222222222222222222222';
 const labels = { entry: 'Paper Buy', exit: 'Paper Sell', hide: 'Hide line' };
 
-function loadChartBridge() {
+function loadChartBridge({
+  frameTitle = 'Financial Chart',
+  href = `https://gmgn.ai/bsc/token/${BSC_ADDRESS}`,
+  referrer = '',
+  topHref = '',
+  topAccessible = true,
+  frameInTradingView = false
+} = {}) {
   const listeners = new Map();
+  const parentMessages = [];
   const clock = { now: 1_000 };
   class FakeDate extends Date { static now() { return clock.now; } }
+  class FakeCanvasRenderingContext2D {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.transform = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+    }
+    fillText() {}
+    strokeText() {}
+    clearRect() {}
+    getTransform() {
+      const { a, b, c, d, e, f } = this.transform;
+      return {
+        a, b, c, d, e, f,
+        transformPoint: ({ x, y }) => ({ x: a * x + c * y + e, y: b * x + d * y + f })
+      };
+    }
+    setTransform(a, b, c, d, e, f) { this.transform = { a, b, c, d, e, f }; }
+  }
   const makeElement = () => {
     const children = [];
     return {
@@ -39,30 +66,60 @@ function loadChartBridge() {
         stableSignature = 'stale-scale';
         renderedSignature = 'stale-render';
         markerPositions.set('stale', 123);
+        markerEconomicCoordinates.set('stale', 'PRICE:1:123');
         ensureOverlay().replaceChildren(document.createElement('div'));
       },
       snapshot() {
         return {
           markerState, lastScaleMode, stableScale, stableSignature, renderedSignature,
-          markerPositions: [...markerPositions], overlayChildren: overlay?.childElementCount || 0,
+          markerPositions: [...markerPositions], markerEconomicCoordinateCount: markerEconomicCoordinates.size,
+          overlayChildren: overlay?.childElementCount || 0,
           overlayTops: overlay?.children?.map((node) => node.style.top) || []
         };
       },
+      trackedCanvasCount() { return labelsByCanvas.size; },
+      hideMarker(id) { hiddenMarkerIds.add(id); renderMarkers(); },
       record(context, text, x, y) { recordLabel(context, text, x, y); },
+      seedAxisRecords(context, samples) {
+        const id = canvasId(context.canvas);
+        const records = new Map();
+        samples.forEach((sample) => records.set(sample.text, {
+          text: sample.text, value: parseNumber(sample.text), y: sample.y, x: 950, id,
+          generation: sample.generation, sequence: ++axisLabelSequence, updatedAt: sample.updatedAt
+        }));
+        labelsByCanvas.set(id, { canvas: context.canvas, records });
+      },
       render: renderMarkers
     };
     setInterval(renderMarkers, 400);`
   );
+  const location = { href };
   const context = {
     console, Date: FakeDate, Map, WeakMap, Set, Math, Number,
+    location, URL,
     innerWidth: 1200, innerHeight: 800,
+    CanvasRenderingContext2D: FakeCanvasRenderingContext2D,
     document: {
-      body: makeElement(), documentElement: makeElement(), createElement: makeElement
+      body: makeElement(), documentElement: makeElement(), createElement: makeElement, referrer
     },
     setInterval() { return 0; }
   };
+  const top = {};
+  Object.defineProperty(top, 'location', {
+    get() {
+      if (!topAccessible) throw new Error('cross-origin top');
+      return { href: topHref };
+    }
+  });
   context.window = {
-    top: {}, frameElement: { title: 'Financial Chart' }, parent: { postMessage() {} },
+    top,
+    frameElement: {
+      title: frameTitle,
+      closest(selector) {
+        return frameInTradingView && selector === '[data-sentry-component="TradingView"]' ? {} : null;
+      }
+    },
+    parent: { postMessage(message) { parentMessages.push(message); } },
     addEventListener(type, listener) { listeners.set(type, listener); }
   };
   context.window.window = context.window;
@@ -72,12 +129,350 @@ function loadChartBridge() {
     isConnected: true, width: 1_000, height: 700,
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_200, height: 700 })
   };
-  const canvasContext = { canvas, getTransform: () => ({ transformPoint: (point) => point }) };
+  const canvasContext = new FakeCanvasRenderingContext2D(canvas);
   return {
-    api: context.window.__chartTest, clock, canvasContext,
-    message: (data) => listeners.get('message')({ data })
+    api: context.window.__chartTest, bridgeInitialized: Boolean(context.window.__tangoPaperChartBridge),
+    clock, canvasContext, parentMessages,
+    message: (data, source = context.window.parent) => listeners.get('message')({ data, source }),
+    setHref: (nextHref) => { location.href = nextHref; },
+    resize: () => listeners.get('resize')(),
+    clear: () => canvasContext.clearRect(0, 0, canvas.width, canvas.height),
+    createCanvasContext: () => {
+      const unrelatedCanvas = {
+        isConnected: true, width: 1_000, height: 700,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_200, height: 700 })
+      };
+      return new FakeCanvasRenderingContext2D(unrelatedCanvas);
+    }
   };
 }
+
+test('chart child recovers a dropped startup READY from one exact probe without marker feedback', () => {
+  const chart = loadChartBridge();
+  const readyMessages = () => chart.parentMessages.filter((message) => (
+    message?.source === 'TANGO_PAPER_CHART' && message?.type === 'READY'
+  ));
+
+  assert.equal(readyMessages().length, 1, 'the child keeps its spontaneous document-start READY');
+  chart.parentMessages.length = 0;
+
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'probe-1' });
+  assert.equal(readyMessages().length, 1, 'one parent probe recovers one child READY');
+  assert.equal(readyMessages()[0].probeId, 'probe-1', 'the child correlates the READY to its exact probe');
+
+  for (let index = 0; index < 20; index += 1) {
+    chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [] } });
+  }
+  assert.equal(readyMessages().length, 1, 'marker delivery never creates a READY feedback loop');
+});
+
+test('chart READY reports child URL identity instead of adopting parent marker identity', () => {
+  const chart = loadChartBridge({
+    href: `https://gmgn.ai/sol/token/${ADDRESS}`
+  });
+  chart.parentMessages.length = 0;
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'base', tokenAddress: '0x2222222222222222222222222222222222222222',
+      markers: []
+    }
+  });
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'identity-probe' });
+
+  const ready = chart.parentMessages.find((message) => message?.type === 'READY');
+  assert.equal(ready?.identity?.chain, 'sol');
+  assert.equal(ready?.identity?.address, ADDRESS);
+});
+
+test('chart READY recovers blob-frame identity from a same-origin GMGN detail referrer', () => {
+  const chart = loadChartBridge({
+    href: 'blob:https://gmgn.ai/4e6d6288-f914-46ce-a03b-42c722afca93',
+    referrer: `https://gmgn.ai/bsc/token/${BSC_ADDRESS}`
+  });
+  chart.parentMessages.length = 0;
+
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'blob-probe' });
+
+  const ready = chart.parentMessages.find((message) => message?.type === 'READY');
+  assert.equal(ready?.probeId, 'blob-probe');
+  assert.equal(ready?.identity?.chain, 'bsc');
+  assert.equal(ready?.identity?.address, BSC_ADDRESS);
+});
+
+test('chart READY prefers same-origin top detail identity for a reused blob frame', () => {
+  const chart = loadChartBridge({
+    href: 'blob:https://gmgn.ai/4e6d6288-f914-46ce-a03b-42c722afca93',
+    topHref: `https://gmgn.ai/bsc/token/${BSC_ADDRESS}`,
+    referrer: `https://gmgn.ai/sol/token/${ADDRESS}`
+  });
+  chart.parentMessages.length = 0;
+
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'top-probe' });
+
+  const ready = chart.parentMessages.find((message) => message?.type === 'READY');
+  assert.equal(ready?.identity?.chain, 'bsc');
+  assert.equal(ready?.identity?.address, BSC_ADDRESS);
+});
+
+test('chart READY fails closed when top detail identity is inaccessible', () => {
+  const chart = loadChartBridge({
+    href: 'about:blank',
+    topAccessible: false,
+    referrer: `https://gmgn.ai/bsc/token/${BSC_ADDRESS}`
+  });
+  chart.parentMessages.length = 0;
+
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'blocked-top' });
+
+  const ready = chart.parentMessages.find((message) => message?.type === 'READY');
+  assert.equal(ready?.identity, undefined);
+});
+
+test('a non-parent marker sender cannot inject or clear chart state', () => {
+  const chart = loadChartBridge({
+    href: `https://gmgn.ai/bsc/token/${BSC_ADDRESS}`
+  });
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  const currentPayload = {
+    chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_000, currentPrice: 0,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+  };
+
+  chart.message(
+    { source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: currentPayload },
+    {}
+  );
+  assert.equal(chart.api.snapshot().markerState, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: currentPayload });
+  const beforeForgedClear = JSON.parse(JSON.stringify(chart.api.snapshot()));
+  assert.equal(beforeForgedClear.overlayChildren, 1);
+  chart.message(
+    { source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [] } },
+    {}
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), beforeForgedClear);
+});
+
+test('malformed parent marker messages cannot crash or corrupt the current chart state', () => {
+  const chart = loadChartBridge({
+    href: `https://gmgn.ai/bsc/token/${BSC_ADDRESS}`
+  });
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_000, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  const beforeMalformed = JSON.parse(JSON.stringify(chart.api.snapshot()));
+
+  for (const message of [
+    null,
+    { source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS' },
+    { source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: null },
+    { source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: {} } },
+    { source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [null] } }
+  ]) {
+    assert.doesNotThrow(() => chart.message(message));
+    assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), beforeMalformed);
+  }
+});
+
+test('a trusted parent payload for another token cannot replace or clear current-token markers', () => {
+  const chart = loadChartBridge({
+    href: `https://gmgn.ai/bsc/token/${BSC_ADDRESS}`
+  });
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_000, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  const beforeCrossToken = JSON.parse(JSON.stringify(chart.api.snapshot()));
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'base', tokenAddress: '0x2222222222222222222222222222222222222222',
+      currentMarketCap: 6_000, currentPrice: 0,
+      markers: [{ id: 'other', side: 'BUY', marketCap: 6_000, price: 0, label: 'Other Buy' }]
+    }
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), beforeCrossToken);
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: '0x2222222222222222222222222222222222222222',
+      markers: []
+    }
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), beforeCrossToken);
+});
+
+test('the trusted parent can draw and clear markers for the independently derived current token', () => {
+  const mixedCaseAddress = '0xA111111111111111111111111111111111111111';
+  const normalizedAddress = mixedCaseAddress.toLowerCase();
+  const chart = loadChartBridge({
+    href: `https://gmgn.ai/bsc/token/${mixedCaseAddress}`
+  });
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'BSC', tokenAddress: normalizedAddress, currentMarketCap: 6_000, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: { chain: 'bsc', tokenAddress: normalizedAddress, markers: [] }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot().markerState)), {
+    chain: 'bsc', tokenAddress: normalizedAddress, markers: []
+  });
+});
+
+test('an identified payload is rejected when the chart child has no independent token identity', () => {
+  const chart = loadChartBridge({ href: 'about:blank', topAccessible: false });
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_000, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(chart.api.snapshot().markerState, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('invalid EVM and Solana child addresses cannot authorize matching identified payloads', () => {
+  const scenarios = [
+    ['short EVM address', 'bsc', '0x111111111111111111111111111111111111111', 6_000],
+    ['non-hex EVM address', 'bsc', '0xgg11111111111111111111111111111111111111', 6_000],
+    ['wrong decoded Solana length', 'sol', '1111111111111111111111111111111', 6_000],
+    ['invalid Solana alphabet', 'sol', '0bCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP', 6_000]
+  ];
+
+  for (const [label, chain, address, marketCap] of scenarios) {
+    const chart = loadChartBridge({ href: `https://gmgn.ai/${chain}/token/${address}` });
+    for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+      chart.api.record(chart.canvasContext, text, 950, y);
+    }
+    chart.message({
+      source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+      payload: {
+        chain, tokenAddress: address, currentMarketCap: marketCap, currentPrice: 0,
+        markers: [{ id: 'buy', side: 'BUY', marketCap, price: 0, label: 'Paper Buy' }]
+      }
+    });
+    assert.equal(chart.api.snapshot().markerState, null, label);
+    assert.equal(chart.api.snapshot().overlayChildren, 0, label);
+  }
+});
+
+test('valid Solana marker identity remains case-sensitive while exact draw and clear stay allowed', () => {
+  const chart = loadChartBridge({ href: `https://gmgn.ai/sol/token/${ADDRESS}` });
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  const marker = { id: 'buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' };
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'sol', tokenAddress: ADDRESS, currentMarketCap: 6_000, currentPrice: 0,
+      markers: [marker]
+    }
+  });
+  const exactState = JSON.parse(JSON.stringify(chart.api.snapshot()));
+  assert.equal(exactState.overlayChildren, 1);
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'sol', tokenAddress: ADDRESS.toLowerCase(), currentMarketCap: 6_000, currentPrice: 0,
+      markers: [{ ...marker, id: 'wrong-case' }]
+    }
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), exactState);
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: { chain: 'sol', tokenAddress: ADDRESS, markers: [] }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('invalid producer marker records cannot replace or clear current chart state', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  const validMarker = {
+    id: 'buy', side: 'BUY', marketCap: 6_000, price: 0,
+    label: 'Paper Buy', closeLabel: 'Hide line'
+  };
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_000, currentPrice: 0,
+      markers: [validMarker]
+    }
+  });
+  const beforeMalformedMarker = JSON.parse(JSON.stringify(chart.api.snapshot()));
+
+  const invalidMarkers = [
+    ['empty record', {}],
+    ['missing id', { ...validMarker, id: undefined }],
+    ['empty id', { ...validMarker, id: '' }],
+    ['invalid side', { ...validMarker, side: 'HOLD' }],
+    ['non-finite market cap', { ...validMarker, marketCap: Number.NaN, price: 2 }],
+    ['negative market cap', { ...validMarker, marketCap: -1, price: 2 }],
+    ['non-finite price', { ...validMarker, marketCap: 6_000, price: Number.POSITIVE_INFINITY }],
+    ['negative price', { ...validMarker, marketCap: 6_000, price: -1 }],
+    ['no usable coordinate', { ...validMarker, marketCap: 0, price: 0 }],
+    ['missing label', { ...validMarker, label: undefined }],
+    ['empty label', { ...validMarker, label: '' }],
+    ['non-string label', { ...validMarker, label: 7 }],
+    ['empty close label', { ...validMarker, closeLabel: '' }],
+    ['non-string close label', { ...validMarker, closeLabel: 7 }]
+  ];
+
+  for (const [label, marker] of invalidMarkers) {
+    assert.doesNotThrow(() => chart.message({
+      source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+      payload: {
+        chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_000, currentPrice: 0,
+        markers: [marker]
+      }
+    }), label);
+    assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), beforeMalformedMarker, label);
+  }
+});
 
 test('returns the existing empty marker shape without a current token', () => {
   assert.deepEqual(buildPayload({ current: null, position: null, trades: [], labels }), { markers: [] });
@@ -86,7 +481,11 @@ test('returns the existing empty marker shape without a current token', () => {
 test('position entry wins and the first four matching sells keep trade order', () => {
   const current = {
     token: { chain: 'sol', address: ADDRESS },
-    quote: { priceUsd: 2, marketCapUsd: 2_000 }
+    quote: {
+      priceUsd: 2, marketCapUsd: 2_000,
+      source: 'GMGN_NETWORK', priceProvenance: 'OBSERVED_PRICE',
+      priceObservedAt: 100, marketCapObservedAt: 100, observedAt: 100
+    }
   };
   const trades = [
     { id: 'sell-1', chain: 'sol', tokenAddress: ADDRESS.toLowerCase(), side: 'SELL', amountNative: 1, nativePriceUsd: 100, marketCapUsd: 1_500, observedPriceUsd: 1.5 },
@@ -142,12 +541,19 @@ test('synthetic market-cap prices stay off the price axis until a real ratio ref
 
   assert.equal(payload.markers[0].price, 0);
   assert.equal(payload.markers[1].price, 0);
-  assert.equal(payload.currentMarketCap, 2_000);
+  assert.equal(payload.currentMarketCap, 0);
   assert.equal(payload.markers[0].marketCap, 1_000);
   assert.equal(payload.markers[1].marketCap, 1_500);
 
   const withRealReference = buildPayload({
-    current: { ...current, quote: { priceUsd: 0.000002, marketCapUsd: 2_000, priceProvenance: 'OBSERVED_PRICE' } },
+    current: {
+      ...current,
+      quote: {
+        priceUsd: 0.000002, marketCapUsd: 2_000,
+        priceProvenance: 'OBSERVED_PRICE', source: 'GMGN_NETWORK',
+        priceObservedAt: 100, marketCapObservedAt: 100, observedAt: 100
+      }
+    },
     position: {
       averageEntryMarketCap: 1_000, averageEntryPriceUsd: 0.000001,
       valuationMode: 'MARKET_CAP', averageEntryPriceProvenance: 'MARKET_CAP_DERIVED'
@@ -166,9 +572,178 @@ test('synthetic market-cap prices stay off the price axis until a real ratio ref
   });
 });
 
+test('known execution supply maps fallback market-cap entries onto a factual price-only chart', () => {
+  const supply = 100_000_000_000;
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address: '0x1111111111111111111111111111111111111111' },
+      quote: { priceUsd: 0.00000008, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position: {
+      chain: 'base', tokenAddress: '0x1111111111111111111111111111111111111111',
+      averageEntryMarketCap: 3_200, averageEntryPriceUsd: 0.000000032,
+      valuationMode: 'MARKET_CAP', averageEntryPriceProvenance: 'MARKET_CAP_DERIVED',
+      totalSupply: supply, marketCapDivisor: supply, supplySource: 'LAUNCHPAD_RULE'
+    },
+    trades: [],
+    labels
+  });
+
+  assert.equal(payload.currentPrice, 0.00000008);
+  assert.equal(payload.currentMarketCap, 8_000);
+  assert.equal(payload.markers[0].marketCap, 3_200);
+  assert.equal(payload.markers[0].price, 0.000000032);
+});
+
+test('mixed fresh price and stale market cap prefer same-token execution supply', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const position = {
+    chain: 'base', tokenAddress: address,
+    averageEntryMarketCap: 500, averageEntryPriceUsd: 0.5,
+    averageEntryPriceProvenance: 'MARKET_CAP_DERIVED',
+    totalSupply: 1_000, supplySource: 'GMGN_EXACT'
+  };
+  const current = {
+    token: { chain: 'base', address },
+    quote: {
+      priceUsd: 2, marketCapUsd: 1_000,
+      priceSource: 'GMGN_NETWORK', marketCapSource: 'GMGN_NETWORK',
+      priceObservedAt: 200, marketCapObservedAt: 100, observedAt: 200,
+      priceProvenance: 'OBSERVED_PRICE'
+    }
+  };
+
+  const mixed = buildPayload({ current, position, trades: [], labels });
+  assert.equal(mixed.markers[0].price, 0.5);
+
+  const sameObservation = buildPayload({
+    current: {
+      ...current,
+      quote: { ...current.quote, marketCapObservedAt: 200 }
+    },
+    position,
+    trades: [],
+    labels
+  });
+  assert.equal(sameObservation.markers[0].price, 1);
+  assert.equal(sameObservation.currentMarketCap, 1_000);
+  assert.equal(mixed.currentMarketCap, 2_000);
+});
+
+test('incoherent observed market cap has no payload fallback without known supply', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address },
+      quote: {
+        priceUsd: 2, marketCapUsd: 1_000,
+        priceSource: 'GMGN_NETWORK', marketCapSource: 'GMGN_NETWORK',
+        priceObservedAt: 200, marketCapObservedAt: 100, observedAt: 200,
+        priceProvenance: 'OBSERVED_PRICE'
+      }
+    },
+    position: null,
+    trades: [],
+    labels
+  });
+
+  assert.equal(payload.currentPrice, 2);
+  assert.equal(payload.currentMarketCap, 0);
+});
+
+test('untrusted execution supply cannot synthesize market-cap or marker price references', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address },
+      quote: { priceUsd: 2, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position: {
+      chain: 'base', tokenAddress: address,
+      averageEntryMarketCap: 500, averageEntryPriceUsd: 0.5,
+      averageEntryPriceProvenance: 'MARKET_CAP_DERIVED',
+      totalSupply: 1_000, supplySource: 'UNKNOWN_FALLBACK'
+    },
+    trades: [],
+    labels
+  });
+
+  assert.equal(payload.currentMarketCap, 0);
+  assert.equal(payload.markers[0].price, 0);
+});
+
+test('factual BUY and SELL execution prices survive zero execution market caps', () => {
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'sol', address: ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position: null,
+    trades: [
+      {
+        id: 'price-only-buy', chain: 'sol', tokenAddress: ADDRESS, side: 'BUY',
+        marketCapUsd: 0, observedPriceUsd: 0.0000012, priceProvenance: 'OBSERVED_PRICE'
+      },
+      {
+        id: 'price-only-sell', chain: 'sol', tokenAddress: ADDRESS, side: 'SELL',
+        marketCapUsd: 0, observedPriceUsd: 0.0000015, priceProvenance: 'OBSERVED_PRICE'
+      }
+    ],
+    labels
+  });
+
+  assert.deepEqual(payload.markers, [
+    {
+      id: `entry:sol:${ADDRESS}`, side: 'BUY', marketCap: 0, price: 0.0000012,
+      label: 'Paper Buy', closeLabel: 'Hide line'
+    },
+    {
+      id: `sell:sol:${ADDRESS}:price-only-sell`, side: 'SELL', marketCap: 0, price: 0.0000015,
+      label: 'Paper Sell', closeLabel: 'Hide line'
+    }
+  ]);
+});
+
+test('factual zero-cap BUY price wins over an existing derived position price', () => {
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'sol', address: ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position: {
+      averageEntryMarketCap: 0, averageEntryPriceUsd: 0.0000099,
+      averageEntryPriceProvenance: 'MARKET_CAP_DERIVED', valuationMode: 'MARKET_CAP'
+    },
+    trades: [{
+      id: 'factual-buy', chain: 'sol', tokenAddress: ADDRESS, side: 'BUY',
+      marketCapUsd: 0, observedPriceUsd: 0.0000012, priceProvenance: 'OBSERVED_PRICE'
+    }],
+    labels
+  });
+
+  assert.deepEqual(payload.markers, [{
+    id: `entry:sol:${ADDRESS}`, side: 'BUY', marketCap: 0, price: 0.0000012,
+    label: 'Paper Buy', closeLabel: 'Hide line'
+  }]);
+});
+
 test('chart cache identity includes chain as well as token address', () => {
   assert.match(chartSource, /markerState\?\.chain !== nextState\?\.chain/);
   assert.match(chartSource, /markerState\?\.tokenAddress !== nextState\?\.tokenAddress/);
+});
+
+test('chart bridge accepts the TradingView frame title but ignores unrelated titled frames', () => {
+  assert.equal(loadChartBridge({ frameTitle: 'TradingView' }).bridgeInitialized, true);
+  assert.equal(loadChartBridge({ frameTitle: 'Unrelated analytics' }).bridgeInitialized, false);
+});
+
+test('chart bridge accepts a dynamically titled frame only inside the TradingView container', () => {
+  assert.equal(loadChartBridge({
+    frameTitle: 'GMGN chart 8/3', frameInTradingView: true
+  }).bridgeInitialized, true);
+  assert.equal(loadChartBridge({
+    frameTitle: 'GMGN chart 8/3', frameInTradingView: false
+  }).bridgeInitialized, false);
 });
 
 test('actual engine fallback provenance reprices markers from a factual live ratio with verified 100B supply', () => {
@@ -182,12 +757,16 @@ test('actual engine fallback provenance reprices markers from a factual live rat
   });
   const state = State.createInitialState({ now: 1, initialBalances: { base: 10 } });
   state.initialized = true;
+  const fallbackValuation = global.Tango.Supply.fallbackValuation({
+    chain: 'base', launchpad: ''
+  });
   const fallback = {
+    ...fallbackValuation,
     chain: 'base', address: baseAddress,
-    priceUsd: 3_200 / 1_000_000_000, marketCapUsd: 3_200,
-    totalSupply: 1_000_000_000, supplySource: 'UNKNOWN_FALLBACK',
+    marketCapDivisor: fallbackValuation.totalSupply,
+    provisionalSupply: fallbackValuation.totalSupply,
     nativePriceUsd: 2_000, observedAt: 1_000, nativePriceObservedAt: 1_000,
-    source: 'TANGO_FALLBACK', valuationMode: 'PRICE',
+    source: 'TANGO_FALLBACK', valuationMode: 'MARKET_CAP',
     priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
     syntheticTokenPrice: true, provisional: true, paperFallback: true
   };
@@ -200,7 +779,9 @@ test('actual engine fallback provenance reprices markers from a factual live rat
     quote: {
       priceUsd: 0.002, marketCapUsd: 200_000_000,
       totalSupply: 100_000_000_000, supplySource: 'GMGN_EXACT',
-      priceProvenance: 'OBSERVED_PRICE', source: 'GMGN_NETWORK'
+      priceProvenance: 'OBSERVED_PRICE', source: 'GMGN_NETWORK',
+      observationId: 'gmgn-live-1', priceObservationId: 'gmgn-live-1',
+      marketCapObservationId: 'gmgn-live-1', observedAt: 2_000
     }
   };
   const payload = buildPayload({
@@ -228,12 +809,31 @@ test('an empty marker payload clears overlay and every cached chart placement', 
     stableSignature: '',
     renderedSignature: '',
     markerPositions: [],
+    markerEconomicCoordinateCount: 0,
     overlayChildren: 0,
     overlayTops: []
   });
 });
 
-test('chart bridge ignores axis labels older than 1.5 seconds instead of drawing a stale line', () => {
+test('first identified marker reuses current axis labels captured after an unidentified clear', () => {
+  const chart = loadChartBridge();
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [] } });
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+});
+
+test('latest axis generation remains eligible 1.5 seconds after labels precede the first marker', () => {
   const chart = loadChartBridge();
   for (const [text, y] of [['$5K', 400], ['$6K', 300], ['$7K', 200]]) {
     chart.api.record(chart.canvasContext, text, 950, y);
@@ -242,11 +842,300 @@ test('chart bridge ignores axis labels older than 1.5 seconds instead of drawing
   chart.message({
     source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
     payload: {
-      chain: 'bsc', tokenAddress: '0x1', currentMarketCap: 6_028, currentPrice: 0,
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
       markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
     }
   });
-  assert.equal(chart.api.snapshot().overlayChildren, 0);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+});
+
+test('axis fitting unions latest-generation labels with fresh older-generation labels', () => {
+  const chart = loadChartBridge();
+  chart.api.seedAxisRecords(chart.canvasContext, [
+    { text: '$5K', y: 400, generation: 2, updatedAt: chart.clock.now - 1_501 },
+    { text: '$6K', y: 300, generation: 2, updatedAt: chart.clock.now - 1_501 },
+    { text: '$7K', y: 200, generation: 1, updatedAt: chart.clock.now }
+  ]);
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+});
+
+test('same-token marker keeps its verified scale while the chart axis is idle', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  const initialTop = chart.api.snapshot().overlayTops[0];
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.clock.now += 1_501;
+  chart.api.render();
+
+  assert.ok(initialTop);
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], initialTop);
+});
+
+test('same marker id follows a changed economic value below the jitter deadband', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2.02, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2.02, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '298px');
+});
+
+test('same marker id reuses its prior Y when an unchanged linear axis shifts exactly 2px', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+
+  for (const [text, y] of [['$1', 402], ['$2', 302], ['$3', 202]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+});
+
+test('economic cache prunes a removed marker before that id reappears', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+
+  for (const [text, y] of [['$1', 398], ['$2', 298], ['$3', 198]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'other', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().markerEconomicCoordinateCount, 1);
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '298px');
+});
+
+test('economic cache clears when the token identity changes', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+
+  chart.setHref(`https://gmgn.ai/bsc/token/${BSC_OTHER_ADDRESS}`);
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_OTHER_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().markerEconomicCoordinateCount, 0);
+  for (const [text, y] of [['$1', 398], ['$2', 298], ['$3', 198]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '298px');
+});
+
+test('economic cache clears across a resize before the same marker rerenders', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+
+  chart.resize();
+  assert.equal(chart.api.snapshot().markerEconomicCoordinateCount, 0);
+  for (const [text, y] of [['$1', 398], ['$2', 298], ['$3', 198]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '298px');
+});
+
+test('economic cache distinguishes price and market-cap axes with the same raw coordinate', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+
+  for (const [text, y] of [['$1', 398], ['$2', 298], ['$3', 198]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 0, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 2, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '298px');
+});
+
+test('economic cache distinguishes market-cap factors with the same raw coordinate', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 0, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 2, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+
+  for (const [text, y] of [['$1', 398], ['$2', 298], ['$3', 198]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 0, currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 2_000, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '298px');
+});
+
+test('clearing an unrelated canvas preserves the active price-axis scale', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.ok(chart.api.snapshot().stableScale);
+
+  const unrelatedContext = chart.createCanvasContext();
+  unrelatedContext.clearRect(0, 0, unrelatedContext.canvas.width, unrelatedContext.canvas.height);
+
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+});
+
+test('positive marker values select an axis when both current references are zero', () => {
+  const priceChart = loadChartBridge({
+    href: `https://gmgn.ai/sol/token/${ADDRESS}`
+  });
+  for (const [text, y] of [['$0.0000010', 400], ['$0.0000012', 300], ['$0.0000014', 200]]) {
+    priceChart.api.record(priceChart.canvasContext, text, 950, y);
+  }
+  priceChart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'sol', tokenAddress: ADDRESS, currentMarketCap: 0, currentPrice: 0,
+      markers: [{ id: 'price-buy', side: 'BUY', marketCap: 0, price: 0.0000012, label: 'Paper Buy' }]
+    }
+  });
+
+  const marketCapChart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    marketCapChart.api.record(marketCapChart.canvasContext, text, 950, y);
+  }
+  marketCapChart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 0, currentPrice: 0,
+      markers: [{ id: 'cap-buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(priceChart.api.snapshot().overlayChildren, 1, 'marker factual price selects a price axis');
+  assert.equal(marketCapChart.api.snapshot().overlayChildren, 1, 'marker market cap selects a market-cap axis');
 });
 
 test('current right-axis labels place a $6.028K marker near the $6.02K scale', () => {
@@ -261,7 +1150,7 @@ test('current right-axis labels place a $6.028K marker near the $6.02K scale', (
   chart.message({
     source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
     payload: {
-      chain: 'bsc', tokenAddress: '0x1', currentMarketCap: 6_028, currentPrice: 0,
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
       markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
     }
   });
@@ -277,20 +1166,458 @@ test('token switch rejects still-fresh axis labels captured for the previous tok
   chart.message({
     source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
     payload: {
-      chain: 'bsc', tokenAddress: '0xold', currentMarketCap: 6_028, currentPrice: 0,
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
       markers: [{ id: 'old-buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
     }
   });
   assert.equal(chart.api.snapshot().overlayChildren, 1);
 
   chart.clock.now += 100;
+  chart.setHref(`https://gmgn.ai/bsc/token/${BSC_OTHER_ADDRESS}`);
   chart.message({
     source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
     payload: {
-      chain: 'bsc', tokenAddress: '0xnew', currentMarketCap: 6_028, currentPrice: 0,
+      chain: 'bsc', tokenAddress: BSC_OTHER_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
       markers: [{ id: 'new-buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
     }
   });
 
   assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('identified token followed by an empty clear cannot lend its labels to the next token', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'old-buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [] } });
+  chart.setHref(`https://gmgn.ai/bsc/token/${BSC_OTHER_ADDRESS}`);
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_OTHER_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'new-buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('resize boundary cannot rebuild a scale from pre-resize labels plus two new labels', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.resize();
+  for (const [text, y] of [['$5.9K', 350], ['$6.1K', 250]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('full-canvas clear with no new labels cannot rebuild the old overlay', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.clear();
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().stableScale, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('newest complete axis snapshot after a narrow right-axis clear', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+
+  chart.clock.now += 400;
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  for (const [text, y] of [['$5.9K', 420], ['$6.1K', 320], ['$6.3K', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '356px');
+});
+
+test('a tall clear entirely right of the canvas cannot invalidate the active axis snapshot', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.canvasContext.clearRect(1001, 0, 1, 700);
+  chart.api.render();
+
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+});
+
+test('a tall clear below the canvas cannot invalidate the active axis snapshot', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.canvasContext.clearRect(900, 701, 100, 700);
+  chart.api.render();
+
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+});
+
+test('the right-axis boundary accepts exactly 70 percent clipped coverage at the 80 percent edge', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.clock.now += 400;
+  chart.canvasContext.clearRect(700, 210, 100, 700);
+  for (const [text, y] of [['$5.9K', 420], ['$6.1K', 320], ['$6.3K', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '356px');
+});
+
+test('a scaled raw qualifier that misses the backing right axis preserves the active overlay', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.canvasContext.setTransform(0.5, 0, 0, 0.5, 0, 0);
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  chart.api.render();
+
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+});
+
+test('a scaled raw non-qualifier that covers the backing right axis starts a fresh snapshot', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.clock.now += 400;
+  chart.canvasContext.setTransform(2, 0, 0, 2, 0, 0);
+  chart.canvasContext.clearRect(400, 0, 100, 350);
+  chart.canvasContext.setTransform(1, 0, 0, 1, 0, 0);
+  for (const [text, y] of [['$5.9K', 420], ['$6.1K', 320], ['$6.3K', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '356px');
+});
+
+test('a translated raw qualifier that misses the backing right axis preserves the active overlay', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.canvasContext.setTransform(1, 0, 0, 1, -250, 0);
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  chart.api.render();
+
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+});
+
+test('a translated raw non-qualifier that covers the backing right axis starts a fresh snapshot', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.clock.now += 400;
+  chart.canvasContext.setTransform(1, 0, 0, 1, 250, 0);
+  chart.canvasContext.clearRect(650, 0, 100, 700);
+  chart.canvasContext.setTransform(1, 0, 0, 1, 0, 0);
+  for (const [text, y] of [['$5.9K', 420], ['$6.1K', 320], ['$6.3K', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '356px');
+});
+
+test('a skewed right-axis clear is ignored conservatively by the narrow branch', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.canvasContext.setTransform(1, 0.1, 0, 1, 0, 0);
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  chart.api.render();
+
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+});
+
+test('an axis-aligned reflected clear that covers the backing right axis starts a fresh snapshot', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.clock.now += 400;
+  chart.canvasContext.setTransform(-1, 0, 0, -1, 1_000, 700);
+  chart.canvasContext.clearRect(0, 0, 100, 700);
+  chart.canvasContext.setTransform(1, 0, 0, 1, 0, 0);
+  for (const [text, y] of [['$5.9K', 420], ['$6.1K', 320], ['$6.3K', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayTops[0], '356px');
+});
+
+test('a failed transform read cannot trigger the narrow right-axis branch', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.canvasContext.getTransform = () => { throw new Error('transform unavailable'); };
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  chart.api.render();
+
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+});
+
+test('a malformed transform cannot trigger the narrow right-axis branch', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.canvasContext.getTransform = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0 });
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  chart.api.render();
+
+  assert.ok(chart.api.snapshot().stableScale);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+});
+
+test('the legacy full-canvas clear remains effective when reading the transform fails', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+
+  chart.canvasContext.getTransform = () => { throw new Error('transform unavailable'); };
+  chart.clear();
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().stableScale, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('replacing the active canvas without a full clear discards its old axis records', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  const replacedCanvas = chart.canvasContext.canvas;
+  replacedCanvas.isConnected = false;
+  chart.canvasContext.canvas = {
+    isConnected: true, width: 1_000, height: 700,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_200, height: 700 })
+  };
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().overlayChildren, 0, 'disconnected canvas records cannot select an axis');
+  assert.equal(chart.api.trackedCanvasCount(), 0, 'disconnected canvas history is discarded');
+});
+
+test('markerless renders discard repeatedly disconnected canvas histories but retain connected records', () => {
+  const chart = loadChartBridge();
+  const retainedContext = chart.createCanvasContext();
+  for (const [text, y] of [['$8K', 400], ['$9K', 300], ['$10K', 200]]) {
+    chart.api.record(retainedContext, text, 950, y);
+  }
+
+  for (let replacement = 0; replacement < 3; replacement += 1) {
+    for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+      chart.api.record(chart.canvasContext, text, 950, y);
+    }
+    const replacedCanvas = chart.canvasContext.canvas;
+    replacedCanvas.isConnected = false;
+    chart.canvasContext.canvas = {
+      isConnected: true, width: 1_000, height: 700,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_200, height: 700 })
+    };
+
+    chart.api.render();
+    assert.equal(chart.api.trackedCanvasCount(), 1, 'only the connected canvas history remains');
+  }
+});
+
+test('all-hidden markers discard a disconnected active canvas and its stable scale', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.ok(chart.api.snapshot().stableScale);
+
+  chart.api.hideMarker('buy');
+  chart.canvasContext.canvas.isConnected = false;
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().stableScale, null);
+  assert.equal(chart.api.trackedCanvasCount(), 0);
 });

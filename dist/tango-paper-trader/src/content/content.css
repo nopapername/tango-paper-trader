@@ -11,6 +11,11 @@
 
 .tango-shell, .tango-shell * { box-sizing: border-box; }
 
+html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
 .BuyButton-continer.tango-native-buy-overridden {
   isolation: isolate;
   min-width: 0;
@@ -18,44 +23,128 @@
   position: relative !important;
 }
 .tango-list-quick-buy {
+  align-items: center !important;
+  align-self: stretch !important;
+  background: transparent !important;
+  border: 0 !important;
   box-sizing: border-box;
+  box-shadow: none !important;
   cursor: pointer;
-  font: inherit;
-  min-width: 0;
+  display: inline-flex !important;
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  inset: auto !important;
+  justify-content: center !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  outline: 0 !important;
+  padding: 0 !important;
   overflow: hidden;
+  pointer-events: auto !important;
+  position: static !important;
+  transform: none !important;
+  vertical-align: top !important;
   white-space: nowrap;
+  width: 100% !important;
+  z-index: 1 !important;
 }
-.tango-list-quick-buy:hover { filter: brightness(1.12); }
+.BuyButton-continer.tango-native-buy-overridden[data-tango-quick-buy="1"] .tango-list-quick-buy {
+  align-content: center !important;
+  align-items: center !important;
+  align-self: stretch !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+.tango-quick-buy-fallback { color: inherit; }
+.tango-list-quick-buy:hover {
+  filter: brightness(1.12);
+}
 .tango-list-quick-buy:active { opacity: .55; }
-.tango-list-quick-buy:disabled { cursor: wait; opacity: .65; }
+.tango-list-quick-buy[data-tango-paper-state="in-flight"] { cursor: wait; opacity: .65; }
+.tango-quick-buy-content {
+  align-items: center !important;
+  background: color-mix(in srgb, var(--customize-button-ultra-color, #7dd3fc) 16%, transparent) !important;
+  border-radius: inherit;
+  box-sizing: border-box;
+  display: inline-flex !important;
+  flex: 1 1 100% !important;
+  flex-direction: column !important;
+  font-size: var(--tango-quick-buy-display-text, 11px) !important;
+  gap: 0 !important;
+  height: 100% !important;
+  justify-content: center !important;
+  line-height: .9 !important;
+  max-height: 100% !important;
+  max-width: 100% !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
+  padding: 0 2px !important;
+  pointer-events: none !important;
+  width: 100% !important;
+}
+.tango-list-quick-buy[data-tango-quick-buy-size="small"] {
+  --tango-quick-buy-display-text: 11px;
+  --tango-quick-buy-label-text: 8px;
+}
+.tango-list-quick-buy[data-tango-quick-buy-size="large"] {
+  --tango-quick-buy-display-text: 12px;
+  --tango-quick-buy-label-text: 9px;
+}
+.tango-list-quick-buy[data-tango-quick-buy-size="extra-large"] {
+  --tango-quick-buy-display-text: 13px;
+  --tango-quick-buy-label-text: 9px;
+}
+.tango-list-quick-buy[data-tango-quick-buy-size="giant"] {
+  --tango-quick-buy-display-text: 14px;
+  --tango-quick-buy-label-text: 10px;
+}
+.tango-list-quick-buy:hover .tango-quick-buy-content {
+  background: color-mix(in srgb, var(--customize-button-ultra-color, #7dd3fc) 24%, transparent) !important;
+}
+.tango-list-quick-buy:focus-visible .tango-quick-buy-content {
+  outline: 1px solid var(--customize-button-ultra-color, #7dd3fc) !important;
+  outline-offset: -1px !important;
+}
 .tango-paper-hint {
   background: #7756e8;
-  border: 1px solid #ad9aff;
+  border: 0;
   border-radius: 3px;
   color: #fff;
-  flex: 0 1 auto;
-  font-size: 8px;
+  flex: 0 0 auto;
+  font-size: var(--tango-quick-buy-label-text, 8px) !important;
   font-weight: 950;
-  line-height: 11px;
-  min-width: 0;
-  overflow: hidden;
-  padding: 0 2px;
-  text-overflow: ellipsis;
+  line-height: .9 !important;
+  min-width: max-content;
+  overflow: visible;
+  padding: 0 1px;
+  white-space: nowrap;
 }
 .tango-buy-amount {
   align-items: center;
   display: flex;
   flex: 0 1 auto;
-  font-size: 12px;
+  font-size: 1em !important;
   font-weight: 950;
-  gap: 2px;
+  gap: .16em;
   letter-spacing: -.02em;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   text-shadow: 0 0 9px color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 45%, transparent);
+  line-height: .9 !important;
+  white-space: nowrap;
 }
-.tango-buy-amount svg { flex: 0 0 12px; height: 12px; width: 12px; }
+.tango-buy-amount svg { flex: 0 0 1em; height: 1em; width: 1em; }
+.tango-buy-amount > span {
+  line-height: .9 !important;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tango-shell {
   --bg: #0c0d12;
   --panel: rgba(18, 19, 27, 0.97);

@@ -5,6 +5,20 @@ global.Tango = {};
 require('../src/core/chains.js');
 const Supply = require('../src/core/supply.js');
 
+const LAUNCHPAD_MATRIX = [
+  ['sol', 'Pump.fun', '', 1_000_000_000],
+  ['sol', 'Pump.fun', 'Mayhem', 2_000_000_000],
+  ['bsc', 'Four.meme', '', 1_000_000_000],
+  ['bsc', 'Flap', '', 1_000_000_000],
+  ['base', 'Zora Coins', '', 1_000_000_000],
+  ['xlayer', 'DYOR', '', 1_000_000_000],
+  ['xlayer', 'Bow.fun', '', 1_000_000_000],
+  ['base', 'Bankr', '', 100_000_000_000],
+  ['robinhood', 'Bankr', '', 100_000_000_000],
+  ['base', 'Clanker', '', 100_000_000_000],
+  ['robinhood', 'Clanker', '', 100_000_000_000]
+];
+
 test('exact GMGN supply wins over ratio and launchpad rules', () => {
   assert.deepEqual(Supply.resolve({
     chain: 'sol', launchpad: 'pump.fun', launchMode: 'mayhem',
@@ -63,6 +77,39 @@ test('launchpad and mode rules distinguish 1B, 2B, and 100B supplies', () => {
   assert.equal(Supply.ruleSupply('xlayer', 'DYOR', ''), 1_000_000_000);
 });
 
+test('canonical launchpad registry preserves every chain, platform, and mode dimension', () => {
+  for (const [chain, launchpad, launchMode, totalSupply] of LAUNCHPAD_MATRIX) {
+    assert.equal(Supply.ruleSupply(chain, launchpad, launchMode), totalSupply, `${chain}:${launchpad}:${launchMode}`);
+  }
+
+  for (const alias of ['bankr', 'bankrbot', 'banker']) {
+    assert.equal(Supply.ruleSupply('base', alias, ''), 100_000_000_000, alias);
+    assert.equal(Supply.ruleSupply('robinhood', alias, ''), 100_000_000_000, alias);
+  }
+
+  assert.equal(Supply.ruleSupply('sol', 'Pump.fun', 'mayhem-preview'), 1_000_000_000);
+  assert.equal(Supply.ruleSupply('sol', 'Pump.fun', 'not-mayhem'), 1_000_000_000);
+});
+
+test('canonical registry keeps independently approved platform records independent', () => {
+  const records = Supply.LAUNCHPAD_RULES.map((rule) => ({
+    chain: rule.chain,
+    aliases: [...rule.aliases],
+    launchMode: rule.launchMode,
+    totalSupply: rule.totalSupply
+  }));
+  assert.ok(records.some((rule) => rule.chain === 'xlayer' && rule.aliases.includes('dyor')
+    && !rule.aliases.includes('bow') && !rule.aliases.includes('bowfun')));
+  assert.ok(records.some((rule) => rule.chain === 'xlayer' && !rule.aliases.includes('dyor')
+    && rule.aliases.includes('bow') && rule.aliases.includes('bowfun')));
+  for (const chain of ['base', 'robinhood']) {
+    assert.ok(records.some((rule) => rule.chain === chain && rule.aliases.includes('bankr')
+      && !rule.aliases.includes('clanker')));
+    assert.ok(records.some((rule) => rule.chain === chain && !rule.aliases.includes('bankr')
+      && rule.aliases.includes('clanker')));
+  }
+});
+
 test('verified launchpad rules expose supply and initial market cap', () => {
   const cases = [
     ['sol', 'pump.fun', '', 1_000_000_000],
@@ -86,13 +133,16 @@ test('verified launchpad rules expose supply and initial market cap', () => {
 test('unknown launchpads use the fixed 3200 USD and one-billion fallback', () => {
   assert.equal(Supply.UNKNOWN_INITIAL_MARKET_CAP_USD, 3_200);
   assert.equal(Supply.UNKNOWN_TOTAL_SUPPLY, 1_000_000_000);
-  assert.deepEqual(Supply.fallbackValuation({ chain: 'eth', launchpad: 'unknown' }), {
+  const fallback = Supply.fallbackValuation({ chain: 'eth', launchpad: 'unknown' });
+  assert.deepEqual(Object.fromEntries(Object.entries(fallback)), {
     totalSupply: 1_000_000_000,
     marketCapUsd: 3_200,
     priceUsd: 0.0000032,
     supplySource: 'UNKNOWN_FALLBACK',
     valuationSource: 'UNKNOWN_INITIAL_MARKET_CAP'
   });
+  assert.equal(Supply.isInternalUnknownFallback(fallback), true);
+  assert.equal(Supply.isInternalUnknownFallback(JSON.parse(JSON.stringify(fallback))), false);
 });
 
 test('launchpad fallback rejects known platforms on the wrong chain', () => {
@@ -100,6 +150,9 @@ test('launchpad fallback rejects known platforms on the wrong chain', () => {
   assert.equal(Supply.ruleSupply('base', 'Four.meme', ''), 0);
   assert.equal(Supply.ruleSupply('bsc', 'DYOR', ''), 0);
   assert.equal(Supply.ruleSupply('sol', 'Bankr', ''), 0);
+  assert.equal(Supply.ruleSupply('bsc', 'Bankr.bot', ''), 0);
+  assert.equal(Supply.ruleSupply('robinhood', 'Zora Coins', ''), 0);
+  assert.equal(Supply.ruleSupply('base', 'Bow.fun', ''), 0);
   assert.equal(Supply.resolve({ chain: 'eth', launchpad: 'Zora' }), null);
 });
 

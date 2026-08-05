@@ -2,8 +2,11 @@
   const Tango = global.Tango = global.Tango || {};
   const MARKET_CAP_PROVENANCE = 'SOLANA_PUMP_TRENCH_V1';
   const MARKET_CAP_DIVISOR = 1_000_000_000;
+  const UNKNOWN_FALLBACK_SOURCE = 'UNKNOWN_FALLBACK';
+  const UNKNOWN_FALLBACK_PROVENANCE = 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1';
   const TRUSTED_SUPPLY_SOURCES = Object.freeze([
-    'GMGN_EXACT', 'GMGN_RATIO', 'LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE'
+    'GMGN_EXACT', 'GMGN_RATIO', 'LAUNCHPAD_RULE', 'LEGACY_PUMP_RULE',
+    UNKNOWN_FALLBACK_SOURCE
   ]);
   const VALUATION_MODES = ['PRICE', 'MARKET_CAP'];
   const PRICE_PROVENANCES = [
@@ -14,6 +17,19 @@
     'PRICE', 'NATIVE', 'SUPPLY', 'PRICE_AND_NATIVE', 'PRICE_AND_SUPPLY',
     'NATIVE_AND_SUPPLY', 'PRICE_NATIVE_AND_SUPPLY'
   ];
+  const LOCAL_LAUNCHPAD_RULES = Object.freeze([
+    Object.freeze({ chain: 'sol', aliases: Object.freeze(['pump', 'pumpfun']), launchMode: 'mayhem', totalSupply: 2_000_000_000 }),
+    Object.freeze({ chain: 'sol', aliases: Object.freeze(['pump', 'pumpfun']), launchMode: '', totalSupply: MARKET_CAP_DIVISOR }),
+    Object.freeze({ chain: 'bsc', aliases: Object.freeze(['fourmeme']), launchMode: '', totalSupply: MARKET_CAP_DIVISOR }),
+    Object.freeze({ chain: 'bsc', aliases: Object.freeze(['flap']), launchMode: '', totalSupply: MARKET_CAP_DIVISOR }),
+    Object.freeze({ chain: 'base', aliases: Object.freeze(['zora', 'zoracoins']), launchMode: '', totalSupply: MARKET_CAP_DIVISOR }),
+    Object.freeze({ chain: 'xlayer', aliases: Object.freeze(['dyor']), launchMode: '', totalSupply: MARKET_CAP_DIVISOR }),
+    Object.freeze({ chain: 'xlayer', aliases: Object.freeze(['bow', 'bowfun']), launchMode: '', totalSupply: MARKET_CAP_DIVISOR }),
+    Object.freeze({ chain: 'base', aliases: Object.freeze(['bankr', 'bankrbot', 'banker']), launchMode: '', totalSupply: 100_000_000_000 }),
+    Object.freeze({ chain: 'robinhood', aliases: Object.freeze(['bankr', 'bankrbot', 'banker']), launchMode: '', totalSupply: 100_000_000_000 }),
+    Object.freeze({ chain: 'base', aliases: Object.freeze(['clanker']), launchMode: '', totalSupply: 100_000_000_000 }),
+    Object.freeze({ chain: 'robinhood', aliases: Object.freeze(['clanker']), launchMode: '', totalSupply: 100_000_000_000 })
+  ]);
   const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   const finite = (value) => typeof value === 'number' && Number.isFinite(value);
   const finiteBetween = (value, minimum, maximum) => finite(value)
@@ -32,17 +48,11 @@
     const id = Tango.Chains?.get?.(chain)?.id || '';
     const platform = cleanRuleIdentity(launchpad);
     const mode = cleanRuleIdentity(launchMode);
-    if (id === 'sol' && ['pump', 'pumpfun'].includes(platform)) {
-      return mode.includes('mayhem') ? 2_000_000_000 : MARKET_CAP_DIVISOR;
-    }
-    if (['bankr', 'clanker'].includes(platform) && ['base', 'robinhood'].includes(id)) {
-      return 100_000_000_000;
-    }
-    if (id === 'bsc' && ['fourmeme', 'flap'].includes(platform)) return MARKET_CAP_DIVISOR;
-    if (id === 'base' && ['zora', 'zoracoins'].includes(platform)) return MARKET_CAP_DIVISOR;
-    if (id === 'xlayer' && ['dyor', 'bow', 'bowfun'].includes(platform)) return MARKET_CAP_DIVISOR;
-    return 0;
+    const matches = LOCAL_LAUNCHPAD_RULES.filter((rule) => rule.chain === id && rule.aliases.includes(platform));
+    return (matches.find((rule) => rule.launchMode === mode)
+      || matches.find((rule) => !rule.launchMode))?.totalSupply || 0;
   };
+  const ruleSupply = (value) => contextualRuleSupply(value);
   const contextualRuleSupply = (value) => {
     const resolved = typeof Tango.Supply?.ruleSupply === 'function'
       ? Number(Tango.Supply.ruleSupply(value?.chain, value?.launchpad, value?.launchMode))
@@ -58,6 +68,12 @@
     const price = value?.observedPriceUsd ?? value?.lastPriceUsd;
     if (source === 'GMGN_RATIO' && !supplyRatioMatches(marketCap, price, totalSupply)) return null;
     if (source === 'LAUNCHPAD_RULE' && contextualRuleSupply(value) !== totalSupply) return null;
+    if (source === UNKNOWN_FALLBACK_SOURCE && (
+      totalSupply !== MARKET_CAP_DIVISOR
+      || Number(value?.marketCapDivisor) !== MARKET_CAP_DIVISOR
+      || Number(value?.provisionalSupply) !== MARKET_CAP_DIVISOR
+      || value?.provisionalSupplyProvenance !== UNKNOWN_FALLBACK_PROVENANCE
+    )) return null;
     if (source === 'LEGACY_PUMP_RULE') {
       const address = value?.tokenAddress ?? value?.address;
       const validDivisor = value?.side
@@ -111,6 +127,8 @@
     ['provisionalTokenPrice', (value) => typeof value === 'boolean'],
     ['provisionalNativePrice', (value) => typeof value === 'boolean'],
     ['totalSupply', (value) => finiteBetween(value, 0, Number.MAX_VALUE)],
+    ['provisionalSupply', (value) => finiteBetween(value, 0, Number.MAX_VALUE)],
+    ['provisionalSupplyProvenance', (value) => value === UNKNOWN_FALLBACK_PROVENANCE],
     ['supplySource', (value) => optionalText(value) && isTrustedSupplySource(value)],
     ['launchpad', (value) => optionalText(value)],
     ['launchMode', (value) => optionalText(value)]
@@ -126,6 +144,13 @@
       delete normalized[field];
       if (validate(value?.[field])) normalized[field] = value[field];
     });
+    if (normalized.supplySource === UNKNOWN_FALLBACK_SOURCE
+      && !trustedSupplyIdentity(normalized)) {
+      delete normalized.supplySource;
+      delete normalized.totalSupply;
+      delete normalized.provisionalSupply;
+      delete normalized.provisionalSupplyProvenance;
+    }
     return normalized;
   }
 
@@ -143,7 +168,7 @@
     if (!isRecord(source)) throw new Error('invalidSettings');
     const booleanFields = [
       'enabled', 'fastMode', 'confirmationEnabled', 'soundEnabled', 'showListQuickBuy',
-      'barCollapsed', 'panelCollapsed'
+      'barCollapsed', 'panelCollapsed', 'onboardingInitialized'
     ];
     if (booleanFields.some((field) => hasOwn(source, field) && typeof source[field] !== 'boolean')) {
       throw new Error('invalidSettings');
@@ -212,6 +237,9 @@
     if (!validProvenance(trade)
       || !optional(trade, 'quoteObservedAtOriginal', validTimestamp)
       || !optional(trade, 'nativePriceObservedAtOriginal', validTimestamp)) throw new Error('invalidTrade');
+    if (['quoteObservedAtOriginal', 'nativePriceObservedAtOriginal'].some((field) => (
+      hasOwn(trade, field) && trade[field] > trade.executedAt
+    ))) throw new Error('invalidTrade');
     if (!legacy && trade.nativeSymbol && trade.nativeSymbol !== chain.nativeSymbol) throw new Error('invalidTrade');
     if (trade.valuationMode != null && !VALUATION_MODES.includes(trade.valuationMode)) throw new Error('invalidTrade');
     if (trade.priceProvenance != null && !PRICE_PROVENANCES.includes(trade.priceProvenance)) throw new Error('invalidTrade');
@@ -414,7 +442,93 @@
       && marketCapRatioMatches(position?.lastMarketCapUsd, position?.lastPriceUsd);
   }
 
-  function normalizePosition(position, key, accounts, strict, legacyKey = false) {
+  function isDurableUnknownFallbackTrade(trade) {
+    return trade?.supplySource === UNKNOWN_FALLBACK_SOURCE
+      && trade?.provisionalSupplyProvenance === UNKNOWN_FALLBACK_PROVENANCE;
+  }
+
+  function isCanonicalUnknownFallbackOrigin(trade) {
+    const canonicalMarketCap = Number(
+      Tango.Supply?.UNKNOWN_INITIAL_MARKET_CAP_USD || 3_200
+    );
+    const canonicalPrice = canonicalMarketCap / MARKET_CAP_DIVISOR;
+    const canonicalFallbackOrigin = String(trade?.quoteSource || '').toUpperCase() === 'TANGO_FALLBACK'
+      && Number(trade?.marketCapUsd) === canonicalMarketCap
+      && Math.abs(Number(trade?.observedPriceUsd) - canonicalPrice)
+        <= canonicalPrice * 0.001;
+    const cardMarketCapOrigin = String(trade?.quoteSource || '').toUpperCase()
+      === 'TANGO_FALLBACK_CARD_MARKET_CAP'
+      && Number.isSafeInteger(trade?.quoteObservedAtOriginal)
+      && trade.quoteObservedAtOriginal > 0
+      && trade.quoteObservedAtOriginal <= trade.executedAt
+      && Number(trade.marketCapUsd) > 0
+      && Number(trade.observedPriceUsd) > 0
+      && Math.abs(trade.marketCapUsd / trade.observedPriceUsd - MARKET_CAP_DIVISOR)
+        <= MARKET_CAP_DIVISOR * 0.001;
+    const durableUnknownFallbackBuy = trade?.side === 'BUY'
+      && isDurableUnknownFallbackTrade(trade)
+      && Number(trade?.totalSupply) === MARKET_CAP_DIVISOR
+      && Number(trade.marketCapDivisor) === MARKET_CAP_DIVISOR
+      && Number(trade.provisionalSupply) === MARKET_CAP_DIVISOR;
+    const syntheticPriceOrigin = trade?.paperFallback === true
+      && trade?.provisional === true
+      && trade?.syntheticTokenPrice === true
+      && trade?.valuationMode === 'MARKET_CAP'
+      && trade?.priceProvenance === 'SYNTHETIC_PRICE'
+      && (canonicalFallbackOrigin || cardMarketCapOrigin);
+    const nativeOnlyProvisional = trade?.provisional === true
+      && trade?.syntheticTokenPrice === false
+      && trade?.syntheticNativePrice === true
+      && Number(trade?.nativePriceUsd) === 1;
+    const factualPriceSyntheticMarketCapOrigin = trade?.paperFallback === true
+      && (trade?.provisional === false || nativeOnlyProvisional)
+      && trade?.syntheticTokenPrice === false
+      && trade?.valuationMode === 'PRICE'
+      && trade?.priceProvenance === 'OBSERVED_PRICE'
+      && ['GMGN', 'GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'].includes(
+        String(trade?.quoteSource || '').toUpperCase()
+      )
+      && Number.isSafeInteger(trade?.quoteObservedAtOriginal)
+      && trade.quoteObservedAtOriginal > 0
+      && trade.quoteObservedAtOriginal <= trade.executedAt
+      && Number(trade.marketCapUsd) === canonicalMarketCap
+      && Number(trade.observedPriceUsd) > 0;
+    return durableUnknownFallbackBuy
+      && trade.paperFallback === true
+      && (syntheticPriceOrigin || factualPriceSyntheticMarketCapOrigin);
+  }
+
+  function validateUnknownFallbackTradeHistories(trades) {
+    const histories = new Map();
+    trades.forEach((trade) => {
+      if (!isDurableUnknownFallbackTrade(trade)) return;
+      const key = `${trade.chain}:${trade.tokenAddress}`;
+      const history = histories.get(key) || [];
+      history.push(trade);
+      histories.set(key, history);
+    });
+    histories.forEach((history) => {
+      const originTime = Math.min(...history.map((trade) => Number(trade.executedAt)));
+      if (!history.some((trade) => (
+        Number(trade.executedAt) === originTime
+        && isCanonicalUnknownFallbackOrigin(trade)
+      ))) {
+        throw new Error('invalidTrade');
+      }
+    });
+  }
+
+  function hasCanonicalUnknownFallbackEntry(position, trades) {
+    const address = Tango.Chains.normalizeAddress(position.chain, position.tokenAddress);
+    return trades.some((trade) => (
+      trade.chain === position.chain
+      && trade.tokenAddress === address
+      && isCanonicalUnknownFallbackOrigin(trade)
+      && Number(trade.executedAt) === Number(position.openedAt)
+    ));
+  }
+
+  function normalizePosition(position, key, accounts, strict, legacyKey = false, trades = []) {
     const chainId = String(position?.chain || '').toLowerCase();
     const chain = Tango.Chains.get(chainId);
     const address = position?.tokenAddress ?? position?.address;
@@ -448,6 +562,9 @@
       if (position.valuationMode != null && !VALUATION_MODES.includes(position.valuationMode)) {
         throw new Error('invalidPosition');
       }
+      if (hasOwn(position, 'quoteObservedAt') && position.quoteObservedAt > position.updatedAt) {
+        throw new Error('invalidPosition');
+      }
       if (position.marketCapProvenance != null && position.marketCapProvenance !== MARKET_CAP_PROVENANCE) {
         throw new Error('invalidPosition');
       }
@@ -463,7 +580,12 @@
       if (String(position.supplySource || '') && !supply) throw new Error('invalidPosition');
       const coherentTrustedSupply = Boolean(supply
         && Number(position.marketCapDivisor) === supply.totalSupply
-        && supplyRatioMatches(position.lastMarketCapUsd, position.lastPriceUsd, supply.totalSupply));
+        && (supply.source === UNKNOWN_FALLBACK_SOURCE
+          || supplyRatioMatches(position.lastMarketCapUsd, position.lastPriceUsd, supply.totalSupply)));
+      if (supply?.source === UNKNOWN_FALLBACK_SOURCE
+        && !hasCanonicalUnknownFallbackEntry(position, trades)) {
+        throw new Error('invalidPosition');
+      }
       const coherentLegacyRatioContext = supply?.source === 'LEGACY_PUMP_RULE'
         && coherentTrustedSupply;
       const derivedPrice = ['MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED']
@@ -605,9 +727,13 @@
       chain.id,
       normalizeAccount(raw.accounts?.[chain.id], base.accounts[chain.id], strict)
     ]));
+    const trades = Array.isArray(raw.trades)
+      ? raw.trades.slice(0, Tango.MAX_TRADES).map((trade) => normalizeV2Trade(trade, strict))
+      : [];
+    if (strict) validateUnknownFallbackTradeHistories(trades);
     const positions = {};
     Object.entries(raw.positions || {}).forEach(([key, position]) => {
-      const normalized = normalizePosition(position, key, accounts, strict);
+      const normalized = normalizePosition(position, key, accounts, strict, false, trades);
       if (!normalized) return;
       if (positions[normalized[0]] && strict) throw new Error('positionCollision');
       if (strict && !normalized[2]) throw new Error('invalidPosition');
@@ -629,7 +755,7 @@
         : 0,
       accounts,
       positions,
-      trades: Array.isArray(raw.trades) ? raw.trades.slice(0, Tango.MAX_TRADES).map((trade) => normalizeV2Trade(trade, strict)) : [],
+      trades,
       calibrations,
       dailyRealizedByChain,
       initialized: Boolean(raw.initialized)
@@ -658,7 +784,7 @@
     return state;
   }
 
-  Tango.State = { createInitialState, normalizeSettings, normalizeState, resetChain, resetAll };
+  Tango.State = { createInitialState, normalizeSettings, normalizeState, resetChain, resetAll, ruleSupply };
   Tango.createInitialState = (solBalance = 10) => createInitialState({ initialBalances: { sol: Number(solBalance) } });
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.State;
 })(globalThis);

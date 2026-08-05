@@ -1,0 +1,49 @@
+html:not(.tango-paper-native-quick-buy-allowed) [data-testid="quickbuy"] {
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) .BuyButton-continer {
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) [data-sentry-component="BuyButtons"] {
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) .tango-list-quick-buy[data-tango-published="0"] {
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) .BuyButton-continer[data-tango-quick-buy="1"] {
+  pointer-events: auto !important;
+  visibility: visible !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) .BuyButton-continer[data-tango-quick-buy="1"] :where(button, [role="button"], a[href], [data-testid="quickbuy"]):not(.tango-list-quick-buy) {
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) .BuyButton-continer[data-tango-quick-buy="1"] .tango-list-quick-buy {
+  pointer-events: auto !important;
+  visibility: visible !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) [data-sentry-component="BuyButtons"] .tango-list-quick-buy {
+  pointer-events: auto !important;
+  visibility: visible !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) .BuyButton-continer[data-tango-quick-buy="1"] .tango-list-quick-buy[data-tango-published="0"] {
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+html:not(.tango-paper-native-quick-buy-allowed) [data-sentry-component="BuyButtons"] .tango-list-quick-buy[data-tango-published="0"] {
+  pointer-events: none !important;
+  visibility: hidden !important;
+}

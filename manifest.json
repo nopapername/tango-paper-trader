@@ -24,6 +24,12 @@
   "content_scripts": [
     {
       "matches": ["https://gmgn.ai/*"],
+      "css": ["src/content/quick-buy-safety.css"],
+      "js": ["src/shared/constants.js", "src/content/native-quick-buy-guard.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://gmgn.ai/*"],
       "js": ["src/core/chains.js", "src/core/supply.js", "src/adapters/gmgn-quotes.js", "src/content/page-main.js"],
       "run_at": "document_start",
       "world": "MAIN"

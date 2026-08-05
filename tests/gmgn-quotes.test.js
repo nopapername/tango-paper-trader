@@ -7,6 +7,7 @@ const Quotes = require('../src/adapters/gmgn-quotes.js');
 
 const FIELD_PROVENANCE_KEYS = [
   'totalSupplyObservationSource', 'priceSource', 'marketCapSource',
+  'totalSupplyField', 'totalSupplyTrustRank', 'totalSupplyAmbiguous',
   'liquidityObservedAt', 'liquiditySource', 'symbolObservedAt', 'symbolSource',
   'nameObservedAt', 'nameSource', 'logoUrlObservedAt', 'logoUrlSource',
   'launchpadObservedAt', 'launchpadSource', 'launchModeObservedAt', 'launchModeSource'
@@ -37,16 +38,16 @@ test('invalid addresses and unknown chains are discarded', () => {
   }, 'unknown', 123), []);
 });
 
-test('duplicate quote fragments merge compact numbers and bounded metadata', () => {
+test('duplicate quote fragments do not treat a generic cross-fragment price as factual USD', () => {
   const address = 'So11111111111111111111111111111111111111112';
   const quotes = Quotes.extract({ data: [
     { mint: address, price: '$0.25', symbol: '$SOL', name: ' Solana ' },
     { token_address: address, market_cap: '2.5M', liquidity: { usd: '125K' }, logo_url: 'x'.repeat(1100) }
   ] }, 'sol', 456);
   assert.deepEqual(quotes.map(withoutFieldProvenance), [{
-    chain: 'sol', address, priceUsd: 0.25, marketCapUsd: 2_500_000, liquidityUsd: 125_000,
+    chain: 'sol', address, priceUsd: 0, marketCapUsd: 2_500_000, liquidityUsd: 125_000,
     totalSupply: 0, totalSupplySource: '', symbol: 'SOL', name: 'Solana', logoUrl: 'x'.repeat(1000),
-    launchpad: '', launchMode: '', priceObservedAt: 456, marketCapObservedAt: 456,
+    launchpad: '', launchMode: '', priceObservedAt: 0, marketCapObservedAt: 456,
     totalSupplyObservedAt: 0, metadataObservedAt: 456, observedAt: 456, source: 'GMGN_NETWORK'
   }]);
   assert.equal(quotes[0].symbolObservedAt, 456);
@@ -148,6 +149,177 @@ test('supply-only and metadata-only exact-address fragments are retained', () =>
   assert.equal(metadataOnly.launchpad, 'Clanker');
   assert.equal(metadataOnly.launchMode, 'standard');
   assert.equal(metadataOnly.observedAt, 700);
+});
+
+test('explicit total supply outranks nested generic supply at the same observation', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const [quote] = Quotes.extract({
+    address,
+    total_supply: '100B',
+    nested: { address, supply: '1B' }
+  }, 'base', 800);
+  assert.equal(quote.totalSupply, 100_000_000_000);
+  assert.equal(quote.totalSupplySource, 'GMGN_NETWORK_EXACT');
+  assert.equal(quote.totalSupplyObservedAt, 800);
+});
+
+test('generic supply alone cannot claim exact GMGN supply trust', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const [quote] = Quotes.extract({ address, supply: '1B', symbol: 'GENERIC' }, 'base', 801);
+  assert.notEqual(quote.totalSupplySource, 'GMGN_NETWORK_EXACT');
+  assert.equal(quote.totalSupply, 0);
+});
+
+test('conflicting explicit supplies at one observation are ambiguous instead of traversal ordered', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  for (const data of [
+    [{ address, total_supply: '100B' }, { address, totalSupply: '1B' }],
+    [{ address, totalSupply: '1B' }, { address, total_supply: '100B' }]
+  ]) {
+    const [quote] = Quotes.extract({ data, symbol: 'CONFLICT' }, 'base', 802);
+    assert.equal(quote.totalSupply, 0);
+    assert.equal(quote.totalSupplySource, '');
+    assert.equal(quote.totalSupplyAmbiguous, true);
+  }
+});
+
+function assertAmbiguousExactSupply(quote) {
+  assert.equal(quote.totalSupply, 0);
+  assert.equal(quote.totalSupplySource, '');
+  assert.equal(quote.totalSupplyAmbiguous, true);
+}
+
+test('same-time exact supply followed by an internally ambiguous fragment stays ambiguous', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const [quote] = Quotes.extract({ data: [
+    { address, total_supply: '100B' },
+    { address, total_supply: '100B', totalSupply: '1B' }
+  ] }, 'base', 803);
+
+  assertAmbiguousExactSupply(quote);
+});
+
+test('same-time internally ambiguous supply followed by exact supply stays ambiguous', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const [quote] = Quotes.extract({ data: [
+    { address, total_supply: '100B', totalSupply: '1B' },
+    { address, total_supply: '100B' }
+  ] }, 'base', 803);
+
+  assertAmbiguousExactSupply(quote);
+});
+
+test('an older ambiguous supply cannot overwrite a newer trusted exact supply', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const newerExact = Quotes.mergeObservation(null, {
+    chain: 'base', address,
+    totalSupply: 100_000_000_000,
+    totalSupplySource: 'GMGN_NETWORK_EXACT',
+    observedAt: 200, source: 'GMGN_NETWORK'
+  });
+  const merged = Quotes.mergeObservation(newerExact, {
+    chain: 'base', address,
+    totalSupply: 0,
+    totalSupplyAmbiguous: true,
+    observedAt: 100, source: 'GMGN_NETWORK'
+  });
+
+  assert.equal(merged.totalSupply, 100_000_000_000);
+  assert.equal(merged.totalSupplySource, 'GMGN_NETWORK_EXACT');
+  assert.notEqual(merged.totalSupplyAmbiguous, true);
+  assert.equal(merged.totalSupplyObservedAt, 200);
+});
+
+test('an object with conflicting valid address aliases is rejected entirely', () => {
+  const first = '0x1111111111111111111111111111111111111111';
+  const second = '0x2222222222222222222222222222222222222222';
+  assert.deepEqual(Quotes.extract({
+    address: first, token_address: second, price_usd: '2', total_supply: '100B'
+  }, 'base', 803), []);
+});
+
+test('only explicit or dimensionally proven generic prices become factual USD prices', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const [explicit] = Quotes.extract({ address, price_usd: '0.000032' }, 'base', 804);
+  assert.equal(explicit.priceUsd, 0.000032);
+  assert.equal(explicit.priceSource, 'GMGN_NETWORK');
+
+  const [generic] = Quotes.extract({ address, price: '0.000032', symbol: 'GENERIC' }, 'base', 805);
+  assert.equal(generic.priceUsd, 0);
+  assert.equal(generic.priceSource, '');
+
+  const [proven] = Quotes.extract({
+    address, price: '0.000032', market_cap: '3.2M', total_supply: '100B'
+  }, 'base', 806);
+  assert.equal(proven.priceUsd, 0.000032);
+  assert.equal(proven.marketCapUsd, 3_200_000);
+  assert.equal(proven.totalSupply, 100_000_000_000);
+});
+
+test('a contradictory price market-cap supply triple cannot calibrate any dimension', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const [quote] = Quotes.extract({
+    address,
+    price_usd: '0.000032',
+    market_cap: '3200',
+    total_supply: '100B',
+    symbol: 'CONTRADICTORY'
+  }, 'base', 807);
+  assert.equal(quote.priceUsd, 0);
+  assert.equal(quote.marketCapUsd, 0);
+  assert.equal(quote.totalSupply, 0);
+  assert.equal(quote.totalSupplySource, '');
+});
+
+function assertAmbiguousContradictoryDimensions(quote) {
+  assert.equal(quote.priceUsd, 0);
+  assert.equal(quote.marketCapUsd, 0);
+  assert.equal(quote.totalSupply, 0);
+  assert.equal(quote.totalSupplySource, '');
+  assert.equal(quote.totalSupplyAmbiguous, true);
+}
+
+test('a valuation fragment followed by contradictory exact supply stays ambiguous', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const [quote] = Quotes.extract({ data: [
+    { address, price_usd: '0.000032', market_cap: '3200' },
+    { address, total_supply: '100B' }
+  ] }, 'base', 808);
+
+  assertAmbiguousContradictoryDimensions(quote);
+});
+
+test('contradictory exact supply followed by a valuation fragment stays ambiguous', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const [quote] = Quotes.extract({ data: [
+    { address, total_supply: '100B' },
+    { address, price_usd: '0.000032', market_cap: '3200' }
+  ] }, 'base', 809);
+
+  assertAmbiguousContradictoryDimensions(quote);
+});
+
+test('a newer independent explicit price does not invalidate older coherent cap and supply fields', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const coherent = Quotes.mergeObservation(null, {
+    chain: 'base', address,
+    priceUsd: 1, marketCapUsd: 1_000, totalSupply: 1_000,
+    totalSupplySource: 'GMGN_NETWORK_EXACT',
+    observedAt: 100, source: 'GMGN_NETWORK'
+  });
+  const merged = Quotes.mergeObservation(coherent, {
+    chain: 'base', address,
+    priceUsd: 2, observedAt: 200, source: 'GMGN_NETWORK'
+  });
+
+  assert.equal(merged.priceUsd, 2);
+  assert.equal(merged.priceObservedAt, 200);
+  assert.equal(merged.marketCapUsd, 1_000);
+  assert.equal(merged.marketCapObservedAt, 100);
+  assert.equal(merged.totalSupply, 1_000);
+  assert.equal(merged.totalSupplyObservedAt, 100);
+  assert.equal(merged.totalSupplySource, 'GMGN_NETWORK_EXACT');
+  assert.notEqual(merged.totalSupplyAmbiguous, true);
 });
 
 test('each metadata field keeps independent time and source provenance', () => {
@@ -257,13 +429,35 @@ test('invalid values and timestamps are ignored per field without freezing later
   assert.equal(recovered.priceObservedAt, 300);
 });
 
-test('major coin price payloads produce only registered native symbols', () => {
+test('native price extraction rejects generic price without trusted endpoint context', () => {
   assert.deepEqual(Quotes.extractNativePrices({ data: [
     { symbol: 'SOL', price: '150' },
     { symbol: 'ETH', price_usd: '3500' },
     { symbol: 'RANDOM', price: '9' }
   ] }, 700), [
-    { symbol: 'SOL', priceUsd: 150, observedAt: 700, source: 'GMGN_MAJOR_COIN' },
     { symbol: 'ETH', priceUsd: 3500, observedAt: 700, source: 'GMGN_MAJOR_COIN' }
   ]);
+});
+
+test('generic native price requires the exact GMGN major-coin endpoint and a non-token entry', () => {
+  const payload = { data: [{ symbol: 'SOL', price: '150' }] };
+  const trusted = { requestUrl: 'https://gmgn.ai/api/v1/major_coin_prices?chain=all' };
+  assert.deepEqual(Quotes.extractNativePrices(payload, 701, trusted), [
+    { symbol: 'SOL', priceUsd: 150, observedAt: 701, source: 'GMGN_MAJOR_COIN' }
+  ]);
+
+  for (const context of [
+    { allowGenericPrice: true },
+    { requestUrl: 'https://example.com/api/v1/major_coin_prices' },
+    { requestUrl: 'https://gmgn.ai/api/v1/major_coin_prices/extra' }
+  ]) {
+    assert.deepEqual(Quotes.extractNativePrices(payload, 701, context), []);
+  }
+  assert.deepEqual(Quotes.extractNativePrices({
+    data: [{
+      address: '0x1111111111111111111111111111111111111111',
+      symbol: 'ETH',
+      price: '3500'
+    }]
+  }, 701, trusted), []);
 });

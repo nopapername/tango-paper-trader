@@ -11,17 +11,27 @@
     quoteRequests: new Map(), quoteRetryAt: new Map(),
     gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
+    refreshRetryTimer: null, refreshRetryDelay: 500,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-    renderedMarkup: null, markerPayloads: new WeakMap(), latestMarkerPayload: { markers: [] },
+    renderedMarkup: null, markerPayloads: new WeakMap(), markerFrameListeners: new WeakSet(),
+    chartFrameRoutes: new WeakMap(), chartFrameReadyBeforeLoad: new WeakSet(),
+    chartFrameAwaitingReady: new WeakSet(), chartFrameProbeIds: new WeakMap(), chartProbeSequence: 0,
+    chartFrameTentative: new WeakSet(),
+    latestMarkerPayload: { markers: [] },
     quickBuySyncQueued: false, activeChainId: null,
     routeEpoch: 0, routeIdentity: null, pendingMutationRoots: new Set(), quickBuyMode: 'unknown',
-    selectedChainSync: null,
-    selectedChainPersistence: {
-      desiredChain: null, persistedChain: null, dirty: false, opportunity: 0
-    },
+    quickBuySettingsPending: false, quickBuyAuthoritativelyDisabled: false,
     positionCalibrationPromises: new Map(), positionCalibrationTargets: new Map(),
     positionCalibrationDirty: new Set()
   };
+
+  chrome.storage?.onChanged?.addListener?.((changes, areaName) => {
+    const settingsKey = Tango.SETTINGS_KEY || 'tangoPaperTraderSettingsV1';
+    if (areaName !== 'local'
+      || !Object.prototype.hasOwnProperty.call(changes || {}, settingsKey)) return;
+    runtime.quickBuySettingsPending = true;
+    runtime.quickBuyAuthoritativelyDisabled = changes[settingsKey]?.newValue?.enabled === false;
+  });
 
   const host = document.createElement('div');
   host.id = 'tango-paper-trader-host';
@@ -36,6 +46,11 @@
   shell.addEventListener('pointerdown', () => { runtime.interactionUntil = Date.now() + 500; }, true);
 
   function activeChain() { return Tango.Chains.fromUrl(location.href); }
+  function paperExecutionDisabled() {
+    return runtime.quickBuySettingsPending
+      || runtime.quickBuyAuthoritativelyDisabled
+      || runtime.settings?.enabled !== true;
+  }
   function currentRouteIdentity(url = location.href) {
     const chain = Tango.Chains.fromUrl(url);
     if (!chain) return `unsupported:${String(url)}`;
@@ -129,51 +144,24 @@
       && capture.identity === currentRouteIdentity();
   }
   function advanceRouteEpoch() {
-    runtime.routeEpoch += 1;
-    runtime.routeIdentity = currentRouteIdentity();
-  }
-  function syncSelectedChainFromRoute() {
-    const chain = activeChain();
-    if (!chain || !runtime.settings) return null;
-    const persistence = runtime.selectedChainPersistence;
-    if (persistence.persistedChain === null) {
-      persistence.persistedChain = runtime.settings.selectedChain;
-    }
-    persistence.desiredChain = chain.id;
-    persistence.opportunity += 1;
-    if (persistence.persistedChain !== chain.id) persistence.dirty = true;
-    if (runtime.selectedChainSync) return runtime.selectedChainSync.promise;
-    if (!persistence.dirty && persistence.persistedChain === chain.id) return null;
-    const promise = (async () => {
-      while (persistence.dirty) {
-        const expectedChain = persistence.desiredChain;
-        const attemptOpportunity = persistence.opportunity;
-        let saved;
-        try {
-          saved = await Tango.Store.patchSettings({ selectedChain: expectedChain });
-        } catch {
-          persistence.dirty = true;
-          if (persistence.opportunity > attemptOpportunity) continue;
-          break;
-        }
-        if (saved?.selectedChain !== expectedChain) {
-          persistence.dirty = true;
-          if (persistence.opportunity > attemptOpportunity) continue;
-          break;
-        }
-        persistence.persistedChain = expectedChain;
-        persistence.dirty = persistence.desiredChain !== persistence.persistedChain;
-        if (activeChain()?.id === expectedChain && persistence.desiredChain === expectedChain) {
-          runtime.settings = saved;
-          queueRender();
-        }
-      }
-      return runtime.settings;
-    })().finally(() => {
-      if (runtime.selectedChainSync?.promise === promise) runtime.selectedChainSync = null;
+    const nextIdentity = currentRouteIdentity();
+    const framesAwaitingRouteSeal = [];
+    chartFrames().forEach((frame) => {
+      if (!runtime.markerFrameListeners.has(frame)) return;
+      framesAwaitingRouteSeal.push(frame);
+      runtime.chartFrameTentative.add(frame);
+      runtime.chartFrameReadyBeforeLoad.delete(frame);
+      runtime.chartFrameAwaitingReady.delete(frame);
+      runtime.chartFrameProbeIds.delete(frame);
+      runtime.markerPayloads.delete(frame);
     });
-    runtime.selectedChainSync = { promise };
-    return promise;
+    runtime.routeEpoch += 1;
+    runtime.routeIdentity = nextIdentity;
+    framesAwaitingRouteSeal.forEach((frame) => {
+      runtime.chartFrameRoutes.set(frame, { epoch: runtime.routeEpoch, identity: nextIdentity });
+    });
+    Tango.GMGN._clearChartTrust?.();
+    framesAwaitingRouteSeal.forEach((frame) => probeChartFrameReady(frame));
   }
   function activeAccount() {
     const chain = activeChain();
@@ -233,7 +221,37 @@
   function handlePageMessage(event) {
     if (event.data?.source === 'TANGO_PAPER_CHART' && event.data?.type === 'READY') {
       const frame = [...chartFrames()].find((candidate) => candidate.contentWindow === event.source);
-      if (frame) replayChartMarkers(frame);
+      if (frame) {
+        const registrationChanged = registerChartFrame(frame);
+        const routeCurrent = routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame));
+        const probeTagged = Object.prototype.hasOwnProperty.call(event.data || {}, 'probeId');
+        const probeId = typeof event.data?.probeId === 'string' ? event.data.probeId : '';
+        if (probeTagged
+          && (!routeCurrent || !probeId || runtime.chartFrameProbeIds.get(frame) !== probeId)) return;
+        const tentative = runtime.chartFrameTentative.has(frame);
+        const readyIdentity = chartReadyIdentity(event.data?.identity);
+        const routeToken = detailRouteToken();
+        const independentlyMatchesRoute = Boolean(routeToken && readyIdentity
+          && readyIdentity.chain === routeToken.chain && readyIdentity.address === routeToken.address);
+        if (tentative && (!probeTagged || !independentlyMatchesRoute)) {
+          if (registrationChanged) replayChartMarkers(frame);
+          return;
+        }
+        if (routeCurrent) runtime.chartFrameProbeIds.delete(frame);
+        if (routeToken && routeCurrent) {
+          const markedReady = Tango.GMGN._markChartFrameReady?.(frame, routeToken) === true;
+          if (markedReady) {
+            if (tentative) runtime.chartFrameTentative.delete(frame);
+            runtime.chartFrameReadyBeforeLoad.delete(frame);
+            if (probeTagged) runtime.chartFrameAwaitingReady.delete(frame);
+            else {
+              const readyFollowedLoad = runtime.chartFrameAwaitingReady.delete(frame);
+              if (!readyFollowedLoad) runtime.chartFrameReadyBeforeLoad.add(frame);
+            }
+          }
+        }
+        replayChartMarkers(frame);
+      }
       return;
     }
     if (event.source === window && event.data?.source === 'TANGO_GMGN_PAGE'
@@ -260,10 +278,17 @@
     (event.data.quotes || []).forEach((quote) => {
       if (quote?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, quote?.address)) return;
       const address = Tango.Chains.normalizeAddress(chain.id, quote.address);
-      if (!trustedCachedObservation(quote, chain.id, address, Number(Tango.QUOTE_STALE_MS || 15_000), false)) return;
+      const maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000);
+      const normalizedQuote = normalizeObservationDimensions(quote, maxAgeMs, false);
+      if (!trustedCachedObservation(normalizedQuote, chain.id, address, maxAgeMs, false)) return;
       const cacheKey = gmgnQuoteKey(chain.id, address);
-      const cachedQuote = Tango.GMGNQuotes.mergeObservation(runtime.gmgnQuotes.get(cacheKey), quote);
-      if (!trustedCachedObservation(cachedQuote, chain.id, address, Number(Tango.QUOTE_STALE_MS || 15_000), false)) return;
+      const previousQuote = normalizeObservationDimensions(
+        runtime.gmgnQuotes.get(cacheKey), maxAgeMs, false
+      );
+      const cachedQuote = normalizeObservationDimensions(
+        Tango.GMGNQuotes.mergeObservation(previousQuote, normalizedQuote), maxAgeMs, false
+      );
+      if (!trustedCachedObservation(cachedQuote, chain.id, address, maxAgeMs, false)) return;
       runtime.gmgnQuotes.set(cacheKey, cachedQuote);
       if (!runtime.current && routeToken?.chain === chain.id && routeToken.address === address
         && detailBootstrapObservation(cachedQuote)) {
@@ -375,17 +400,21 @@
   function coalesceAsync(task) {
     let active = null;
     let queued = false;
+    async function drain() {
+      let result;
+      do {
+        queued = false;
+        result = await task();
+      } while (queued);
+      return result;
+    }
     return function run() {
       if (active) {
         queued = true;
         return active;
       }
-      active = task().finally(() => {
+      active = drain().finally(() => {
         active = null;
-        if (queued) {
-          queued = false;
-          run();
-        }
       });
       return active;
     };
@@ -398,13 +427,19 @@
     const previousChainSettings = chain
       ? previousSettings?.chainSettings?.[chain.id] || previousSettings?.chains?.[chain.id]
       : null;
-    const data = await Tango.Store.getAll();
+    runtime.quickBuySettingsPending = true;
+    document.documentElement?.classList?.remove('tango-paper-native-quick-buy-allowed');
+    let data;
+    try {
+      data = await Tango.Store.getAll();
+    } catch (error) {
+      clearQuickBuyButtons();
+      throw error;
+    }
     runtime.state = data.state;
     runtime.settings = data.settings;
-    const persistence = runtime.selectedChainPersistence;
-    persistence.persistedChain = runtime.settings.selectedChain;
-    persistence.dirty = persistence.desiredChain !== null
-      && persistence.desiredChain !== persistence.persistedChain;
+    runtime.quickBuyAuthoritativelyDisabled = runtime.settings?.enabled === false;
+    runtime.quickBuySettingsPending = false;
     const becameReady = runtime.settings.enabled === true
       && runtime.state.initialized === true
       && (previousSettings?.enabled === false || previousState?.initialized !== true);
@@ -415,22 +450,53 @@
       previousSettings.language !== runtime.settings.language ||
       Number(previousChainSettings?.buyPresets?.[0]) !== Number(currentChainSettings?.buyPresets?.[0])
     );
-    if (!chain || !runtime.settings.enabled || !runtime.state.initialized || !runtime.settings.showListQuickBuy || quickBuyConfigChanged) clearQuickBuyButtons();
+    const quickBuyShouldBeActive = Boolean(chain && currentChainSettings
+      && runtime.settings.enabled && runtime.state.initialized && runtime.settings.showListQuickBuy);
+    if (quickBuyShouldBeActive) {
+      document.documentElement?.classList?.add('tango-paper-quick-buy-active');
+      if (quickBuyConfigChanged || becameReady || runtime.quickBuyMode !== 'active') {
+        syncQuickBuyButtons();
+      }
+    } else {
+      clearQuickBuyButtons();
+    }
     if (!runtime.settings.enabled || !runtime.state.initialized) {
       clearChartMarkers();
       runtime.current = null;
     }
     if (becameReady) ensureRouteTokenContext();
-    if (chain && runtime.settings.enabled) syncSelectedChainFromRoute();
     if (becameReady) {
       window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
-      syncQuickBuyButtons();
       tickQuote();
     }
     queueRender();
   }
 
   const refresh = coalesceAsync(performRefresh);
+
+  function scheduleRefreshRetry() {
+    if (runtime.refreshRetryTimer !== null) return;
+    const delay = runtime.refreshRetryDelay;
+    runtime.refreshRetryDelay = Math.min(delay * 2, 5_000);
+    runtime.refreshRetryTimer = setTimeout(() => {
+      runtime.refreshRetryTimer = null;
+      return refreshRecoverably();
+    }, delay);
+  }
+
+  async function refreshRecoverably() {
+    try {
+      await refresh();
+      if (runtime.refreshRetryTimer !== null) clearTimeout(runtime.refreshRetryTimer);
+      runtime.refreshRetryTimer = null;
+      runtime.refreshRetryDelay = 500;
+      return true;
+    } catch (error) {
+      console.error('[Tango Paper Trader] settings refresh failed', error);
+      scheduleRefreshRetry();
+      return false;
+    }
+  }
 
   function queueRender() {
     if (runtime.renderQueued) return;
@@ -443,11 +509,101 @@
     requestAnimationFrame(() => { runtime.renderQueued = false; render(); });
   }
 
-  function syncQuickBuyButtons(roots) {
+  function quickBuyPolicyKey() {
+    const chain = activeChain();
+    const settings = chainSettings();
+    return JSON.stringify({
+      enabled: runtime.settings?.enabled === true,
+      initialized: runtime.state?.initialized === true,
+      showListQuickBuy: runtime.settings?.showListQuickBuy === true,
+      chain: chain?.id || '', preset: settings?.buyPresets?.[0] || 0.1, paperLabel: t('paper')
+    });
+  }
+
+  function paperQuickBuyMutationNode(node) {
+    const paperClass = '.tango-list-quick-buy';
+    const paperAction = '[data-tango-paper-action="quick-buy"]';
+    return Boolean(node?.matches?.(paperClass) || node?.matches?.(paperAction)
+      || node?.closest?.(paperClass) || node?.closest?.(paperAction));
+  }
+
+  function containsPaperQuickBuyMutationNode(node) {
+    return paperQuickBuyMutationNode(node)
+      || Boolean(node?.querySelector?.('.tango-list-quick-buy')
+        || node?.querySelector?.('[data-tango-paper-action="quick-buy"]'));
+  }
+
+  function quickBuyMutationRoots(node, {
+    includeAncestors = true, includeDescendants = false
+  } = {}) {
+    if (node?.nodeType !== 1) return [];
+    const tag = String(node.tagName || '').toUpperCase();
+    if (tag === 'BODY' || tag === 'HTML' || paperQuickBuyMutationNode(node)) return [];
+    const tokenItem = '[data-sentry-element="SimulateLinkByConfig"][data-sentry-source-file="TokenItem.tsx"]';
+    const card = '[class~="group/a"]';
+    const slot = '.BuyButton-continer';
+    const roots = new Set();
+    const add = (candidate) => {
+      if (candidate && !paperQuickBuyMutationNode(candidate)) roots.add(candidate);
+    };
+    const isStructuralRoot = Boolean(
+      node.matches?.(tokenItem) || node.matches?.(card) || node.matches?.(slot)
+    );
+    if (isStructuralRoot) add(node);
+    if (includeAncestors) add(node.closest?.(tokenItem) || node.closest?.(card) || node.closest?.(slot));
+    if (includeDescendants && !isStructuralRoot) {
+      const descendants = (selector) => [...(node.querySelectorAll?.(selector) || [])]
+        .filter((candidate) => !paperQuickBuyMutationNode(candidate));
+      const preferred = descendants(tokenItem);
+      const cards = preferred.length ? [] : descendants(card);
+      const fallback = preferred.length ? preferred : (cards.length ? cards : descendants(slot));
+      fallback.forEach(add);
+      if (!roots.size) add(node.querySelector?.(tokenItem) || node.querySelector?.(card) || node.querySelector?.(slot));
+    }
+    return [...roots];
+  }
+
+  function nativeQuickBuyMutationRoots(node, target) {
+    if (node?.nodeType !== 1 || paperQuickBuyMutationNode(node)) return [];
+    const selector = 'button, [role="button"], a[href], [data-testid="quickbuy"]';
+    const candidates = [node.matches?.(selector) ? node : null,
+      ...(node.querySelectorAll?.(selector) || [])].filter(Boolean);
+    const targetSlot = target?.matches?.('.BuyButton-continer') ? target
+      : target?.closest?.('.BuyButton-continer');
+    const roots = new Set();
+    for (const candidate of candidates) {
+      if (paperQuickBuyMutationNode(candidate)) continue;
+      const slot = candidate.closest?.('.BuyButton-continer') || targetSlot;
+      if (slot && !paperQuickBuyMutationNode(slot)) roots.add(slot);
+    }
+    return [...roots];
+  }
+
+  function chartMutationNode(node) {
+    return String(node?.tagName || '').toUpperCase() === 'IFRAME' || Boolean(node?.contentWindow)
+      || Boolean(node?.querySelector?.('iframe[title="Financial Chart"], iframe[title="TradingView"], [data-sentry-component="TradingView"] iframe'));
+  }
+
+  function headerMutationNode(node) {
+    const wallet = '[data-testid="wallet-connected"]';
+    const actions = '[data-testid="header-actions"]';
+    return Boolean(node?.matches?.(wallet) || node?.matches?.(actions)
+      || node?.querySelector?.(wallet) || node?.querySelector?.(actions));
+  }
+
+  function syncQuickBuyButtons(roots, {
+    fast = false, addedRoots = [], removedRoots = [], hrefMutations = [],
+    policyKey = quickBuyPolicyKey()
+  } = {}) {
+    if (runtime.quickBuySettingsPending) return;
     const chain = activeChain();
     const settings = chainSettings();
     if (chain && settings && runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) {
-      Tango.GMGN.discoverTokenCards(handleQuickBuy, settings.buyPresets?.[0] || 0.1, t('paper'), roots);
+      document.documentElement?.classList?.remove('tango-paper-native-quick-buy-allowed');
+      document.documentElement?.classList?.add('tango-paper-quick-buy-active');
+      Tango.GMGN.discoverTokenCards(handleQuickBuy, settings.buyPresets?.[0] || 0.1, t('paper'), roots, {
+        fast, addedRoots, removedRoots, hrefMutations, policyKey
+      });
       runtime.quickBuyMode = 'active';
     } else {
       clearQuickBuyButtons();
@@ -455,9 +611,18 @@
   }
 
   function clearQuickBuyButtons() {
-    if (runtime.quickBuyMode === 'cleared') return;
-    Tango.GMGN.clearQuickBuy();
-    runtime.quickBuyMode = 'cleared';
+    document.documentElement?.classList?.remove('tango-paper-quick-buy-active');
+    const nativeAllowed = !runtime.quickBuySettingsPending
+      && runtime.settings?.enabled === false;
+    if (nativeAllowed) {
+      document.documentElement?.classList?.add('tango-paper-native-quick-buy-allowed');
+    } else {
+      document.documentElement?.classList?.remove('tango-paper-native-quick-buy-allowed');
+    }
+    const nextMode = nativeAllowed ? 'cleared' : 'guarded';
+    if (runtime.quickBuyMode === nextMode) return;
+    Tango.GMGN.clearQuickBuy(nativeAllowed);
+    runtime.quickBuyMode = nextMode;
   }
 
   function queueQuickBuySync(root) {
@@ -468,7 +633,9 @@
       runtime.quickBuySyncQueued = false;
       const roots = [...runtime.pendingMutationRoots];
       runtime.pendingMutationRoots.clear();
-      if (roots.length) syncQuickBuyButtons(roots);
+      if (roots.length) syncQuickBuyButtons(roots, {
+        fast: false, addedRoots: [], removedRoots: [], policyKey: quickBuyPolicyKey()
+      });
     });
   }
 
@@ -594,11 +761,12 @@
   }
 
   function acceptedTokenObservation(candidate, token, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
-    const acceptedSource = Boolean(factualObservationSource(candidate?.source));
-    const hasValue = (Tango.GMGNQuotes.isFactualPriceObservation(candidate)
-      && Number(candidate?.priceUsd || 0) > 0) || trustedMarketCapObservation(candidate, token);
+    const normalized = normalizeObservationDimensions(candidate, maxAgeMs);
+    const acceptedSource = Boolean(factualObservationSource(normalized?.source));
+    const hasValue = Number(normalized?.priceUsd || 0) > 0
+      || trustedMarketCapObservation(normalized, token);
     const observedAt = Number(candidate?.observedAt || 0);
-    return acceptedSource && hasValue && observedAt > 0 && Date.now() - observedAt <= maxAgeMs;
+    return acceptedSource && hasValue && freshObservationTime(observedAt, maxAgeMs);
   }
 
   function factualObservationSource(value, allowDex = true) {
@@ -613,6 +781,41 @@
     const observedAt = Number(value || 0);
     return Number.isSafeInteger(observedAt) && observedAt > 0
       && observedAt - Date.now() <= 5_000 && Date.now() - observedAt <= maxAgeMs;
+  }
+
+  function normalizeObservationDimensions(candidate, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000), allowDex = true) {
+    if (!candidate) return null;
+    const normalized = { ...candidate };
+    for (const dimension of [
+      ['priceUsd', 'priceObservedAt', 'priceSource', 'priceObservationId'],
+      ['marketCapUsd', 'marketCapObservedAt', 'marketCapSource', 'marketCapObservationId'],
+      ['liquidityUsd', 'liquidityObservedAt', 'liquiditySource', 'liquidityObservationId'],
+      ['totalSupply', 'totalSupplyObservedAt', 'totalSupplyObservationSource', 'totalSupplyObservationId']
+    ]) {
+      const [valueField, timeField, sourceField, observationIdField] = dimension;
+      const value = Number(candidate[valueField] || 0);
+      const observedAt = candidate[timeField] == null
+        ? Number(candidate.observedAt || 0) : Number(candidate[timeField]);
+      const source = factualObservationSource(
+        candidate[sourceField] == null ? candidate.source : candidate[sourceField], allowDex
+      );
+      const factualPrice = valueField !== 'priceUsd'
+        || Tango.GMGNQuotes.isFactualPriceObservation(candidate);
+      const valid = Number.isFinite(value) && value > 0 && Boolean(source)
+        && freshObservationTime(observedAt, maxAgeMs) && factualPrice;
+      normalized[valueField] = valid ? value : 0;
+      normalized[timeField] = valid ? observedAt : 0;
+      normalized[sourceField] = valid ? source : '';
+      if (!valid) normalized[observationIdField] = '';
+      if (!valid && valueField === 'priceUsd') normalized.priceProvenance = '';
+      if (!valid && valueField === 'totalSupply') {
+        normalized.totalSupplySource = '';
+        normalized.supplySource = '';
+        normalized.totalSupplyField = '';
+        normalized.totalSupplyTrustRank = 0;
+      }
+    }
+    return normalized;
   }
 
   function trustedCachedObservation(candidate, chain, address, maxAgeMs, allowDex = true) {
@@ -630,9 +833,13 @@
       ['liquidityUsd', 'liquidityObservedAt', 'liquiditySource'],
       ['totalSupply', 'totalSupplyObservedAt', 'totalSupplyObservationSource']
     ]) {
+      const source = candidate?.[sourceField] == null
+        ? candidate?.source : candidate[sourceField];
+      const observedAt = candidate?.[timeField] == null
+        ? candidate?.observedAt : candidate[timeField];
       if (Number(candidate?.[valueField] || 0) > 0
-        && (!factualObservationSource(candidate?.[sourceField] || candidate?.source, allowDex)
-          || !freshObservationTime(candidate?.[timeField] || candidate?.observedAt, maxAgeMs))) return false;
+        && (!factualObservationSource(source, allowDex)
+          || !freshObservationTime(observedAt, maxAgeMs))) return false;
     }
     return true;
   }
@@ -727,12 +934,30 @@
     const nativePriceUsd = freshNativePrice(chain);
     const validationContext = persistedQuoteContext(context.token);
     const trustedMarketCap = trustedMarketCapObservation(quote, validationContext);
+    const fieldObservation = (valueField, timeField, sourceField) => {
+      const value = Number(quote[valueField] || 0);
+      if (!(Number.isFinite(value) && value > 0)) {
+        return { [timeField]: 0, [sourceField]: '' };
+      }
+      return {
+        [timeField]: quote[timeField] == null
+          ? Number(quote.observedAt || 0) : Number(quote[timeField]),
+        [sourceField]: quote[sourceField] == null
+          ? String(quote.source || '') : String(quote[sourceField])
+      };
+    };
     context.quote = {
       ...context.quote,
       ...quote,
       priceUsd: Number(quote.priceUsd || 0),
       marketCapUsd: Number(quote.marketCapUsd || 0),
       liquidityUsd: Number(quote.liquidityUsd || 0),
+      ...fieldObservation('priceUsd', 'priceObservedAt', 'priceSource'),
+      ...fieldObservation('marketCapUsd', 'marketCapObservedAt', 'marketCapSource'),
+      ...fieldObservation('liquidityUsd', 'liquidityObservedAt', 'liquiditySource'),
+      ...(Object.prototype.hasOwnProperty.call(quote, 'totalSupply')
+        ? fieldObservation('totalSupply', 'totalSupplyObservedAt', 'totalSupplyObservationSource')
+        : {}),
       observedAt: Number(quote.observedAt || 0),
       source: String(quote.source || ''),
       nativePriceUsd,
@@ -880,6 +1105,31 @@
     Promise.resolve().then(() => ensureNativePrice(context, routeCapture)).catch(() => null);
   }
 
+  function preferObservationDimensions(merged, candidate) {
+    if (!merged || !candidate) return merged;
+    const preferred = { ...merged };
+    for (const [valueField, timeField, sourceField] of [
+      ['priceUsd', 'priceObservedAt', 'priceSource'],
+      ['marketCapUsd', 'marketCapObservedAt', 'marketCapSource'],
+      ['liquidityUsd', 'liquidityObservedAt', 'liquiditySource']
+    ]) {
+      if (!(Number.isFinite(Number(candidate[valueField])) && Number(candidate[valueField]) > 0)) continue;
+      preferred[valueField] = Number(candidate[valueField]);
+      preferred[timeField] = Number(candidate[timeField] || candidate.observedAt || 0);
+      preferred[sourceField] = String(candidate[sourceField] || candidate.source || '');
+    }
+    if (Number.isFinite(Number(candidate.totalSupply)) && Number(candidate.totalSupply) > 0) {
+      preferred.totalSupply = Number(candidate.totalSupply);
+      preferred.totalSupplyObservedAt = Number(candidate.totalSupplyObservedAt || candidate.observedAt || 0);
+      preferred.totalSupplySource = String(candidate.totalSupplySource || candidate.supplySource || '');
+      preferred.totalSupplyObservationSource = String(candidate.totalSupplyObservationSource || candidate.source || '');
+    }
+    if (candidate.priceProvenance) preferred.priceProvenance = candidate.priceProvenance;
+    preferred.observedAt = Number(candidate.observedAt || preferred.observedAt || 0);
+    preferred.source = String(candidate.source || preferred.source || '');
+    return preferred;
+  }
+
   function resolvePaperTradeQuote(token, candidate, options = {}) {
     const chain = activeChain();
     const address = token?.address || token?.tokenAddress;
@@ -900,28 +1150,39 @@
       && Date.now() - candidateObservedAt <= Number(Tango.QUOTE_STALE_MS || 15_000);
     const candidateIsTrusted = candidateIdentityMatches && candidateFresh
       && Boolean(factualObservationSource(candidateSource));
-    const candidateHasFactualPrice = candidateIsTrusted
-      && Tango.GMGNQuotes.isFactualPriceObservation(candidate);
-    const candidateSyntheticTokenPrice = candidateIsTrusted && candidate?.syntheticTokenPrice === true;
+    const normalizedCandidate = candidateIsTrusted
+      ? normalizeObservationDimensions(candidate, Number(Tango.QUOTE_STALE_MS || 15_000)) : null;
+    const candidateHasFactualPrice = Number(normalizedCandidate?.priceUsd || 0) > 0;
+    const candidateSyntheticTokenPrice = Boolean(normalizedCandidate)
+      && candidate?.syntheticTokenPrice === true;
     const candidateProvisionalSupply = candidateSyntheticTokenPrice
       && Number(candidate?.provisionalSupply) === 1_000_000_000 ? 1_000_000_000 : 0;
-    const candidateSupplySource = String(candidate?.supplySource || candidate?.totalSupplySource || '');
-    const candidateExactSupply = candidateIsTrusted && candidateSource.startsWith('GMGN')
+    const candidateSupplySource = String(
+      normalizedCandidate?.supplySource || normalizedCandidate?.totalSupplySource || ''
+    );
+    const candidateExactSupply = Boolean(normalizedCandidate) && candidateSource.startsWith('GMGN')
       && ['GMGN_EXACT', 'GMGN_NETWORK_EXACT'].includes(candidateSupplySource)
-      && Number.isFinite(Number(candidate?.totalSupply)) && Number(candidate.totalSupply) > 0;
-    const boundCandidate = candidateIsTrusted ? {
-      ...(candidate || {}), chain: chain.id, address: normalizedAddress,
-      priceUsd: candidateHasFactualPrice ? Number(candidate?.priceUsd || 0) : 0,
-      totalSupply: candidateExactSupply ? Number(candidate.totalSupply) : 0,
+      && Number.isFinite(Number(normalizedCandidate?.totalSupply))
+      && Number(normalizedCandidate.totalSupply) > 0;
+    const boundCandidate = normalizedCandidate ? {
+      ...normalizedCandidate, chain: chain.id, address: normalizedAddress,
+      priceUsd: candidateHasFactualPrice ? Number(normalizedCandidate.priceUsd) : 0,
+      totalSupply: candidateExactSupply ? Number(normalizedCandidate.totalSupply) : 0,
       totalSupplySource: candidateExactSupply ? 'GMGN_EXACT' : '',
       supplySource: candidateExactSupply ? 'GMGN_EXACT' : ''
     } : null;
+    const normalizedExact = normalizeObservationDimensions(
+      exact, Number(Tango.QUOTE_STALE_MS || 15_000)
+    );
     const freshExact = trustedCachedObservation(
-      exact, chain.id, normalizedAddress, Number(Tango.QUOTE_STALE_MS || 15_000)
-    ) ? exact : null;
-    const merged = freshExact && boundCandidate
+      normalizedExact, chain.id, normalizedAddress, Number(Tango.QUOTE_STALE_MS || 15_000)
+    ) ? normalizedExact : null;
+    const normallyMerged = freshExact && boundCandidate
       ? Tango.GMGNQuotes.mergeObservation(freshExact, boundCandidate)
       : boundCandidate || freshExact;
+    const merged = options.preferCandidate === true && boundCandidate
+      ? preferObservationDimensions(normallyMerged, boundCandidate)
+      : normallyMerged;
     const mergedHasFactualPrice = Tango.GMGNQuotes.isFactualPriceObservation(merged)
       && Number.isFinite(Number(merged?.priceUsd)) && Number(merged.priceUsd) > 0;
     const positionAddress = position?.tokenAddress || position?.address;
@@ -1006,7 +1267,37 @@
       launchpad: resolvedLaunchpad,
       launchMode: resolvedLaunchMode
     });
-    const calculatedPrice = !safeObservedPrice && safeMarketCapUsd > 0 && supply
+    const marketCapObservationSource = factualObservationSource(
+      local.marketCapSource || local.source
+    );
+    const totalSupplyObservationSource = factualObservationSource(
+      localExactSupply
+        ? local.totalSupplyObservationSource || local.source
+        : positionExactSupply ? boundPosition?.totalSupplyObservationSource : ''
+    );
+    const commonObservationId = String(local.observationId || '');
+    const marketCapObservationId = String(local.marketCapObservationId || commonObservationId);
+    const totalSupplyObservationId = String(
+      localExactSupply
+        ? local.totalSupplyObservationId || commonObservationId
+        : positionExactSupply ? boundPosition?.totalSupplyObservationId || '' : ''
+    );
+    const marketCapObservationTime = Number(
+      local.marketCapObservedAt || local.originalObservedAt || local.observedAt || 0
+    );
+    const totalSupplyObservationTime = Number(
+      localExactSupply
+        ? local.totalSupplyObservedAt || local.originalObservedAt || local.observedAt || 0
+        : positionExactSupply ? boundPosition?.totalSupplyObservedAt || 0 : 0
+    );
+    const sameValuationObservation = marketCapObservationSource
+      && marketCapObservationSource === totalSupplyObservationSource
+      && (marketCapObservationId || totalSupplyObservationId
+        ? Boolean(marketCapObservationId && marketCapObservationId === totalSupplyObservationId)
+        : marketCapObservationTime > 0 && marketCapObservationTime === totalSupplyObservationTime);
+    const factualDerivedPrice = mergedHasFactualMarketCap
+      && (supply?.source !== 'GMGN_EXACT' || sameValuationObservation);
+    const calculatedPrice = !safeObservedPrice && safeMarketCapUsd > 0 && supply && factualDerivedPrice
       ? safeMarketCapUsd / supply.totalSupply
       : 0;
     const derivedPrice = Number.isFinite(calculatedPrice) && calculatedPrice > 0 ? calculatedPrice : 0;
@@ -1017,7 +1308,13 @@
     const fallback = Tango.Supply.fallbackValuation({
       chain: chain.id, launchpad: resolvedLaunchpad, launchMode: resolvedLaunchMode
     });
-    const executionMarketCap = safeMarketCapUsd || fallback.marketCapUsd;
+    const preservePositionMarketCap = mergedHasFactualMarketCap && !safeObservedPrice
+      && supply?.source === 'GMGN_EXACT' && positionExactSupply > 0 && !localExactSupply
+      && !sameValuationObservation
+      && Number.isFinite(historicalMarketCapUsd) && historicalMarketCapUsd > 0;
+    const executionMarketCap = preservePositionMarketCap
+      ? historicalMarketCapUsd : safeMarketCapUsd || fallback.marketCapUsd;
+    const syntheticMarketCap = !preservePositionMarketCap && !(safeMarketCapUsd > 0);
     const executionSupply = supply?.totalSupply || fallback.totalSupply;
     const fallbackPrice = executionMarketCap / executionSupply;
     const priceUsd = safeObservedPrice || derivedPrice || historicalPrice || fallbackPrice;
@@ -1027,20 +1324,38 @@
     const syntheticTokenPrice = !(safeObservedPrice > 0 || derivedPrice > 0 || historicalPrice > 0);
     const syntheticNativePrice = !(native.price > 0);
     const fallbackSupply = derivedPrice > 0 && supply?.confidence === 'fallback';
+    const provisionalSupply = (syntheticTokenPrice || (syntheticMarketCap && safeObservedPrice > 0))
+      && !['GMGN_EXACT', 'GMGN_RATIO'].includes(String(supply?.source || ''))
+      ? Number(executionSupply) : 0;
+    const internalUnknownFallbackSupply = (syntheticTokenPrice || (syntheticMarketCap && safeObservedPrice > 0))
+      && String(fallback.supplySource || '') === 'UNKNOWN_FALLBACK'
+      && Number(executionSupply) === 1_000_000_000
+      && provisionalSupply === 1_000_000_000
+      && (syntheticMarketCap || Math.abs(executionMarketCap / priceUsd - executionSupply)
+        <= executionSupply * 0.001);
+    const executionSupplySource = String(
+      supply?.source || (internalUnknownFallbackSupply ? fallback.supplySource : '')
+    );
     const valuationSource = safeObservedPrice > 0 ? 'OBSERVED_PRICE'
       : derivedPrice > 0 ? 'OBSERVED_MARKET_CAP'
         : historicalPrice > 0 ? 'POSITION_HISTORY'
+          : preservePositionMarketCap ? 'POSITION_HISTORY'
           : safeMarketCapUsd > 0 ? 'CARD_MARKET_CAP_FALLBACK_SUPPLY'
             : fallback.valuationSource;
     return {
+      ...fallback,
       ...local,
       chain: chain.id,
       address: normalizedAddress,
       launchpad: resolvedLaunchpad,
       launchMode: resolvedLaunchMode,
-      provisionalSupply: syntheticTokenPrice ? Number(executionSupply) : 0,
+      provisionalSupply,
       priceUsd,
       marketCapUsd: executionMarketCap,
+      marketCapSource: syntheticMarketCap
+        ? 'TANGO_FALLBACK' : String(local.marketCapSource || local.source || ''),
+      marketCapObservedAt: syntheticMarketCap ? 0 : marketCapObservationTime,
+      marketCapObservationId: syntheticMarketCap ? '' : marketCapObservationId,
       liquidityUsd: Number.isFinite(Number(local.liquidityUsd)) && Number(local.liquidityUsd) > 0
         ? Number(local.liquidityUsd) : 0,
       nativePriceUsd,
@@ -1049,12 +1364,14 @@
       originalObservedAt: Number(local.observedAt || 0),
       nativeOriginalObservedAt: Number(native.observedAt || 0),
       source: syntheticTokenPrice ? 'TANGO_FALLBACK' : String(local.source || 'GMGN_LAST_KNOWN'),
-      valuationMode: derivedPrice > 0 ? 'MARKET_CAP' : 'PRICE',
+      valuationMode: safeObservedPrice > 0 ? 'PRICE'
+        : derivedPrice > 0 || internalUnknownFallbackSupply
+        ? 'MARKET_CAP' : 'PRICE',
       priceProvenance: syntheticTokenPrice ? 'FALLBACK_INITIAL_MARKET_CAP'
         : derivedPrice > 0 ? 'MARKET_CAP_DERIVED' : 'OBSERVED_PRICE',
       totalSupply: Number(executionSupply),
       marketCapDivisor: Number(executionSupply),
-      supplySource: supply?.source || fallback.supplySource,
+      supplySource: executionSupplySource,
       supplyConfidence: supply?.confidence || '',
       valuationSource,
       syntheticTokenPrice,
@@ -1150,7 +1467,11 @@
       nativePriceUsd,
       nativePriceObservedAt: runtime.nativePriceObservedAt.get(chain.id)
     };
-    const validation = Tango.Engine.validateQuote(quote, Date.now(), undefined, persistedQuoteContext(token));
+    const baseContext = executionValidationBaseContext(token);
+    const validation = Tango.Engine.validateQuote(
+      quote, Date.now(), undefined, baseContext,
+      executionValidationTrustContext(baseContext, token)
+    );
     if (!validation.ok) throw new Error(validation.reason);
     return quote;
   }
@@ -1165,6 +1486,29 @@
     const address = token?.tokenAddress || token?.address;
     if (!chain || !address) return token;
     return runtime.state?.positions?.[Tango.Engine.positionKey(chain, address)] || token;
+  }
+
+  function executionValidationBaseContext(token) {
+    const chain = Tango.Chains.get(token?.chain)?.id;
+    const address = token?.tokenAddress || token?.address;
+    if (!chain || !Tango.Chains.validateAddress(chain, address)) return null;
+    const normalizedAddress = Tango.Chains.normalizeAddress(chain, address);
+    const position = runtime.state?.positions?.[Tango.Engine.positionKey(chain, normalizedAddress)];
+    return position || { chain, address: normalizedAddress, tokenAddress: normalizedAddress };
+  }
+
+  function executionValidationTrustContext(baseContext, token) {
+    const chain = Tango.Chains.get(baseContext?.chain)?.id;
+    const baseAddress = baseContext?.tokenAddress || baseContext?.address;
+    const tokenAddress = token?.tokenAddress || token?.address;
+    const trustedSource = ['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK']
+      .includes(String(token?.metadataSource || '').toUpperCase());
+    const sameToken = chain && token?.chain === chain
+      && Tango.Chains.validateAddress(chain, baseAddress)
+      && Tango.Chains.validateAddress(chain, tokenAddress)
+      && Tango.Chains.normalizeAddress(chain, baseAddress) === Tango.Chains.normalizeAddress(chain, tokenAddress);
+    if (token?.metadataVerified !== true || !trustedSource || !sameToken) return baseContext;
+    return { ...baseContext, launchpad: token?.launchpad, launchMode: token?.launchMode };
   }
 
   function freshExecutableQuoteResult(position) {
@@ -1193,7 +1537,7 @@
   }
 
   async function handleQuickBuy(context) {
-    if (!runtime.settings?.enabled) return;
+    if (paperExecutionDisabled()) return;
     const clickContext = {
       ...(context || {}),
       token: context?.token ? { ...context.token } : context?.token,
@@ -1216,6 +1560,7 @@
   }
 
   async function buy(amountNative, context = runtime.current, routeCapture = captureRoute()) {
+    if (paperExecutionDisabled()) return;
     primeTradeAudio();
     if (!routeCaptureIsCurrent(routeCapture)) return;
     if (!runtime.state.initialized) return showToast(t('startPaperTrading'), 'error');
@@ -1242,13 +1587,55 @@
     } catch (error) { showToast(t(error.message), 'error'); }
   }
 
+  function routeMatchesDetailToken(token) {
+    if (!Tango.GMGN._isTokenDetailPage?.()) return false;
+    const chain = activeChain();
+    if (!chain || token?.chain !== chain.id) return false;
+    let routeAddress;
+    try { routeAddress = Tango.GMGN.tokenAddressFromUrl(); } catch { return false; }
+    const address = token?.address || token?.tokenAddress;
+    return Tango.Chains.validateAddress(chain.id, address)
+      && Tango.Chains.validateAddress(chain.id, routeAddress)
+      && Tango.Chains.normalizeAddress(chain.id, address)
+        === Tango.Chains.normalizeAddress(chain.id, routeAddress);
+  }
+
+  function resolveCommitPaperTradeQuote(order, position, routeCapture) {
+    if (!routeCaptureIsCurrent(routeCapture)) return null;
+    const fallback = order?.quote || resolvePaperTradeQuote(order?.token, order?.quote, { position });
+    if (!routeMatchesDetailToken(order?.token)) return fallback;
+    const snapshot = Tango.GMGN.readVerifiedCurrentTokenSnapshot?.(order.token);
+    if (!routeCaptureIsCurrent(routeCapture)) return null;
+    const address = snapshot?.token?.address || snapshot?.token?.tokenAddress;
+    const quoteAddress = snapshot?.quote?.address || snapshot?.quote?.tokenAddress;
+    if (snapshot?.token?.chain !== order.token.chain
+      || !Tango.Chains.validateAddress(order.token.chain, address)
+      || Tango.Chains.normalizeAddress(order.token.chain, address)
+        !== Tango.Chains.normalizeAddress(order.token.chain, order.token.address)) return fallback;
+    const maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000);
+    const normalizedQuote = normalizeObservationDimensions(snapshot.quote, maxAgeMs);
+    const expectedAddress = Tango.Chains.normalizeAddress(order.token.chain, order.token.address);
+    if (snapshot.quote?.chain !== order.token.chain
+      || !Tango.Chains.validateAddress(order.token.chain, quoteAddress)
+      || Tango.Chains.normalizeAddress(order.token.chain, quoteAddress) !== expectedAddress
+      || !trustedCachedObservation(
+        normalizedQuote, order.token.chain, expectedAddress, maxAgeMs
+      )
+      || !acceptedTokenObservation(normalizedQuote, snapshot.token, maxAgeMs)) return fallback;
+    return resolvePaperTradeQuote(order.token, normalizedQuote, { position, preferCandidate: true }) || fallback;
+  }
+
   function previewBuy(order, routeCapture) {
     if (!routeCaptureIsCurrent(routeCapture)) return;
     const chain = activeChain();
     const account = activeAccount();
     const settings = chainSettings();
     if (!chain || order.token?.chain !== chain.id || !account || !settings) throw new Error('unsupportedChain');
-    const validation = Tango.Engine.validateQuote(order.quote, Date.now(), undefined, persistedQuoteContext(order.token));
+    const baseContext = executionValidationBaseContext(order.token);
+    const validation = Tango.Engine.validateQuote(
+      order.quote, Date.now(), undefined, baseContext,
+      executionValidationTrustContext(baseContext, order.token)
+    );
     if (!validation.ok) throw new Error(validation.reason);
     if (!(order.amountNative > 0)) throw new Error('invalidAmount');
     if (order.amountNative > account.cashBalanceNative) throw new Error('insufficientBalance');
@@ -1281,12 +1668,13 @@
   }
 
   async function commitBuy(order, routeCapture = captureRoute()) {
-    if (!routeCaptureIsCurrent(routeCapture)) return;
+    if (paperExecutionDisabled() || !routeCaptureIsCurrent(routeCapture)) return;
     if (runtime.tradePending) return;
     runtime.tradePending = true;
     try {
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
-      const quote = paperExecutableQuote(order.token, order.quote);
+      const finalQuote = resolveCommitPaperTradeQuote(order, null, routeCapture);
+      const quote = paperExecutableQuote(order.token, finalQuote);
       if (!quote) throw new Error('invalidQuote');
       const executableOrder = { ...order, quote };
       const result = await Tango.Store.executeBuy(executableOrder);
@@ -1313,7 +1701,11 @@
       order.quote = resolvePaperTradeQuote(context?.token, context?.quote, { position });
       if (!order.quote) throw new Error('invalidQuote');
       refreshPaperQuoteInBackground(order.token);
-      const validation = Tango.Engine.validateQuote(order.quote, Date.now(), undefined, persistedQuoteContext(order.token));
+      const baseContext = executionValidationBaseContext(order.token);
+      const validation = Tango.Engine.validateQuote(
+        order.quote, Date.now(), undefined, baseContext,
+        executionValidationTrustContext(baseContext, order.token)
+      );
       if (!validation.ok) throw new Error(validation.reason);
       if (requiresConfirmation()) {
         const valuationRow = displaysMarketCapValuation(order.quote)
@@ -1349,7 +1741,8 @@
     try {
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
       const position = persistedQuoteContext(order.token);
-      const quote = paperExecutableQuote(order.token, order.quote, position);
+      const finalQuote = resolveCommitPaperTradeQuote(order, position, routeCapture);
+      const quote = paperExecutableQuote(order.token, finalQuote, position);
       if (!quote) throw new Error('invalidQuote');
       const executableOrder = { ...order, quote };
       const result = await Tango.Store.executeSell(executableOrder);
@@ -1787,15 +2180,93 @@
   }
 
   function chartFrames() {
-    return document.querySelectorAll('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe');
+    return document.querySelectorAll('iframe[title="Financial Chart"], iframe[title="TradingView"], [data-sentry-component="TradingView"] iframe');
+  }
+
+  function chartReadyIdentity(value) {
+    const chain = Tango.Chains.get(String(value?.chain || '').trim().toLowerCase());
+    const address = String(value?.address || value?.tokenAddress || '').trim();
+    if (!chain || !Tango.Chains.validateAddress(chain.id, address)) return null;
+    return { chain: chain.id, address: Tango.Chains.normalizeAddress(chain.id, address) };
+  }
+
+  function probeChartFrameReady(frame) {
+    const target = frame?.contentWindow;
+    if (!target || !routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame))) return false;
+    runtime.chartProbeSequence += 1;
+    const probeId = `${runtime.routeEpoch}:${runtime.chartProbeSequence}`;
+    runtime.chartFrameProbeIds.set(frame, probeId);
+    target.postMessage({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId }, '*');
+    return true;
+  }
+
+  function registerChartFrame(frame, routeEligible = true) {
+    const firstSeen = !runtime.markerFrameListeners.has(frame);
+    if (!firstSeen) {
+      if (!routeEligible || routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame))) return false;
+      runtime.chartFrameRoutes.set(frame, captureRoute());
+      runtime.chartFrameTentative.add(frame);
+      runtime.chartFrameReadyBeforeLoad.delete(frame);
+      runtime.chartFrameAwaitingReady.delete(frame);
+      runtime.chartFrameProbeIds.delete(frame);
+      runtime.markerPayloads.delete(frame);
+      probeChartFrameReady(frame);
+      return true;
+    }
+    runtime.markerFrameListeners.add(frame);
+    if (routeEligible) runtime.chartFrameRoutes.set(frame, captureRoute());
+    const transitionPending = location.href !== runtime.lastUrl
+      || currentRouteIdentity() !== runtime.routeIdentity;
+    if (!routeEligible || transitionPending || runtime.routeEpoch > 0) {
+      runtime.chartFrameTentative.add(frame);
+    }
+    frame.addEventListener?.('load', () => {
+      let routeCurrent = routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame));
+      if (!routeCurrent && [...chartFrames()].includes(frame)) {
+        runtime.chartFrameRoutes.set(frame, captureRoute());
+        runtime.chartFrameTentative.add(frame);
+        routeCurrent = routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame));
+      }
+      const readyBeforeLoad = runtime.chartFrameReadyBeforeLoad.delete(frame);
+      if (!routeCurrent || !readyBeforeLoad) {
+        Tango.GMGN._invalidateChartFrame?.(frame);
+        runtime.chartFrameTentative.add(frame);
+        runtime.chartFrameAwaitingReady.delete(frame);
+        if (routeCurrent) runtime.chartFrameAwaitingReady.add(frame);
+      } else runtime.chartFrameAwaitingReady.delete(frame);
+      runtime.markerPayloads.delete(frame);
+      deliverChartMarkers([frame], runtime.latestMarkerPayload, true);
+      probeChartFrameReady(frame);
+    });
+    probeChartFrameReady(frame);
+    return true;
+  }
+
+  function chartMarkerDeliveryAllowed(frame, payload) {
+    const unscopedClear = Array.isArray(payload?.markers) && payload.markers.length === 0
+      && !payload?.chain && !payload?.tokenAddress;
+    if (unscopedClear) return true;
+    if (!routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame))) return false;
+    const routeToken = detailRouteToken();
+    if (!routeToken || payload?.chain !== routeToken.chain
+      || !Tango.Chains.validateAddress(routeToken.chain, payload?.tokenAddress)) return false;
+    return Tango.Chains.normalizeAddress(routeToken.chain, payload.tokenAddress) === routeToken.address;
   }
 
   function deliverChartMarkers(frames, payload, force = false) {
-    const signature = JSON.stringify(payload);
     frames.forEach((frame) => {
-      if (!force && runtime.markerPayloads.get(frame) === signature) return;
+      const registrationChanged = registerChartFrame(frame);
+      const tentative = runtime.chartFrameTentative.has(frame);
+      const deliveredPayload = tentative ? { markers: [] }
+        : chartMarkerDeliveryAllowed(frame, payload) ? payload : null;
+      if (!deliveredPayload) return;
+      const signature = JSON.stringify(deliveredPayload);
+      if ((!force || tentative) && !registrationChanged
+        && runtime.markerPayloads.get(frame) === signature) return;
       runtime.markerPayloads.set(frame, signature);
-      frame.contentWindow?.postMessage({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload }, '*');
+      frame.contentWindow?.postMessage({
+        source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: deliveredPayload
+      }, '*');
     });
   }
 
@@ -1818,8 +2289,8 @@
 
   function syncChartMarkers(force = false) {
     const frames = chartFrames();
-    if (!frames.length) return;
     runtime.latestMarkerPayload = chartMarkerPayload();
+    if (!frames.length) return;
     deliverChartMarkers(frames, runtime.latestMarkerPayload, force);
   }
 
@@ -1986,7 +2457,6 @@
     ensureRouteTokenContext();
     publishChartMarkers(true);
     queueRender();
-    syncSelectedChainFromRoute(captureRoute());
     window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
     syncQuickBuyButtons();
     tickQuote();
@@ -1994,47 +2464,97 @@
 
   async function start() {
     runtime.routeIdentity = currentRouteIdentity();
+    chartFrames().forEach((frame) => registerChartFrame(frame));
     let mutationTimer;
     runtime.observer = new MutationObserver((records) => {
       if (location.href !== runtime.lastUrl) {
         handleRouteChange();
       }
+      chartFrames().forEach((frame) => registerChartFrame(frame));
+      const fastRoots = [];
+      const addedRoots = [];
+      const removedRoots = [];
+      const hrefMutations = [];
+      let chartMutation = false;
+      let headerMutation = false;
       for (const record of records) {
         const target = record.target?.nodeType === 3 ? record.target.parentElement : record.target;
-        const targetTag = String(target?.tagName || '').toUpperCase();
-        if (target?.nodeType === 1 && targetTag !== 'BODY' && targetTag !== 'HTML') {
-          runtime.pendingMutationRoots.add(target);
+        if (record.type === 'attributes') {
+          const roots = quickBuyMutationRoots(target);
+          if (roots.length) {
+            roots.forEach((root) => runtime.pendingMutationRoots.add(root));
+            if (record.attributeName === 'href') {
+              fastRoots.push(...roots);
+              hrefMutations.push({ target, oldValue: record.oldValue });
+            }
+          }
         }
-        for (const node of record.addedNodes || []) {
-          if (node?.nodeType === 1) runtime.pendingMutationRoots.add(node);
+        if (record.type === 'characterData') {
+          quickBuyMutationRoots(target).forEach((root) => runtime.pendingMutationRoots.add(root));
         }
-        for (const node of record.removedNodes || []) {
-          if (node?.nodeType === 1) runtime.pendingMutationRoots.add(node);
+        if (record.type === 'childList') {
+          const paperReplacement = [...(record.addedNodes || [])].some(containsPaperQuickBuyMutationNode);
+          for (const node of record.addedNodes || []) {
+            if (chartMutationNode(node)) chartMutation = true;
+            if (headerMutationNode(node)) headerMutation = true;
+            const structuralRoots = quickBuyMutationRoots(node, {
+              includeAncestors: false, includeDescendants: true
+            });
+            const roots = [...new Set([...structuralRoots, ...nativeQuickBuyMutationRoots(node, target)])];
+            if (!roots.length) continue;
+            fastRoots.push(...roots);
+            roots.forEach((root) => runtime.pendingMutationRoots.add(root));
+            if (structuralRoots.length) addedRoots.push(node);
+          }
+          for (const node of record.removedNodes || []) {
+            if (chartMutationNode(node)) chartMutation = true;
+            if (headerMutationNode(node)) headerMutation = true;
+            const structuralRoots = quickBuyMutationRoots(node, {
+              includeAncestors: false, includeDescendants: true
+            });
+            const nativeRoots = paperReplacement ? [] : nativeQuickBuyMutationRoots(node, target);
+            const roots = [...new Set([...structuralRoots, ...nativeRoots])];
+            if (!roots.length) continue;
+            fastRoots.push(...roots);
+            roots.forEach((root) => runtime.pendingMutationRoots.add(root));
+            if (structuralRoots.length) removedRoots.push(node);
+          }
         }
       }
-      if (mutationTimer) return;
+      if (fastRoots.length && runtime.settings?.enabled
+        && runtime.state?.initialized && runtime.settings?.showListQuickBuy
+        && !runtime.quickBuySettingsPending && !runtime.quickBuyAuthoritativelyDisabled) {
+        syncQuickBuyButtons([...new Set(fastRoots)], {
+          fast: true, addedRoots: [...new Set(addedRoots)], removedRoots: [...new Set(removedRoots)],
+          hrefMutations, policyKey: quickBuyPolicyKey()
+        });
+      }
+      if (mutationTimer || (!runtime.pendingMutationRoots.size && !chartMutation && !headerMutation)) return;
       mutationTimer = setTimeout(() => {
         mutationTimer = null;
         const roots = [...runtime.pendingMutationRoots];
         runtime.pendingMutationRoots.clear();
-        if (roots.length) syncQuickBuyButtons(roots);
+        if (roots.length) syncQuickBuyButtons(roots, {
+          fast: false, addedRoots: [], removedRoots: [], policyKey: quickBuyPolicyKey()
+        });
         if (runtime.settings?.enabled && runtime.state?.initialized) {
           renderHeaderAccountSummary({});
           if (Tango.GMGN.needsCurrentTokenRead(runtime.current)) tickQuote();
         }
-        if (document.querySelector('iframe[title="Financial Chart"], [data-sentry-component="TradingView"] iframe')) replayChartMarkers();
+        if (document.querySelector('iframe[title="Financial Chart"], iframe[title="TradingView"], [data-sentry-component="TradingView"] iframe')) replayChartMarkers();
       }, 160);
     });
     runtime.observer.observe(document.body, {
       childList: true, subtree: true, attributes: true,
-      attributeFilter: ['href', 'class', 'style', 'data-testid'], characterData: true
+      attributeFilter: ['href', 'class', 'style', 'data-testid'], attributeOldValue: true,
+      characterData: true
     });
+    Tango.Store.subscribe(refreshRecoverably);
     const session = await chrome.runtime.sendMessage({ type: 'TANGO_GET_SESSION_CONFIRM' }).catch(() => null);
     runtime.suppressConfirmForSession = Boolean(session?.suppressed);
     runtime.activeChainId = activeChain()?.id || null;
-    await refresh();
+    await refreshRecoverably();
     ensureRouteTokenContext();
-    syncSelectedChainFromRoute(captureRoute());
     const handleQuickBuyAmountChange = (event) => {
       if (event.target?.closest?.('[data-sentry-component="BuyAmountInput"]')) {
         const root = event.target.closest('[data-sentry-component="TrenchColumn"], [class~="group/a"]') || event.target;
@@ -2043,7 +2563,6 @@
     };
     document.addEventListener('input', handleQuickBuyAmountChange, true);
     document.addEventListener('change', handleQuickBuyAmountChange, true);
-    Tango.Store.subscribe(refresh);
     await tickQuote();
     runtime.quoteTimer = setInterval(tickQuote, 3000);
     runtime.markerTimer = setInterval(syncChartMarkers, 1000);

@@ -13,7 +13,9 @@ const {
   paperOnlySafetyErrors,
   collectProductionJavaScriptSources,
   mainWorldScriptOrderErrors,
+  nativeQuickBuyGuardErrors,
   REQUIRED_ISOLATED_ORDER,
+  REQUIRED_NATIVE_GUARD_ORDER,
   REQUIRED_MAIN_ORDER,
   REQUIRED_DASHBOARD_ORDER
 } = require('../scripts/validate-extension.js');
@@ -160,6 +162,34 @@ test('manifest content scripts load every registry-driven dependency before cons
   const main = manifest.content_scripts.find((entry) => entry.world === 'MAIN' && entry.js?.includes('src/content/page-main.js'));
   assert.deepEqual(isolated.js, REQUIRED_ISOLATED_ORDER);
   assert.deepEqual(main.js, REQUIRED_MAIN_ORDER);
+});
+
+test('manifest installs the native quick-buy fail-closed stylesheet at document start', () => {
+  const manifest = require('../manifest.json');
+  const safety = manifest.content_scripts.find((entry) =>
+    entry.run_at === 'document_start'
+    && entry.css?.includes('src/content/quick-buy-safety.css')
+  );
+  assert.ok(safety);
+  assert.deepEqual(safety.matches, ['https://gmgn.ai/*']);
+  assert.deepEqual(safety.js, REQUIRED_NATIVE_GUARD_ORDER);
+  assert.notEqual(safety.world, 'MAIN');
+});
+
+test('native quick-buy guard contract requires isolated document-start execution before MAIN', () => {
+  assert.equal(typeof nativeQuickBuyGuardErrors, 'function');
+  const guard = {
+    matches: ['https://gmgn.ai/*'],
+    css: ['src/content/quick-buy-safety.css'],
+    js: ['src/shared/constants.js', 'src/content/native-quick-buy-guard.js'],
+    run_at: 'document_start'
+  };
+  const main = { world: 'MAIN', js: ['src/content/page-main.js'], run_at: 'document_start' };
+  assert.deepEqual(nativeQuickBuyGuardErrors([guard, main]), []);
+  assert.match(nativeQuickBuyGuardErrors([main, guard])[0], /before MAIN/i);
+  assert.match(nativeQuickBuyGuardErrors([{ ...guard, world: 'MAIN' }, main])[0], /isolated/i);
+  assert.match(nativeQuickBuyGuardErrors([{ ...guard, world: 'USER_SCRIPT' }, main])[0], /isolated/i);
+  assert.match(nativeQuickBuyGuardErrors([{ ...guard, run_at: 'document_idle' }, main])[0], /document_start/i);
 });
 
 test('isolated content loads the chain view before content runtime consumers', () => {

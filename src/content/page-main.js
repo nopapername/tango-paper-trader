@@ -3,29 +3,116 @@
   window.__tangoGmgnQuoteTap = true;
 
   const paperActionDispatchAt = new Map();
-  const paperTradeEvents = ['pointerdown', 'mousedown', 'touchstart', 'pointerup', 'mouseup', 'touchend', 'click', 'keydown', 'keyup'];
+  const paperPointerActions = new Map();
+  const paperKeyboardActions = new Map();
+  const paperTradeEvents = [
+    'pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup',
+    'touchstart', 'touchend', 'click', 'auxclick', 'keydown', 'keyup'
+  ];
+  function eventElementPath(event) {
+    return event.composedPath().filter((node) => node instanceof Element);
+  }
   function paperActionTarget(event) {
-    return event.composedPath().find((node) => node instanceof Element && node.matches?.('[data-tango-paper-action="quick-buy"]')) || null;
+    return eventElementPath(event).find((node) => node.matches?.('[data-tango-paper-action="quick-buy"]')) || null;
+  }
+  function nativeQuickBuyTarget(event) {
+    return eventElementPath(event).find((node) =>
+      node.matches?.('[data-testid="quickbuy"]') || node.matches?.('.BuyButton-continer')
+      || node.matches?.('[data-sentry-component="BuyButtons"]')
+    ) || null;
+  }
+  function eventIsTrusted(event) {
+    return event.isTrusted !== false;
+  }
+  function isPrimaryPointerEvent(event) {
+    return (event.button == null || event.button === 0)
+      && event.isPrimary !== false
+      && eventIsTrusted(event);
+  }
+  function paperActivationIdentity(button) {
+    const actionId = String(button?.dataset?.tangoActionId || '');
+    const bindingNonce = String(button?.dataset?.tangoBindingNonce || '');
+    const state = String(button?.dataset?.tangoPaperState || '');
+    if (!actionId || !bindingNonce
+      || !['resolving-identity', 'ready', 'in-flight'].includes(state)) return null;
+    return { actionId, bindingNonce, state, key: `${actionId}:${bindingNonce}:${state}` };
+  }
+  function publishPaperActivation(identity) {
+    const type = identity.state === 'resolving-identity'
+      ? 'PAPER_QUICK_BUY_INTENT' : 'PAPER_QUICK_BUY_CLICK';
+    window.postMessage({
+      source: 'TANGO_GMGN_PAGE', type,
+      actionId: identity.actionId, bindingNonce: identity.bindingNonce
+    }, '*');
+  }
+  function updatePointerActivation(event, identity) {
+    if (!['pointerdown', 'pointerup', 'pointercancel'].includes(event.type)) return false;
+    const pointerId = event.pointerId == null ? 'legacy-primary' : event.pointerId;
+    if (event.type === 'pointerdown') {
+      paperPointerActions.delete(pointerId);
+      if (identity && isPrimaryPointerEvent(event)) paperPointerActions.set(pointerId, identity.key);
+      return false;
+    }
+    const startedIdentityKey = paperPointerActions.get(pointerId) || '';
+    paperPointerActions.delete(pointerId);
+    return event.type === 'pointerup'
+      && Boolean(identity)
+      && startedIdentityKey === identity.key
+      && isPrimaryPointerEvent(event);
+  }
+  function updateKeyboardActivation(event, identity) {
+    if (event.type !== 'keydown' && event.type !== 'keyup') return false;
+    const key = event.key;
+    if (event.type === 'keydown') {
+      if (event.repeat) return false;
+      paperKeyboardActions.delete(key);
+      if (identity && eventIsTrusted(event)) paperKeyboardActions.set(key, identity.key);
+      return false;
+    }
+    const startedIdentityKey = paperKeyboardActions.get(key) || '';
+    paperKeyboardActions.delete(key);
+    return Boolean(identity)
+      && startedIdentityKey === identity.key
+      && !event.repeat
+      && eventIsTrusted(event);
+  }
+  function isSafeSemanticClick(event, button) {
+    return event.type === 'click'
+      && event.target === button
+      && event.button === 0
+      && Number(event.detail ?? 0) === 0
+      && eventIsTrusted(event);
   }
   function blockGmgnPaperAction(event) {
     const button = paperActionTarget(event);
-    if (!button) return;
     if ((event.type === 'keydown' || event.type === 'keyup') && event.key !== 'Enter' && event.key !== ' ') return;
+    const identity = paperActivationIdentity(button);
+    const pointerActivation = updatePointerActivation(event, identity);
+    const keyboardActivation = updateKeyboardActivation(event, identity);
+    if (!button) {
+      const nativeAllowed = document.documentElement?.classList?.contains(
+        'tango-paper-native-quick-buy-allowed'
+      );
+      if (nativeAllowed || !nativeQuickBuyTarget(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    if (event.type !== 'pointerup' && event.type !== 'click' && event.type !== 'keydown') return;
-    const actionId = button.dataset.tangoActionId;
-    const lastDispatchAt = Number(paperActionDispatchAt.get(actionId) || 0);
-    if (!actionId || Date.now() - lastDispatchAt < 700) return;
-    paperActionDispatchAt.set(actionId, Date.now());
+    if (!identity || (!pointerActivation && !keyboardActivation && !isSafeSemanticClick(event, button))) return;
+    const lastDispatchAt = Number(paperActionDispatchAt.get(identity.key) || 0);
+    if (Date.now() - lastDispatchAt < 700) return;
+    paperActionDispatchAt.set(identity.key, Date.now());
     if (paperActionDispatchAt.size > 500) {
       const expiresBefore = Date.now() - 60_000;
       paperActionDispatchAt.forEach((dispatchedAt, key) => {
         if (dispatchedAt < expiresBefore) paperActionDispatchAt.delete(key);
       });
     }
-    window.postMessage({ source: 'TANGO_GMGN_PAGE', type: 'PAPER_QUICK_BUY_CLICK', actionId }, '*');
+    publishPaperActivation(identity);
   }
   paperTradeEvents.forEach((type) => window.addEventListener(type, blockGmgnPaperAction, { capture: true, passive: false }));
 
@@ -74,9 +161,11 @@
     if (chain) {
       try { publish(Tango.GMGNQuotes.extract(payload, chain, observedAt)); } catch {}
     }
-    if (isMajorCoinPricesResponse(url)) {
+    if (isMajorCoinPriceRequest(url)) {
       try {
-        const prices = Tango.GMGNQuotes.extractNativePrices(payload, observedAt);
+        const prices = Tango.GMGNQuotes.extractNativePrices(payload, observedAt, {
+          requestUrl: new URL(String(url || ''), location.href).href
+        });
         if (prices.length) window.postMessage({
           source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES', prices
         }, '*');
@@ -89,8 +178,13 @@
     return Boolean(chain) && (!explicitChain || explicitChain === chain);
   }
 
-  function isMajorCoinPricesResponse(url) {
-    return /\/api\/v1\/major_coin_prices(?:\?|$)/i.test(String(url || ''));
+  function isMajorCoinPriceRequest(url) {
+    try {
+      const parsed = new URL(String(url || ''), location.href);
+      return parsed.protocol === 'https:'
+        && /(^|\.)gmgn\.ai$/i.test(parsed.hostname)
+        && parsed.pathname === '/api/v1/major_coin_prices';
+    } catch { return false; }
   }
 
   function shouldInspectResponse(url, contentType) {
@@ -112,7 +206,7 @@
           const contentType = response?.headers?.get('content-type') || '';
           const responseUrl = response?.url || requestStart.url;
           if (response?.ok && shouldInspectResponse(responseUrl, contentType)
-            && (isMajorCoinPricesResponse(responseUrl)
+            && (isMajorCoinPriceRequest(responseUrl)
               || responseMatchesRequestChain(responseUrl, requestStart.chain))) {
             response.clone().json().then((payload) => inspectPayload(
               payload, requestStart.chain, responseUrl, requestStart.observedAt
@@ -138,7 +232,7 @@
       const contentType = this.getResponseHeader('content-type') || '';
       const responseUrl = this.responseURL || this.__tangoRequestUrl;
       if (this.status >= 200 && this.status < 300 && shouldInspectResponse(responseUrl, contentType)
-        && (isMajorCoinPricesResponse(responseUrl)
+        && (isMajorCoinPriceRequest(responseUrl)
           || responseMatchesRequestChain(responseUrl, this.__tangoRequestChain))) {
         try {
           inspectPayload(this.responseType === 'json' ? this.response : JSON.parse(this.responseText),
