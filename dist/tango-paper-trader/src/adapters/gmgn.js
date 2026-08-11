@@ -1,6 +1,5 @@
 (function initGmgnAdapter(global) {
   const Tango = global.Tango = global.Tango || {};
-  const quickBuyActions = new Map();
   const quickBuyIntents = new Map();
   const quickBuyCardGenerations = new WeakMap();
   let quickBuyCardBirths = new WeakMap();
@@ -8,15 +7,12 @@
   const quickBuyOperations = new Map();
   const trackedQuickBuySlots = new Set();
   const trenchColumns = new WeakMap();
-  let quickBuyPresentationsByColumn = new WeakMap();
-  const quickBuyPresentationsByChain = new Map();
   const trenchSnapshots = new Map();
   const MAX_TRENCH_SNAPSHOTS = 200;
   const QUICK_BUY_IDENTITY_INTENT_TTL_MS = 300;
   const FDV_MARKET_CAP_TOLERANCE = 2;
   let lastVerifiedDetail = null;
   let quickBuyProbeCursor = 0;
-  let quickBuyPresentationRevision = 0;
   let quickBuyGenerationSequence = 0;
   let quickBuyNonceSequence = 0;
   const TOKEN_ITEM_ROOT_SELECTOR =
@@ -24,22 +20,6 @@
   const FAST_QUICK_BUY_SLOT_LIMIT = 24;
   let chartTrustByFrame = new WeakMap();
   const CHART_FRAME_SELECTOR = 'iframe[title="Financial Chart"], iframe[title="TradingView"], [data-sentry-component="TradingView"] iframe';
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('message', (event) => {
-      if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE') return;
-      invokeQuickBuyAction(event.data?.actionId, event.data?.bindingNonce, event.data?.type);
-    });
-  }
-
-  function invokeQuickBuyAction(actionId, bindingNonce, type) {
-    const action = quickBuyActions.get(String(actionId || ''));
-    const expectedKind = type === 'PAPER_QUICK_BUY_INTENT' ? 'intent'
-      : (type === 'PAPER_QUICK_BUY_CLICK' ? 'execute' : '');
-    if (!action || !expectedKind || action.kind !== expectedKind
-      || action.bindingNonce !== String(bindingNonce || '')) return undefined;
-    return action.invoke();
-  }
 
   function cardGeneration(card) {
     if (!quickBuyCardGenerations.has(card)) {
@@ -1177,286 +1157,13 @@
     }
   }
 
-  const QUICK_BUY_SIZE_PROFILES = Object.freeze({
-    small: Object.freeze({ id: 'small', heightPx: 24, textPx: 12 }),
-    large: Object.freeze({ id: 'large', heightPx: 28, textPx: 13 }),
-    extraLarge: Object.freeze({ id: 'extra-large', heightPx: 32, textPx: 14 }),
-    giant: Object.freeze({ id: 'giant', heightPx: 36, textPx: 16 })
+
+  const LOCKED_QUICK_BUY_PROFILE = Object.freeze({
+    id: 'giant',
+    heightPx: 36,
+    amountTextPx: 14,
+    hintTextPx: 10
   });
-  const QUICK_BUY_SIZE_PROFILE_LIST = Object.freeze(Object.values(QUICK_BUY_SIZE_PROFILES));
-  const quickBuyProfilesByChain = new Map();
-  let quickBuyProfileRevision = 0;
-
-  function rememberQuickBuyProfile(chain, profile) {
-    const current = quickBuyProfilesByChain.get(chain);
-    if (!chain || !profile) return current || null;
-    if (current?.profile?.id === profile.id) return current;
-    const next = { profile, revision: ++quickBuyProfileRevision };
-    quickBuyProfilesByChain.set(chain, next);
-    return next;
-  }
-
-  function quickBuyUtilityClass(name) {
-    const token = String(name || '').trim();
-    let bracketDepth = 0;
-    let parenthesisDepth = 0;
-    let escaped = false;
-    let separator = -1;
-    for (let index = 0; index < token.length; index += 1) {
-      const character = token[index];
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (character === '\\') {
-        escaped = true;
-        continue;
-      }
-      if (character === '[') bracketDepth += 1;
-      else if (character === ']' && bracketDepth > 0) bracketDepth -= 1;
-      else if (character === '(') parenthesisDepth += 1;
-      else if (character === ')' && parenthesisDepth > 0) parenthesisDepth -= 1;
-      else if (character === ':' && bracketDepth === 0 && parenthesisDepth === 0) separator = index;
-    }
-    return token.slice(separator + 1);
-  }
-
-  function safeQuickBuyPresentationClass(name) {
-    const token = String(name || '').trim();
-    const utility = quickBuyUtilityClass(token);
-    const modifiers = utility.match(/^[!-]+/)?.[0] || '';
-    const baseUtility = utility.slice(modifiers.length);
-    if (!token || utility === 'tango-list-quick-buy' || utility === 'tango-quick-buy-fallback') return false;
-    if (token.endsWith('!')) return false;
-    if (token !== utility) return false;
-    if (modifiers.includes('-') || baseUtility.startsWith('[')) return false;
-    if (modifiers.includes('!')) return false;
-    if (/^(?:h|min-h|max-h|w|min-w|max-w|size|p[trblxy]?|m[trblxy]?|gap(?:-[xy])?|space-[xy]|font|leading|tracking)-/.test(baseUtility)) return false;
-    if (/^text-\[(?:length:)?[^\]]+\]$/.test(baseUtility) || /^text-(?:xs|sm|base|lg|xl|\d+xl)$/.test(baseUtility)) return false;
-    if (/^(?:hidden|invisible|collapse|contents|sr-only|opacity-.+|pointer-events-.+)$/.test(baseUtility)) return false;
-    if (/^(?:static|fixed|absolute|relative|sticky)$/.test(baseUtility)) return false;
-    if (/^(?:transform(?:-gpu|-cpu|-none)?|translate-[xy]-.+|scale(?:-[xy])?-.+|rotate-.+|skew-[xy]-.+|origin-.+)$/.test(baseUtility)) return false;
-    if (/^(?:inset(?:-[xy])?|top|right|bottom|left|z|order|float|clear)-/.test(baseUtility)) return false;
-    if (/^(?:is-)?(?:loading|disabled|pending)$/.test(baseUtility) || /^animate-/.test(baseUtility)) return false;
-    const layoutUtility = /^(?:flex-(?:(?:row|col)(?:-reverse)?|wrap(?:-reverse)?|nowrap)|grid-flow-.+|items-.+|content-.+|justify-.+|self-.+|place-(?:content|items|self)-.+|text-(?:left|center|right|justify|start|end)|align-.+)$/.test(baseUtility);
-    if (layoutUtility || /^(?:flex|inline-flex|grid|inline-grid)$/.test(baseUtility)) return false;
-    return /^(?:text|border|outline|shadow|fill|stroke)-/.test(baseUtility)
-      || /^(?:rounded(?:-(?:none|sm|md|lg|xl|2xl|3xl|full))?|border)$/.test(baseUtility);
-  }
-
-  function safeQuickBuyStyleProperty(property, value) {
-    const name = String(property || '').trim().toLowerCase();
-    const source = String(value || '').trim();
-    if (!name || !source) return false;
-    if (name === '--customize-button-ultra-color') return true;
-    return /^(?:color|border(?:-(?:top|right|bottom|left))?(?:-(?:color|style|width|radius))?|border-radius|outline(?:-(?:color|style|width|offset))?|box-shadow|fill|stroke)$/.test(name);
-  }
-
-  function sanitizeQuickBuyStyleText(styleText) {
-    return String(styleText || '').split(';').map((declaration) => declaration.trim()).filter(Boolean)
-      .map((declaration) => {
-        const separator = declaration.indexOf(':');
-        if (separator < 1) return null;
-        const property = declaration.slice(0, separator).trim().toLowerCase();
-        const value = declaration.slice(separator + 1).trim();
-        return safeQuickBuyStyleProperty(property, value) ? `${property}: ${value};` : null;
-      }).filter(Boolean).join(' ');
-  }
-
-  function quickBuyProfileSignalFromPresentation(className, styleText) {
-    const classSource = String(className || '');
-    const styleSource = String(styleText || '');
-    const height = Number(
-      classSource.match(/(?:^|\s)!?h-\[(\d+(?:\.\d+)?)px\](?=\s|$)/)?.[1]
-      || styleSource.match(/(?:^|;)\s*height\s*:\s*(\d+(?:\.\d+)?)px\b/i)?.[1]
-      || 0
-    );
-    const text = Number(
-      classSource.match(/(?:^|\s)!?text-\[(\d+(?:\.\d+)?)px\](?=\s|$)/)?.[1]
-      || styleSource.match(/(?:^|;)\s*font-size\s*:\s*(\d+(?:\.\d+)?)px\b/i)?.[1]
-      || 0
-    );
-    if (!height && !text) return null;
-    if (height && text) return QUICK_BUY_SIZE_PROFILE_LIST.find((profile) =>
-      profile.heightPx === height && profile.textPx === text) || null;
-    return QUICK_BUY_SIZE_PROFILE_LIST.reduce((closest, profile) => {
-      const closestDistance = Math.abs((height ? closest.heightPx : closest.textPx) - (height || text));
-      const candidateDistance = Math.abs((height ? profile.heightPx : profile.textPx) - (height || text));
-      return candidateDistance < closestDistance ? profile : closest;
-    }, QUICK_BUY_SIZE_PROFILES.large);
-  }
-
-  function quickBuyProfileFromPresentation(className, styleText) {
-    return quickBuyProfileSignalFromPresentation(className, styleText) || QUICK_BUY_SIZE_PROFILES.large;
-  }
-
-  function canonicalQuickBuyProfileFromNode(node) {
-    if (!node?.isConnected) return null;
-    const className = typeof node.className === 'string'
-      ? node.className : String(node.className?.baseVal || '');
-    const styleText = node.getAttribute?.('style') || node.style?.cssText || '';
-    const height = Number(
-      className.match(/(?:^|\s)!?h-\[(\d+(?:\.\d+)?)px\](?=\s|$)/)?.[1]
-      || styleText.match(/(?:^|;)\s*height\s*:\s*(\d+(?:\.\d+)?)px\b/i)?.[1]
-      || 0
-    );
-    const text = Number(
-      className.match(/(?:^|\s)!?text-\[(\d+(?:\.\d+)?)px\](?=\s|$)/)?.[1]
-      || styleText.match(/(?:^|;)\s*font-size\s*:\s*(\d+(?:\.\d+)?)px\b/i)?.[1]
-      || 0
-    );
-    if (!height && !text) return null;
-    return QUICK_BUY_SIZE_PROFILE_LIST.find((profile) =>
-      (!height || profile.heightPx === height)
-      && (!text || profile.textPx === text)
-    ) || null;
-  }
-
-  function quickBuyConnectedProfileSources(slot, binding, nativeControl = null) {
-    if (!slot) return [];
-    const replacement = binding?.replacement || slot.__tangoReplacementQuickBuy;
-    const candidates = [
-      nativeControl || binding?.nativeControl,
-      replacement?.parentElement,
-      slot.querySelector?.('[class~="group/btn"]')
-    ];
-    for (let node = replacement?.parentElement; node && node !== slot; node = node.parentElement) {
-      candidates.push(node);
-    }
-    candidates.push(slot);
-    return [...new Set(candidates.filter((node) => node?.isConnected))].filter((node) =>
-      node.closest?.('.BuyButton-continer') === slot
-    );
-  }
-
-  function readConnectedQuickBuyProfile(slot, binding, nativeControl = null) {
-    for (const node of quickBuyConnectedProfileSources(slot, binding, nativeControl)) {
-      const profile = canonicalQuickBuyProfileFromNode(node);
-      if (profile) return { node, profile };
-    }
-    return null;
-  }
-
-  function readQuickBuyPresentation(control) {
-    if (!control) return { className: '', styleText: '', signature: '' };
-    const rawClassName = typeof control.className === 'string'
-      ? control.className : String(control.className?.baseVal || '');
-    const className = rawClassName.split(/\s+/)
-      .filter(safeQuickBuyPresentationClass).join(' ');
-    const rawStyleText = control.getAttribute?.('style') || control.style?.cssText || '';
-    const styleText = sanitizeQuickBuyStyleText(rawStyleText);
-    const normalizedClassName = className.trim();
-    const normalizedStyleText = styleText.trim();
-    return {
-      className: normalizedClassName,
-      styleText: normalizedStyleText,
-      profile: quickBuyProfileSignalFromPresentation(rawClassName, rawStyleText),
-      signature: normalizedClassName || normalizedStyleText
-        ? `${normalizedClassName}\n${normalizedStyleText}` : ''
-    };
-  }
-
-  function presentationSignature(control) {
-    return readQuickBuyPresentation(control).signature;
-  }
-
-  function copyQuickBuyPresentation(presentation) {
-    return {
-      className: String(presentation?.className || ''),
-      styleText: String(presentation?.styleText || ''),
-      signature: String(presentation?.signature || ''),
-      profile: presentation?.profile || null,
-      revision: Number(presentation?.revision || 0)
-    };
-  }
-
-  function isStableQuickBuyPresentationClass(name) {
-    const token = String(name || '').trim();
-    if (!token) return false;
-    return /^(?:text|border|outline|shadow|fill|stroke)-/.test(token)
-      || /^(?:rounded(?:-(?:none|sm|md|lg|xl|2xl|3xl|full))?|border)$/.test(token);
-  }
-
-  function sharedQuickBuyPresentation(presentation) {
-    const className = String(presentation?.className || '').split(/\s+/)
-      .filter(isStableQuickBuyPresentationClass).join(' ');
-    return {
-      className,
-      styleText: '',
-      signature: className ? `${className}\n` : '',
-      profile: presentation?.profile || null
-    };
-  }
-
-  function mergeQuickBuyPresentation(localPresentation, sharedPresentation) {
-    const local = copyQuickBuyPresentation(localPresentation);
-    const shared = copyQuickBuyPresentation(sharedPresentation);
-    if (!shared.signature) return local;
-    const localClasses = local.className.split(/\s+/)
-      .filter((name) => name && !isStableQuickBuyPresentationClass(name));
-    const sharedClasses = shared.className.split(/\s+/).filter(Boolean);
-    const className = [...localClasses, ...sharedClasses].join(' ');
-    return {
-      className,
-      styleText: local.styleText,
-      signature: className || local.styleText ? `${className}\n${local.styleText}` : '',
-      profile: shared.profile || local.profile || null,
-      revision: shared.revision
-    };
-  }
-
-  function cachedQuickBuyPresentation(card, chain = chainFromUrl()) {
-    const column = trenchColumn(card);
-    const columnCached = column && quickBuyPresentationsByColumn.get(column);
-    const chainCached = quickBuyPresentationsByChain.get(chain);
-    const cached = columnCached || chainCached;
-    return cached ? copyQuickBuyPresentation(cached) : null;
-  }
-
-  function rememberQuickBuyPresentation(card, chain, presentation) {
-    if (!presentation || !chain) return cachedQuickBuyPresentation(card, chain);
-    const sharedPresentation = sharedQuickBuyPresentation(presentation);
-    const column = trenchColumn(card);
-    const columnCached = column && quickBuyPresentationsByColumn.get(column);
-    let columnRevision = Number(columnCached?.revision || 0);
-    if (column && (sharedPresentation.signature || sharedPresentation.profile)) {
-      const nextColumn = {
-        className: sharedPresentation.signature ? sharedPresentation.className : String(columnCached?.className || ''),
-        styleText: sharedPresentation.signature ? sharedPresentation.styleText : String(columnCached?.styleText || ''),
-        signature: sharedPresentation.signature || String(columnCached?.signature || ''),
-        profile: sharedPresentation.profile || columnCached?.profile || null
-      };
-      const columnChanged = !columnCached || columnCached.signature !== nextColumn.signature
-        || columnCached.profile?.id !== nextColumn.profile?.id;
-      columnRevision = columnChanged ? ++quickBuyPresentationRevision : columnRevision;
-      quickBuyPresentationsByColumn.set(column, {
-        ...nextColumn,
-        revision: columnRevision
-      });
-    }
-
-    const pageCached = quickBuyPresentationsByChain.get(chain);
-    let pageRevision = Number(pageCached?.revision || 0);
-    if (sharedPresentation.signature || sharedPresentation.profile) {
-      const nextPage = {
-        className: sharedPresentation.signature ? sharedPresentation.className : String(pageCached?.className || ''),
-        styleText: sharedPresentation.signature ? sharedPresentation.styleText : String(pageCached?.styleText || ''),
-        signature: sharedPresentation.signature || String(pageCached?.signature || ''),
-        profile: sharedPresentation.profile || pageCached?.profile || null
-      };
-      const sharedChanged = !pageCached || pageCached.signature !== nextPage.signature
-        || pageCached.profile?.id !== nextPage.profile?.id;
-      pageRevision = sharedChanged ? ++quickBuyPresentationRevision : pageRevision;
-      quickBuyPresentationsByChain.set(chain, {
-        ...nextPage,
-        revision: pageRevision
-      });
-    }
-    return {
-      ...copyQuickBuyPresentation(presentation),
-      revision: Number(columnRevision || pageRevision || 0)
-    };
-  }
 
   function stripQuickBuyActionAttributes(control) {
     for (const name of control?.getAttributeNames?.() || []) {
@@ -1507,7 +1214,7 @@
     return Tango.NativeQuickBuyGuard?.registerPaperAction?.(replacement, {
       slot, card, binding, actionId: expectedActionId, bindingNonce, generation, state,
       chain, address, href, amountNative
-    }) === true;
+    }, binding.action?.invoke) === true;
   }
 
   function paperGuardIdentity(binding) {
@@ -1535,8 +1242,7 @@
       replacementDataset: { ...(binding?.replacement?.dataset || {}) },
       original: slot?.__tangoOriginalQuickBuy,
       replacement: slot?.__tangoReplacementQuickBuy,
-      card: slot?.__tangoQuickBuyCard,
-      handler: slot?.__tangoQuickBuyHandler
+      card: slot?.__tangoQuickBuyCard
     };
   }
 
@@ -1553,8 +1259,6 @@
     else delete slot.__tangoReplacementQuickBuy;
     if (snapshot.card !== undefined) slot.__tangoQuickBuyCard = snapshot.card;
     else delete slot.__tangoQuickBuyCard;
-    if (snapshot.handler !== undefined) slot.__tangoQuickBuyHandler = snapshot.handler;
-    else delete slot.__tangoQuickBuyHandler;
   }
 
   function stagePaperBinding(slot, binding) {
@@ -1566,7 +1270,6 @@
     slot.__tangoQuickBuyBinding = binding;
     slot.__tangoReplacementQuickBuy = binding.replacement;
     slot.__tangoQuickBuyCard = binding.card;
-    slot.__tangoQuickBuyHandler = binding.action?.invoke;
     if (!binding.replacement.isConnected) mountQuickBuyReplacement(slot, null, binding.replacement);
   }
 
@@ -1574,12 +1277,7 @@
     const binding = previous.binding;
     if (!binding || binding === nextBinding) return;
     cancelQuickBuyIdentityIntent(binding, 'superseded');
-    quickBuyActions.delete(String(binding.actionId || ''));
-    if (binding.repairTimer) global.clearTimeout?.(binding.repairTimer);
-    for (const target of binding.resizeTargets || []) binding.resizeObserver?.unobserve?.(target);
-    binding.resizeObserver?.disconnect?.();
-    binding.presentationObserver?.disconnect?.();
-    binding.profileObserver?.disconnect?.();
+    binding.actionHost?.classList?.remove?.('tango-quick-buy-action-host');
     if (binding.replacement !== nextBinding.replacement) {
       Tango.NativeQuickBuyGuard?.revokePaperAction?.(binding.replacement);
       binding.replacement?.remove?.();
@@ -1603,7 +1301,6 @@
           previous.binding.replacement.dataset.tangoPublished = '1';
         } else {
           Tango.NativeQuickBuyGuard?.revokePaperAction?.(previous.binding.replacement);
-          quickBuyActions.delete(String(previous.binding.actionId || ''));
           previous.binding.replacement.dataset.tangoPublished = '0';
         }
       }
@@ -1615,10 +1312,8 @@
       }
       return false;
     }
-    quickBuyActions.set(nextBinding.actionId, action);
     nextBinding.replacement.dataset.tangoPublished = '1';
     retirePreviousPaperBinding(previous, nextBinding);
-    slot.__tangoQuickBuyHandler = action.invoke;
     mountQuickBuyReplacement(slot, nextBinding.nativeControl, nextBinding.replacement);
     replaceAdditionalNativeQuickBuyControls(slot, nextBinding);
     return true;
@@ -1792,44 +1487,35 @@
     }
   }
 
-  function applyInertPresentation(replacement, nativeControl, fallbackPresentation = null) {
-    if (!replacement) return '';
-    const livePresentation = readQuickBuyPresentation(nativeControl);
-    const hasExplicitFallback = fallbackPresentation?.signature !== undefined;
-    const fallback = hasExplicitFallback
-      ? fallbackPresentation : readQuickBuyPresentation(fallbackPresentation);
-    const currentPresentation = readQuickBuyPresentation(replacement);
-    const presentation = livePresentation.signature
-      ? livePresentation
-      : (hasExplicitFallback ? fallback : (fallback?.signature ? fallback : currentPresentation));
-    replacement.className = `${presentation.className || ''} tango-list-quick-buy`.trim();
-    if (replacement.style) replacement.style.cssText = presentation.styleText || '';
+
+  function lockedQuickBuyActionHost(slot, replacement = null) {
+    const parent = replacement?.parentElement;
+    if (parent?.matches?.('[class~="group/btn"]')
+      && parent.closest?.('.BuyButton-continer') === slot) return parent;
+    return slot?.querySelector?.('[class~="group/btn"]') || null;
+  }
+
+  function applyLockedQuickBuyPresentation(replacement, slot = null) {
+    if (!replacement) return LOCKED_QUICK_BUY_PROFILE;
+    replacement.className = 'tango-list-quick-buy';
+    if (replacement.style) replacement.style.cssText = '';
     ensureInertQuickBuy(replacement);
-    return presentation.signature || '';
-  }
-
-  function setStylePropertyIfChanged(style, name, value) {
-    if (!style?.setProperty || style.getPropertyValue?.(name) === value) return;
-    style.setProperty(name, value);
-  }
-
-  function applyQuickBuyProfile(replacement, profile, slot = null) {
-    const selected = profile || QUICK_BUY_SIZE_PROFILES.large;
-    const height = `${selected.heightPx}px`;
-    const text = `${selected.textPx}px`;
-    setStylePropertyIfChanged(replacement?.style, '--tango-quick-buy-height', height);
-    setStylePropertyIfChanged(replacement?.style, '--tango-quick-buy-text', text);
-    setStylePropertyIfChanged(slot?.style, '--tango-quick-buy-height', height);
-    if (replacement?.dataset?.tangoQuickBuySize !== selected.id) {
-      replacement.dataset.tangoQuickBuySize = selected.id;
+    replacement.dataset.tangoQuickBuySize = LOCKED_QUICK_BUY_PROFILE.id;
+    if (slot?.dataset) slot.dataset.tangoQuickBuySize = LOCKED_QUICK_BUY_PROFILE.id;
+    const binding = slot?.__tangoQuickBuyBinding;
+    const actionHost = lockedQuickBuyActionHost(slot, replacement);
+    if (binding?.actionHost && binding.actionHost !== actionHost) {
+      binding.actionHost.classList?.remove?.('tango-quick-buy-action-host');
     }
-    if (slot?.dataset && slot.dataset.tangoQuickBuySize !== selected.id) {
-      slot.dataset.tangoQuickBuySize = selected.id;
+    actionHost?.classList?.add?.('tango-quick-buy-action-host');
+    if (binding) {
+      binding.actionHost = actionHost;
+      binding.quickBuyProfile = LOCKED_QUICK_BUY_PROFILE;
     }
-    return selected;
+    return LOCKED_QUICK_BUY_PROFILE;
   }
 
-  function syncQuickBuyPresentation(slot, nativeControl = null) {
+  function syncQuickBuyPresentation(slot) {
     const binding = slot?.__tangoQuickBuyBinding;
     const replacement = binding?.replacement || slot?.__tangoReplacementQuickBuy
       || slot?.querySelector?.('.tango-list-quick-buy');
@@ -1837,157 +1523,9 @@
       Tango.NativeQuickBuyGuard?.revokePaperAction?.(replacement);
       return false;
     }
-    if (binding) observeQuickBuyProfileSources(slot, binding, nativeControl);
-    const source = nativeControl || binding?.presentationSource;
-    const connectedProfile = readConnectedQuickBuyProfile(slot, binding, nativeControl);
-    const priorRememberedProfileRevision = Number(
-      quickBuyProfilesByChain.get(binding?.chain)?.revision || 0
-    );
-    const rememberedProfile = connectedProfile?.profile
-      ? rememberQuickBuyProfile(binding?.chain, connectedProfile.profile) : null;
-    const connectedProfileAdvanced = Boolean(connectedProfile?.profile
-      && Number(rememberedProfile?.revision || 0) > priorRememberedProfileRevision);
-    const livePresentation = readQuickBuyPresentation(source);
-    const cachedPresentation = cachedQuickBuyPresentation(binding?.card, binding?.chain);
-    const cachedRevision = Number(cachedPresentation?.revision || 0);
-    const bindingRevision = Number(binding?.presentationRevision || 0);
-    const cachedIsCurrent = Boolean(cachedPresentation?.signature
-      && cachedRevision > bindingRevision);
-    const sourceDrifted = Boolean(source && binding
-      && livePresentation.signature !== String(binding.presentationSourceSignature || ''));
-    const explicitSource = nativeControl != null;
-    const sourceProfileChanged = Boolean(source && livePresentation.profile
-      && livePresentation.profile.id !== String(binding?.presentationSourceProfileId || ''));
-    const sourceCanPromote = Boolean(explicitSource || sourceDrifted || sourceProfileChanged);
-    const profileDrifted = Boolean(sourceCanPromote && livePresentation.profile
-      && (livePresentation.profile.id !== cachedPresentation?.profile?.id));
-    const updatedProfilePresentation = profileDrifted
-      ? rememberQuickBuyPresentation(binding?.card, binding?.chain, livePresentation) : null;
-    const authoritativeSource = Boolean(binding?.presentationTrusted !== false
-      && (explicitSource || sourceDrifted || profileDrifted));
-    const authoritativeLivePresentation = authoritativeSource
-      && (livePresentation.signature || livePresentation.profile)
-      ? rememberQuickBuyPresentation(binding?.card, binding?.chain, livePresentation) : null;
-    const mergedCachedPresentation = cachedIsCurrent
-      ? mergeQuickBuyPresentation(
-        binding?.presentation || livePresentation || readQuickBuyPresentation(replacement),
-        cachedPresentation
-      ) : null;
-    const presentation = authoritativeLivePresentation
-      || mergedCachedPresentation
-      || binding?.presentation
-      || (livePresentation.signature ? livePresentation : null)
-      || cachedPresentation || readQuickBuyPresentation(replacement);
-    const profile = connectedProfile?.profile
-      || updatedProfilePresentation?.profile
-      || (cachedIsCurrent ? cachedPresentation?.profile : null)
-      || (!sourceCanPromote ? binding?.quickBuyProfile : null)
-      || (sourceCanPromote ? livePresentation.profile : null)
-      || rememberedProfile?.profile
-      || quickBuyProfilesByChain.get(binding?.chain)?.profile
-      || cachedPresentation?.profile
-      || binding?.quickBuyProfile || presentation?.profile || QUICK_BUY_SIZE_PROFILES.large;
-    const currentPresentation = readQuickBuyPresentation(replacement);
-    const replacementClasses = String(replacement.className || '').split(/\s+/);
-    const hasTangoClass = replacementClasses.includes('tango-list-quick-buy');
-    const presentationComplete = authoritativeLivePresentation
-      ? true : Boolean(binding?.presentationComplete);
-    const shouldUseFallback = !presentation.signature || !presentationComplete;
-    const hasFallbackClass = replacementClasses.includes('tango-quick-buy-fallback');
-    if (binding?.presentationSignature !== presentation.signature
-      || currentPresentation.signature !== presentation.signature || !hasTangoClass
-      || hasFallbackClass !== shouldUseFallback) {
-      const presentationSource = authoritativeLivePresentation ? source : null;
-      const applied = applyInertPresentation(replacement, presentationSource, presentation);
-      if (shouldUseFallback) {
-        replacement.className = `${replacement.className} tango-quick-buy-fallback`.trim();
-      }
-      if (binding) binding.presentationSignature = applied;
-    }
-    ensureInertQuickBuy(replacement);
-    const appliedProfile = applyQuickBuyProfile(replacement, profile, slot);
-    if (binding) {
-      binding.presentation = presentation;
-      binding.presentationRevision = Number(presentation?.revision || cachedPresentation?.revision || 0);
-      binding.presentationComplete = presentationComplete;
-      binding.quickBuyProfile = appliedProfile;
-      if (source && sourceCanPromote) {
-        binding.presentationSourceSignature = livePresentation.signature;
-        binding.presentationSourceProfileId = livePresentation.profile?.id || '';
-      }
-      registerPaperQuickBuy(slot, binding, binding.actionId);
-    }
-    if (binding?.chain && connectedProfileAdvanced) {
-      for (const otherSlot of [...trackedQuickBuySlots]) {
-        if (otherSlot === slot || !otherSlot?.isConnected) continue;
-        const otherBinding = otherSlot?.__tangoQuickBuyBinding;
-        if (otherBinding?.slot !== otherSlot || !otherBinding.card?.isConnected
-          || !otherBinding.replacement?.isConnected || otherBinding.chain !== binding.chain
-          || otherBinding.quickBuyProfile?.id === connectedProfile.profile.id
-          || readConnectedQuickBuyProfile(otherSlot, otherBinding)?.profile) continue;
-        otherBinding.quickBuyProfile = applyQuickBuyProfile(
-          otherBinding.replacement, connectedProfile.profile, otherSlot
-        );
-      }
-    }
-    const authoritativeRevision = Number(
-      authoritativeLivePresentation?.revision || updatedProfilePresentation?.revision || 0
-    );
-    if (binding?.chain && authoritativeRevision > cachedRevision) {
-      for (const otherSlot of [...trackedQuickBuySlots]) {
-        if (otherSlot === slot) continue;
-        const otherBinding = otherSlot?.__tangoQuickBuyBinding;
-        if (otherBinding?.chain !== binding.chain
-          || Number(otherBinding.presentationRevision || 0) >= authoritativeRevision) continue;
-        syncQuickBuyPresentation(otherSlot);
-      }
-    }
+    applyLockedQuickBuyPresentation(replacement, slot);
+    if (binding) registerPaperQuickBuy(slot, binding, binding.actionId);
     return true;
-  }
-
-  function observeQuickBuyPresentationSource(slot, binding, source) {
-    binding.presentationObserver?.disconnect?.();
-    binding.presentationObserver = null;
-    binding.presentationSource = source || null;
-    if (!source || source === binding.replacement || typeof global.MutationObserver !== 'function') return;
-    const observer = new global.MutationObserver(() => {
-      if (slot.__tangoQuickBuyBinding !== binding || binding.presentationSource !== source) return;
-      if (!syncQuickBuyPresentation(slot, source)) scheduleQuickBuyGeometryRepair(slot);
-    });
-    observer.observe(source, { attributes: true, attributeFilter: ['class', 'style'] });
-    binding.presentationObserver = observer;
-  }
-
-  function observeQuickBuyProfileSources(slot, binding, nativeControl = null) {
-    const sources = quickBuyConnectedProfileSources(slot, binding, nativeControl);
-    const unchanged = sources.length === (binding.profileSources || []).length
-      && sources.every((source, index) => source === binding.profileSources[index]);
-    if (unchanged) return;
-    binding.profileObserver?.disconnect?.();
-    binding.profileObserver = null;
-    binding.profileSources = sources;
-    refreshQuickBuyResizeTargets(slot, binding);
-    if (!sources.length || typeof global.MutationObserver !== 'function') return;
-    const observer = new global.MutationObserver((records = []) => {
-      if (slot.__tangoQuickBuyBinding !== binding) return;
-      if (records.length && !records.some((record) => binding.profileSources.includes(record.target))) return;
-      if (!syncQuickBuyPresentation(slot)) scheduleQuickBuyGeometryRepair(slot);
-    });
-    sources.forEach((source) => observer.observe(source, {
-      attributes: true, attributeFilter: ['class', 'style']
-    }));
-    binding.profileObserver = observer;
-  }
-
-  function scheduleQuickBuyGeometryRepair(slot) {
-    const binding = slot?.__tangoQuickBuyBinding;
-    if (!binding || binding.repairTimer || binding.repairAttempts >= 3) return;
-    binding.repairAttempts += 1;
-    binding.repairTimer = global.setTimeout?.(() => {
-      binding.repairTimer = null;
-      if (slot.__tangoQuickBuyBinding !== binding || !slot.isConnected) return;
-      if (!syncQuickBuyPresentation(slot)) scheduleQuickBuyGeometryRepair(slot);
-    }, 250);
   }
 
   function parseQuickBuyAmount(value) {
@@ -2023,38 +1561,13 @@
   }
 
   function createQuickBuyReplacement(
-    slot, card, chain, nativeControl, amountNative, paperLabel, chainDefinition,
-    trustLivePresentation = true
+    slot, _card, _chain, _nativeControl, amountNative, paperLabel, chainDefinition
   ) {
-    const livePresentation = readQuickBuyPresentation(nativeControl);
-    const connectedProfile = readConnectedQuickBuyProfile(slot, null, nativeControl);
-    const presentationComplete = Boolean(trustLivePresentation && livePresentation.signature);
-    const cachedPresentation = cachedQuickBuyPresentation(card, chain);
-    const initialPresentation = presentationComplete
-      ? rememberQuickBuyPresentation(card, chain, livePresentation)
-      : (cachedPresentation || livePresentation);
-    const profile = livePresentation.profile || connectedProfile?.profile
-      || quickBuyProfilesByChain.get(chain)?.profile
-      || cachedPresentation?.profile
-      || initialPresentation?.profile || QUICK_BUY_SIZE_PROFILES.large;
     const replacement = document.createElement('button');
     replacement.type = 'button';
-    const initialPresentationSignature = applyInertPresentation(
-      replacement, trustLivePresentation ? nativeControl : null, initialPresentation
-    );
-    const quickBuyProfile = applyQuickBuyProfile(replacement, profile);
-    if (!presentationComplete) {
-      replacement.className = `${replacement.className} tango-quick-buy-fallback`.trim();
-    }
+    const quickBuyProfile = applyLockedQuickBuyPresentation(replacement, slot);
     renderQuickBuyContent(replacement, paperLabel, amountNative, chainDefinition.nativeSymbol);
-    return {
-      replacement,
-      presentation: initialPresentation,
-      presentationRevision: Number(initialPresentation?.revision || 0),
-      presentationSignature: initialPresentationSignature,
-      presentationComplete,
-      quickBuyProfile
-    };
+    return { replacement, quickBuyProfile };
   }
 
   function createQuickBuyHandler({
@@ -2129,11 +1642,8 @@
     birth = null, onQuickBuy = null, policyKey = ''
   ) {
     if (!slot?.isConnected || !card?.isConnected) return false;
-    const {
-      replacement, presentation, presentationRevision, presentationSignature, presentationComplete,
-      quickBuyProfile
-    } = createQuickBuyReplacement(
-      slot, card, chain, nativeControl, amountNative, paperLabel, chainDefinition, false
+    const { replacement, quickBuyProfile } = createQuickBuyReplacement(
+      slot, card, chain, nativeControl, amountNative, paperLabel, chainDefinition
     );
     const { generation, bindingNonce } = createQuickBuyGeneration({
       slot, card, chain, address: '', href: '', amountNative
@@ -2143,14 +1653,9 @@
       slot, key: '', chain, address: '', href: '', card, nativeControl: nativeControl || null,
       replacement, actionId, bindingNonce, generation, state: 'resolving-identity',
       amountNative, paperLabel, policyKey, birth, birthAmountNative: amountNative, pendingOnly: false,
-      onQuickBuy, chainDefinition,
-      presentationSignature, presentation, presentationRevision, presentationComplete, quickBuyProfile,
-      presentationSourceProfileId: presentation?.profile?.id || '',
-      presentationTrusted: false,
+      onQuickBuy, chainDefinition, quickBuyProfile,
       cardGenerationIdentity: cardGenerationIdentity(card),
-      presentationSource: null, presentationObserver: null, profileObserver: null, profileSources: [], operation: null,
-      additionalNativeControls: [],
-      repairAttempts: 0, repairTimer: null, resizeObserver: null, resizeTargets: []
+      actionHost: null, operation: null, additionalNativeControls: []
     };
     const action = {
       bindingNonce,
@@ -2167,9 +1672,7 @@
     slot.__tangoOriginalQuickBuy = nativeControl || null;
     trackedQuickBuySlots.add(slot);
     removeDuplicatePaperControls(slot, replacement);
-    observeQuickBuyPresentationSource(slot, binding, nativeControl);
-    if (!syncQuickBuyPresentation(slot, nativeControl)) scheduleQuickBuyGeometryRepair(slot);
-    observeQuickBuySlot(slot, binding);
+    syncQuickBuyPresentation(slot);
     return true;
   }
 
@@ -2199,10 +1702,8 @@
       policyKey, onQuickBuy, chainDefinition,
       cardGenerationIdentity: cardGenerationIdentity(card),
       nativeControl: verifiedNativeControl, pendingOnly: false,
-      presentationTrusted: Boolean(verifiedCardMetadata(card, address, chain)),
       operation: activeQuickBuyOperation(bindingKey),
-      repairAttempts: 0, repairTimer: null, resizeObserver: null, resizeTargets: [],
-      profileObserver: null, profileSources: []
+      actionHost: binding.actionHost || null
     });
     const action = { bindingNonce, kind: 'execute', invoke: handleClick };
     if (!commitPaperQuickBuy(slot, nextBinding, action)) {
@@ -2222,18 +1723,15 @@
     slot.dataset.tangoBindingKey = bindingKey;
     slot.__tangoOriginalQuickBuy = verifiedNativeControl;
     if (liveNativeControl) {
-      observeQuickBuyPresentationSource(slot, nextBinding, liveNativeControl);
-      syncQuickBuyPresentation(slot, liveNativeControl);
+      syncQuickBuyPresentation(slot);
       mountQuickBuyReplacement(slot, liveNativeControl, replacement);
       if (liveNativeControl.isConnected) liveNativeControl.remove();
       replaceAdditionalNativeQuickBuyControls(slot, nextBinding);
     } else {
-      observeQuickBuyPresentationSource(slot, nextBinding, null);
       syncQuickBuyPresentation(slot);
       mountQuickBuyReplacement(slot, null, replacement);
     }
     removeDuplicatePaperControls(slot, replacement);
-    observeQuickBuySlot(slot, nextBinding);
     if (claimedIntent) Promise.resolve().then(() => handleClick());
     return true;
   }
@@ -2331,35 +1829,10 @@
     return address !== binding.address;
   }
 
-  function observeQuickBuySlot(slot, binding) {
-    if (typeof global.ResizeObserver === 'function') {
-      binding.resizeObserver = new global.ResizeObserver(() => {
-        if (slot.__tangoQuickBuyBinding !== binding) return;
-        if (!syncQuickBuyPresentation(slot)) scheduleQuickBuyGeometryRepair(slot);
-      });
-      refreshQuickBuyResizeTargets(slot, binding);
-    } else {
-      global.requestAnimationFrame?.(() => {
-        if (slot.__tangoQuickBuyBinding === binding && !syncQuickBuyPresentation(slot)) {
-          scheduleQuickBuyGeometryRepair(slot);
-        }
-      });
-    }
-  }
-
   function removeDuplicatePaperControls(slot, replacement) {
     for (const control of slot.querySelectorAll?.('.tango-list-quick-buy') || []) {
       if (control !== replacement) control.remove?.();
     }
-  }
-
-  function refreshQuickBuyResizeTargets(slot, binding) {
-    if (!binding?.resizeObserver) return;
-    for (const target of binding.resizeTargets || []) binding.resizeObserver.unobserve?.(target);
-    binding.resizeTargets = [...new Set([
-      slot, binding.replacement, slot?.parentElement, ...(binding.profileSources || [])
-    ].filter(Boolean))];
-    binding.resizeTargets.forEach((target) => binding.resizeObserver.observe(target));
   }
 
   function holdQuickBuyPending(
@@ -2396,16 +1869,7 @@
     slot.dataset.tangoQuickBuy = '1';
     delete slot.dataset.tangoTokenAddress;
     delete slot.dataset.tangoBindingKey;
-    if (nativeControl?.isConnected) {
-      if (trustedNativePresentation) {
-        observeQuickBuyPresentationSource(slot, nextBinding, nativeControl);
-        syncQuickBuyPresentation(slot, nativeControl);
-      } else {
-        syncQuickBuyPresentation(slot);
-      }
-    } else {
-      syncQuickBuyPresentation(slot);
-    }
+    syncQuickBuyPresentation(slot);
     removeNativeQuickBuyControls(slot);
     removeDuplicatePaperControls(slot, replacement);
     return true;
@@ -2446,29 +1910,15 @@
         || !Tango.NativeQuickBuyGuard?.isPaperActionTrusted?.(
           replacement, paperGuardIdentity(binding)
         )) return true;
-      if (binding.state === 'resolving-identity') {
-        const cachedPresentation = cachedQuickBuyPresentation(binding.card, binding.chain);
-        if (!binding.presentationSource && cachedPresentation?.signature
-          && cachedPresentation.revision !== binding.presentationRevision) return true;
-        probeSlots.push({ kind: 'pending', slot, nativeControl });
-        continue;
-      }
-      if (!String(replacement.className || '').split(/\s+/).includes('tango-list-quick-buy')) return true;
-      if (String(replacement.className || '').split(/\s+/).includes('tango-quick-buy-fallback')
-        !== !binding.presentationComplete) return true;
+      if (replacement.className !== 'tango-list-quick-buy'
+        || replacement.style?.cssText
+        || replacement.dataset?.tangoQuickBuySize !== 'giant'
+        || slot.dataset?.tangoQuickBuySize !== 'giant') return true;
       if (replacement.dataset?.tangoPaperAction !== 'quick-buy'
         || replacement.dataset?.tangoActionId !== binding.actionId
         || replacement.dataset?.tangoBindingNonce !== binding.bindingNonce
         || replacement.dataset?.tangoPaperState !== binding.state) return true;
-      const connected = readConnectedQuickBuyProfile(slot, binding);
-      if (connected?.profile?.id && connected.profile.id !== binding.quickBuyProfile?.id) return true;
-      if (presentationSignature(replacement) !== String(binding.presentationSignature || '')) return true;
-      const cachedPresentation = cachedQuickBuyPresentation(binding.card, binding.chain);
-      if (Number(cachedPresentation?.revision || 0) > Number(binding.presentationRevision || 0)) return true;
-      const sourceSignature = presentationSignature(binding.presentationSource);
-      if (binding.presentationSource
-        && sourceSignature !== String(binding.presentationSourceSignature || '')) return true;
-      probeSlots.push({ kind: 'identity', slot });
+      probeSlots.push({ kind: binding.state === 'resolving-identity' ? 'pending' : 'identity', slot, nativeControl });
     }
     const unboundSlots = Array.from(document.querySelectorAll?.(
       '.BuyButton-continer:not([data-tango-quick-buy="1"])'
@@ -2657,15 +2107,13 @@
         slot.dataset.tangoActionId = existingBinding.actionId;
         slot.dataset.tangoBindingKey = bindingKey;
         existingBinding.replacement.dataset.tangoActionId = existingBinding.actionId;
-        if (metadata) existingBinding.presentationTrusted = true;
         setPaperState(slot, existingBinding, existingBinding.operation ? 'in-flight' : 'ready');
         if (nativeControl) {
           // Treat each coherent React reinsertion as the current authoritative native generation.
           // Keeping earlier detached generations would duplicate or revive stale real-money controls on master OFF.
           existingBinding.nativeControl = nativeControl;
           slot.__tangoOriginalQuickBuy = nativeControl;
-          observeQuickBuyPresentationSource(slot, existingBinding, nativeControl);
-          syncQuickBuyPresentation(slot, nativeControl);
+          syncQuickBuyPresentation(slot);
           mountQuickBuyReplacement(slot, nativeControl, existingBinding.replacement);
           if (nativeControl.isConnected) nativeControl.remove();
           replaceAdditionalNativeQuickBuyControls(slot, existingBinding);
@@ -2683,13 +2131,8 @@
         }
       }
       if (!nativeControl) nativeControl = nativeQuickBuyControl(slot);
-      const presentationSource = nativeControl || null;
-      const {
-        replacement, presentation: initialPresentation,
-        presentationRevision, presentationSignature: initialPresentationSignature,
-        presentationComplete, quickBuyProfile
-      } = createQuickBuyReplacement(
-        slot, card, chain, nativeControl, amountSol, paperLabel, chainDefinition, Boolean(metadata)
+      const { replacement, quickBuyProfile } = createQuickBuyReplacement(
+        slot, card, chain, nativeControl, amountSol, paperLabel, chainDefinition
       );
       const { generation, bindingNonce } = createQuickBuyGeneration({
         slot, card, chain, address, href, amountNative: amountSol
@@ -2704,16 +2147,10 @@
       const binding = {
         slot, key: bindingKey, chain, address, href, card, nativeControl, replacement,
         actionId, bindingNonce, generation, state: existingOperation ? 'in-flight' : 'ready',
-        amountNative: amountSol, paperLabel, policyKey, onQuickBuy, chainDefinition,
-        presentationSignature: initialPresentationSignature,
-        presentation: initialPresentation, presentationRevision, presentationComplete, quickBuyProfile,
-        presentationSourceProfileId: initialPresentation?.profile?.id || '', pendingOnly: false,
-        presentationTrusted: Boolean(metadata),
+        amountNative: amountSol, paperLabel, policyKey, onQuickBuy, chainDefinition, quickBuyProfile,
+        pendingOnly: false,
         cardGenerationIdentity: liveCardGenerationIdentity,
-        presentationSource: null, presentationObserver: null, profileObserver: null, profileSources: [],
-        additionalNativeControls: [],
-        operation: existingOperation,
-        repairAttempts: 0, repairTimer: null, resizeObserver: null, resizeTargets: []
+        actionHost: null, additionalNativeControls: [], operation: existingOperation
       };
       const action = { bindingNonce, kind: 'execute', invoke: handleClick };
       applyPaperStateCopy(binding, binding.state);
@@ -2728,9 +2165,7 @@
       if (nativeControl?.isConnected) nativeControl.remove();
       replaceAdditionalNativeQuickBuyControls(slot, binding);
       removeDuplicatePaperControls(slot, replacement);
-      observeQuickBuyPresentationSource(slot, binding, presentationSource);
-      if (!syncQuickBuyPresentation(slot, presentationSource)) scheduleQuickBuyGeometryRepair(slot);
-      observeQuickBuySlot(slot, binding);
+      syncQuickBuyPresentation(slot);
       injected += 1;
     }
     return injected;
@@ -2742,9 +2177,6 @@
       restoreQuickBuySlot(slot, restoreCurrent);
     });
     document.querySelectorAll('.tango-list-quick-buy').forEach((element) => element.remove());
-    quickBuyPresentationsByColumn = new WeakMap();
-    quickBuyPresentationsByChain.clear();
-    quickBuyProfilesByChain.clear();
     quickBuyIntents.clear();
     quickBuyCardBirths = new WeakMap();
     quickBuyProbeCursor = 0;
@@ -2757,15 +2189,7 @@
     Tango.NativeQuickBuyGuard?.revokePaperAction?.(replacement);
     cancelQuickBuyIdentityIntent(binding, 'restored');
     trackedQuickBuySlots.delete(slot);
-    quickBuyActions.delete(String(binding?.actionId || slot?.dataset?.tangoActionId || ''));
-    if (binding?.repairTimer) global.clearTimeout?.(binding.repairTimer);
-    for (const target of binding?.resizeTargets || [slot]) {
-      binding?.resizeObserver?.unobserve?.(target);
-    }
-    binding?.resizeObserver?.disconnect?.();
-    binding?.presentationObserver?.disconnect?.();
-    binding?.profileObserver?.disconnect?.();
-    slot?.style?.removeProperty?.('--tango-quick-buy-height');
+    binding?.actionHost?.classList?.remove?.('tango-quick-buy-action-host');
     const canRestore = restoreCurrent && replacement?.isConnected && original && !original.isConnected
       && original.parentNode == null
       && !nativeQuickBuyControl(slot)
@@ -2777,7 +2201,6 @@
     delete slot.__tangoOriginalQuickBuy;
     delete slot.__tangoReplacementQuickBuy;
     delete slot.__tangoQuickBuyCard;
-    delete slot.__tangoQuickBuyHandler;
     slot.classList.remove('tango-native-buy-overridden', 'tango-quick-expanded', 'tango-quick-narrow');
     delete slot.dataset.tangoQuickBuy;
     delete slot.dataset.tangoTokenAddress;
@@ -2804,9 +2227,8 @@
     _findTokenDetailScope: findTokenDetailScope, _tokenLogo: tokenLogo,
     _resolveCurrentTokenRead: resolveCurrentTokenRead, _needsCurrentTokenRead: needsCurrentTokenRead,
     _selectQuickBuyAmount: selectQuickBuyAmount,
-    _quickBuyProfileFromPresentation: quickBuyProfileFromPresentation,
-    _quickBuySizeProfiles: QUICK_BUY_SIZE_PROFILES,
-    _presentationSignature: presentationSignature, _applyInertPresentation: applyInertPresentation,
+    _lockedQuickBuyProfile: LOCKED_QUICK_BUY_PROFILE,
+    _applyLockedQuickBuyPresentation: applyLockedQuickBuyPresentation,
     _registerPaperQuickBuy: registerPaperQuickBuy,
     _commitPaperQuickBuy: commitPaperQuickBuy,
     _createQuickBuyGeneration: createQuickBuyGeneration,
@@ -2819,7 +2241,6 @@
     _quickBuyIdentityIntentTtlMs: QUICK_BUY_IDENTITY_INTENT_TTL_MS,
     _cardAddressEvidence: cardAddressEvidence,
     _quickBuyBirthForRoot: (root) => quickBuyCardBirths.get(root) || null,
-    _invokeQuickBuyAction: invokeQuickBuyAction,
     _quickBuyIntentCount: () => quickBuyIntents.size,
     _markChartFrameReady: markChartFrameReady, _invalidateChartFrame: invalidateChartFrame,
     _clearChartTrust: clearChartTrust, _hasTrustedChart: hasTrustedChart,

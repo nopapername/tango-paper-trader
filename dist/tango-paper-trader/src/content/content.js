@@ -43,7 +43,27 @@
   shell.className = 'tango-shell';
   shadow.append(stylesheet, shell);
   document.documentElement.appendChild(host);
-  shell.addEventListener('pointerdown', () => { runtime.interactionUntil = Date.now() + 500; }, true);
+  const trustedSessionSuppressInputs = new WeakSet();
+
+  function requireTrustedUserEvent(event) {
+    if (event?.isTrusted === true) return true;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
+    return false;
+  }
+
+  function blockUntrustedShellEvent(event) {
+    requireTrustedUserEvent(event);
+  }
+
+  for (const type of ['click', 'keydown', 'change', 'pointerdown']) {
+    shell.addEventListener(type, blockUntrustedShellEvent, { capture: true, passive: false });
+  }
+
+  shell.addEventListener('pointerdown', (event) => {
+    if (event.isTrusted === true) runtime.interactionUntil = Date.now() + 500;
+  }, true);
 
   function activeChain() { return Tango.Chains.fromUrl(location.href); }
   function paperExecutionDisabled() {
@@ -261,7 +281,6 @@
           .forEach((chain) => rememberNativePrice(chain.id, price.priceUsd, price.observedAt));
       }
       queueRender();
-      queueImmediateCurrentCalibration();
       return;
     }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
@@ -270,10 +289,7 @@
       clearChainContext();
       return;
     }
-    const positionsByAddress = new Map(Tango.ChainView.positions(runtime.state, chain.id)
-      .map((position) => [Tango.Chains.normalizeAddress(chain.id, position.tokenAddress), position]));
     const routeToken = detailRouteToken();
-    const metadataUpdates = [];
     let currentQuoteChanged = false;
     (event.data.quotes || []).forEach((quote) => {
       if (quote?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, quote?.address)) return;
@@ -316,17 +332,6 @@
         mergeQuote(runtime.current, cachedQuote);
         currentQuoteChanged = true;
       }
-      const position = positionsByAddress.get(address);
-      const symbol = String(cachedQuote.symbol || '').replace(/^\$/, '').replace(/\s+/g, ' ').trim().slice(0, 32);
-      const name = String(cachedQuote.name || '').replace(/\s+/g, ' ').trim().slice(0, 100);
-      const logoUrl = String(cachedQuote.logoUrl || '').trim().slice(0, 1000);
-      if (position && (!isPlaceholderTokenLabel(symbol) || !isPlaceholderTokenLabel(name) || logoUrl)) {
-        metadataUpdates.push({
-          chain: position.chain, address: position.tokenAddress,
-          symbol, name, logoUrl,
-          metadataVerified: true, metadataSource: 'GMGN_NETWORK'
-        });
-      }
     });
     if (runtime.gmgnQuotes.size > 2000) {
       const overflow = runtime.gmgnQuotes.size - 2000;
@@ -335,11 +340,7 @@
     if (currentQuoteChanged) {
       publishChartMarkers();
       queueRender();
-      queueImmediateCurrentCalibration();
     }
-    if (metadataUpdates.length) Tango.Store.updatePositionMetadataBatch(metadataUpdates)
-      .then((state) => { runtime.state = state; queueRender(); })
-      .catch(() => null);
   }
   window.addEventListener('message', handlePageMessage);
   window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');
@@ -2024,10 +2025,19 @@
       node.setAttribute('role', 'button');
       node.setAttribute('tabindex', '0');
       node.onpointerdown = (event) => event.stopPropagation();
-      node.onclick = (event) => { event.preventDefault(); event.stopPropagation(); runtime.calendarOpen = !runtime.calendarOpen; render(); };
+      node.onclick = (event) => {
+        if (!requireTrustedUserEvent(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        runtime.calendarOpen = !runtime.calendarOpen;
+        render();
+      };
       node.onkeydown = (event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault(); runtime.calendarOpen = !runtime.calendarOpen; render();
+        if (!requireTrustedUserEvent(event)) return;
+        event.preventDefault();
+        runtime.calendarOpen = !runtime.calendarOpen;
+        render();
       };
     }
     if (node.parentElement !== anchor) {
@@ -2330,17 +2340,26 @@
   }
 
   function bindEvents() {
-    shell.querySelectorAll('[data-buy]').forEach((button) => button.addEventListener('click', () => buy(Number(button.dataset.buy))));
-    shell.querySelectorAll('[data-sell]').forEach((button) => button.addEventListener('click', () => sell(Number(button.dataset.sell))));
-    shell.querySelectorAll('[data-position-open]').forEach((button) => button.addEventListener('click', () => {
+    shell.querySelectorAll('[data-buy]').forEach((button) => button.addEventListener('click', (event) => {
+      if (!requireTrustedUserEvent(event)) return;
+      return buy(Number(button.dataset.buy));
+    }));
+    shell.querySelectorAll('[data-sell]').forEach((button) => button.addEventListener('click', (event) => {
+      if (!requireTrustedUserEvent(event)) return;
+      return sell(Number(button.dataset.sell));
+    }));
+    shell.querySelectorAll('[data-position-open]').forEach((button) => button.addEventListener('click', (event) => {
+      if (!requireTrustedUserEvent(event)) return;
       const position = runtime.state.positions[button.dataset.key];
       if (position) openPosition(position);
     }));
-    shell.querySelectorAll('[data-position-sell]').forEach((button) => button.addEventListener('click', () => {
+    shell.querySelectorAll('[data-position-sell]').forEach((button) => button.addEventListener('click', (event) => {
+      if (!requireTrustedUserEvent(event)) return;
       const position = runtime.state.positions[button.dataset.key];
-      if (position) sellPosition(position, Number(button.dataset.positionSell));
+      if (position) return sellPosition(position, Number(button.dataset.positionSell));
     }));
     shell.querySelectorAll('[data-action]').forEach((element) => element.addEventListener('click', async (event) => {
+      if (!requireTrustedUserEvent(event)) return;
       event.stopPropagation();
       const action = element.dataset.action;
       if (action === 'toggle-drawer') { runtime.drawerOpen = !runtime.drawerOpen; render(); }
@@ -2380,7 +2399,12 @@
       if (action === 'save-presets') await savePresetEdits();
       if (action === 'cancel-modal') { runtime.modal = null; render(); }
       if (action === 'confirm-modal') {
-        const suppressForSession = Boolean(runtime.modal?.allowSessionSuppress && shadow.querySelector('#tango-skip-session-confirm')?.checked);
+        const sessionSuppressInput = shadow.querySelector('#tango-skip-session-confirm');
+        const suppressForSession = Boolean(
+          runtime.modal?.allowSessionSuppress
+          && sessionSuppressInput?.checked
+          && trustedSessionSuppressInputs.has(sessionSuppressInput)
+        );
         const callback = runtime.modal?.action;
         if (callback) await callback();
         if (suppressForSession) {
@@ -2389,8 +2413,19 @@
         }
       }
     }));
+    const sessionSuppressInput = shadow.querySelector('#tango-skip-session-confirm');
+    sessionSuppressInput?.addEventListener('change', (event) => {
+      if (!requireTrustedUserEvent(event)) {
+        sessionSuppressInput.checked = false;
+        trustedSessionSuppressInputs.delete(sessionSuppressInput);
+        return;
+      }
+      if (sessionSuppressInput.checked) trustedSessionSuppressInputs.add(sessionSuppressInput);
+      else trustedSessionSuppressInputs.delete(sessionSuppressInput);
+    });
     shell.querySelectorAll('.tango-preset-editor').forEach((input) => input.addEventListener('keydown', async (event) => {
-      if (event.key === 'Enter') await savePresetEdits();
+      if (event.key !== 'Enter' || !requireTrustedUserEvent(event)) return;
+      await savePresetEdits();
     }));
     bindDrag();
   }
@@ -2406,12 +2441,13 @@
     const element = shadow.querySelector(elementSelector);
     if (!handle || !element) return;
     handle.addEventListener('pointerdown', (event) => {
-      if (event.target.closest('button')) return;
+      if (!requireTrustedUserEvent(event) || event.target.closest('button')) return;
       const rect = element.getBoundingClientRect();
       const startX = event.clientX; const startY = event.clientY;
       const fallbackSettings = { ...runtime.settings, [settingKey]: runtime.settings[settingKey] };
       let dragged = false;
       const onMove = (move) => {
+        if (move?.isTrusted !== true) return;
         if (!dragged && Math.hypot(move.clientX - startX, move.clientY - startY) < 5) return;
         dragged = true;
         move.preventDefault();
@@ -2424,7 +2460,8 @@
         element.style.top = `${position.y}px`;
         element.style.right = 'auto'; element.style.bottom = 'auto'; element.style.transform = 'none';
       };
-      const onUp = async () => {
+      const onUp = async (up) => {
+        if (up?.isTrusted !== true) return;
         global.removeEventListener('pointermove', onMove); global.removeEventListener('pointerup', onUp); global.removeEventListener('pointercancel', onUp);
         if (!dragged) return;
         const suppressClick = (click) => { click.preventDefault(); click.stopImmediatePropagation(); };
