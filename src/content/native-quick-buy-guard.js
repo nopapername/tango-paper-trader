@@ -4,6 +4,7 @@
 
   const settingsKey = Tango.SETTINGS_KEY || 'tangoPaperTraderSettingsV1';
   const trustedPaperActions = new WeakMap();
+  const consumedTrustedClicks = new WeakSet();
   const protectedEvents = [
     'pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup',
     'touchstart', 'touchend', 'click', 'auxclick', 'keydown', 'keyup'
@@ -49,6 +50,8 @@
       && identity.binding.address === identity.address
       && identity.binding.href === identity.href
       && Number(identity.binding.amountNative) === Number(identity.amountNative)
+      && typeof identity.activate === 'function'
+      && identity.binding.action?.invoke === identity.activate
       && ['resolving-identity', 'ready', 'in-flight'].includes(state)
       && element.dataset?.tangoPaperAction === 'quick-buy'
       && element.dataset?.tangoActionId === identity.actionId
@@ -87,25 +90,30 @@
     return null;
   }
 
-  function hasTrustedPaperActionBeforeNative(elements) {
+  function trustedPaperActionBeforeNative(elements) {
     let trustedIdentity = null;
     for (const element of elements) {
       if (!trustedIdentity) trustedIdentity = trustedPaperCoreIdentity(element);
-      if (isNativeQuickBuy(element)) {
-        if (!trustedIdentity || !pathAuthorizesPaper(elements, trustedIdentity)) return false;
-        const currentAncestors = captureNativeAncestors(trustedIdentity.slot);
-        if (!sameNativeAncestors(trustedIdentity.nativeAncestors, currentAncestors)) {
-          trustedIdentity = Object.freeze({
-            ...trustedIdentity,
-            nativeAncestors: currentAncestors
-          });
-          trustedPaperActions.set(trustedIdentity.element, trustedIdentity);
-        }
-        if (trustedIdentity.slot === element || trustedIdentity.nativeAncestors.includes(element)) continue;
-        return false;
+      if (!isNativeQuickBuy(element)) continue;
+      if (!trustedIdentity || !pathAuthorizesPaper(elements, trustedIdentity)) return null;
+      const currentAncestors = captureNativeAncestors(trustedIdentity.slot);
+      if (!sameNativeAncestors(trustedIdentity.nativeAncestors, currentAncestors)) {
+        trustedIdentity = Object.freeze({
+          ...trustedIdentity,
+          nativeAncestors: currentAncestors
+        });
+        trustedPaperActions.set(trustedIdentity.element, trustedIdentity);
       }
+      if (trustedIdentity.slot === element || trustedIdentity.nativeAncestors.includes(element)) continue;
+      return null;
     }
-    return Boolean(trustedIdentity);
+    return trustedIdentity;
+  }
+
+  function stopActivation(event, preventDefault) {
+    if (preventDefault) event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
   }
 
   function blockNativeActivation(event) {
@@ -113,10 +121,22 @@
     if ((event.type === 'keydown' || event.type === 'keyup')
       && event.key !== 'Enter' && event.key !== ' ') return;
     const elements = eventElements(event);
-    if (hasTrustedPaperActionBeforeNative(elements) || !elements.some(isNativeQuickBuy)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
+    const identity = trustedPaperActionBeforeNative(elements);
+    if (identity) {
+      const click = event.type === 'click';
+      const trustedPrimaryClick = click
+        && event.isTrusted === true
+        && (event.button == null || event.button === 0);
+      stopActivation(event, click || event.type === 'auxclick' || event.isTrusted !== true);
+      if (!trustedPrimaryClick || consumedTrustedClicks.has(event)) return;
+      consumedTrustedClicks.add(event);
+      try {
+        Promise.resolve(identity.activate()).catch(() => null);
+      } catch {}
+      return;
+    }
+    if (!elements.some(isNativeQuickBuy)) return;
+    stopActivation(event, true);
   }
 
   function applySettings(settings) {
@@ -146,8 +166,8 @@
     enumerable: false,
     writable: false,
     value: Object.freeze({
-      registerPaperAction(element, identity) {
-        if (!(element instanceof global.Element)) return false;
+      registerPaperAction(element, identity, activate) {
+        if (!(element instanceof global.Element) || typeof activate !== 'function') return false;
         const descriptor = Object.freeze({
           element,
           slot: identity?.slot,
@@ -161,6 +181,7 @@
           address: identity?.address,
           href: identity?.href,
           amountNative: identity?.amountNative,
+          activate,
           nativeAncestors: captureNativeAncestors(identity?.slot)
         });
         if (!currentPaperCoreIdentity(element, descriptor)) {
@@ -173,7 +194,7 @@
       isPaperActionTrusted(element, identity) {
         const descriptor = trustedPaperCoreIdentity(element);
         return Boolean(descriptor)
-          && currentPaperCoreIdentity(element, { ...identity, element })
+          && currentPaperCoreIdentity(element, { ...identity, element, activate: descriptor.activate })
           && sameNativeAncestors(descriptor.nativeAncestors, captureNativeAncestors(descriptor.slot));
       },
       revokePaperAction(element) {

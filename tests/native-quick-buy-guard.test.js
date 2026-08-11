@@ -124,12 +124,13 @@ function paperIdentity(loaded, actionId, patch = {}) {
   const state = patch.state || 'ready';
   const generation = Number(patch.generation || 1);
   const bindingNonce = patch.bindingNonce || `nonce-${generation}`;
+  const activate = patch.activate || (() => undefined);
   const binding = {
     replacement: element, slot, card, actionId, bindingNonce, generation, state,
     chain: 'base', address, href: `https://gmgn.ai/base/token/${address}`,
-    amountNative: 1,
-    // Compatibility with the old guard; the production contract below does not rely on it.
-    pendingOnly: false
+    amountNative: 1, action: {
+      bindingNonce, kind: state === 'resolving-identity' ? 'intent' : 'execute', invoke: activate
+    }
   };
   Object.assign(element.dataset, {
     tangoPaperAction: 'quick-buy', tangoActionId: actionId,
@@ -147,7 +148,7 @@ function paperIdentity(loaded, actionId, patch = {}) {
   slot.appendChild(element);
   card.appendChild(slot);
   return {
-    element, slot, card, binding, actionId, bindingNonce, generation, state,
+    element, slot, card, binding, activate, actionId, bindingNonce, generation, state,
     chain: binding.chain, address: binding.address, href: binding.href,
     amountNative: binding.amountNative
   };
@@ -177,8 +178,8 @@ test('isolated native guard is fail-closed against page class and action spoofin
   assertBlocked(loaded.dispatch('click', [spoofedPaper, nativeSlot]), 'page-writable paper marker');
 
   const trusted = paperIdentity(loaded, 'paper-action-1');
-  loaded.context.Tango.NativeQuickBuyGuard.registerPaperAction(trusted.element, trusted);
-  assertAllowed(loaded.dispatch('click', [trusted.element, trusted.slot]), 'registered paper control');
+  loaded.context.Tango.NativeQuickBuyGuard.registerPaperAction(trusted.element, trusted, trusted.activate);
+  assertBlocked(loaded.dispatch('click', [trusted.element, trusted.slot]), 'registered paper control');
 
   loaded.change({ [SETTINGS_KEY]: { newValue: { enabled: false } } });
   assertAllowed(loaded.dispatch('click', [nativeLeaf]), 'explicit storage OFF');
@@ -242,8 +243,8 @@ test('isolated native guard revokes drifted paper identity until the adapter re-
 
   for (const [index, item] of cases.entries()) {
     const identity = paperIdentity(loaded, `paper-action-${index + 2}`);
-    guard.registerPaperAction(identity.element, identity);
-    assertAllowed(
+    guard.registerPaperAction(identity.element, identity, identity.activate);
+    assertBlocked(
       loaded.dispatch('click', [identity.element, identity.slot]),
       `${item.label}: registered identity`
     );
@@ -260,8 +261,8 @@ test('isolated native guard revokes drifted paper identity until the adapter re-
       `${item.label}: page-only repair cannot restore trust`
     );
 
-    guard.registerPaperAction(identity.element, identity);
-    assertAllowed(
+    guard.registerPaperAction(identity.element, identity, identity.activate);
+    assertBlocked(
       loaded.dispatch('click', [identity.element, identity.slot]),
       `${item.label}: extension re-registration`
     );
@@ -282,11 +283,11 @@ test('ancestor-only React remount self-heals while exact core drift remains fail
   const rootA = new loaded.FakeElement(['[data-sentry-component="BuyButtons"]']);
   const rootB = new loaded.FakeElement(['[data-sentry-component="BuyButtons"]']);
   rootA.appendChild(identity.card);
-  assert.equal(guard.registerPaperAction(identity.element, identity), true);
+  assert.equal(guard.registerPaperAction(identity.element, identity, identity.activate), true);
 
   rootA.removeChild(identity.card);
   rootB.appendChild(identity.card);
-  assertAllowed(loaded.dispatch('click', [
+  assertBlocked(loaded.dispatch('click', [
     identity.element, identity.slot, identity.card, rootB
   ]));
   assert.equal(guard.isPaperActionTrusted(identity.element, identity), true);
@@ -299,6 +300,69 @@ test('ancestor-only React remount self-heals while exact core drift remains fail
   ]));
   identity.element.dataset.tangoBindingNonce = identity.bindingNonce;
   assert.equal(guard.isPaperActionTrusted(identity.element, identity), false);
+});
+
+test('isolated guard rejects forged datasets messages and synthetic activation', () => {
+  const loaded = loadGuard(new Promise(() => {}));
+  const guard = loaded.context.Tango.NativeQuickBuyGuard;
+  let activations = 0;
+  const identity = paperIdentity(loaded, 'opaque-action', {
+    activate: () => { activations += 1; }
+  });
+
+  assert.equal(guard.registerPaperAction(identity.element, identity, identity.activate), true);
+  for (const [type, overrides] of [
+    ['pointerdown', { isTrusted: false, button: 0, pointerId: 1, isPrimary: true }],
+    ['pointerup', { isTrusted: false, button: 0, pointerId: 1, isPrimary: true }],
+    ['keydown', { isTrusted: false, key: 'Enter', repeat: false }],
+    ['keyup', { isTrusted: false, key: 'Enter', repeat: false }],
+    ['click', { isTrusted: false, button: 0, detail: 0 }]
+  ]) {
+    assertBlocked(loaded.dispatch(type, [identity.element, identity.slot], overrides), type);
+  }
+  assert.equal(activations, 0);
+
+  identity.element.dataset.tangoActionId = 'page-readable-forgery';
+  assertBlocked(loaded.dispatch('click', [identity.element, identity.slot], {
+    isTrusted: true, button: 0, detail: 1
+  }));
+  assert.equal(activations, 0);
+});
+
+test('trusted pointer and browser keyboard clicks invoke one opaque paper callback', () => {
+  const loaded = loadGuard(new Promise(() => {}));
+  const guard = loaded.context.Tango.NativeQuickBuyGuard;
+  let activations = 0;
+  const identity = paperIdentity(loaded, 'trusted-action', {
+    activate: () => { activations += 1; }
+  });
+  assert.equal(guard.registerPaperAction(identity.element, identity, identity.activate), true);
+
+  const pointerDown = loaded.dispatch('pointerdown', [identity.element, identity.slot], {
+    isTrusted: true, button: 0, pointerId: 7, isPrimary: true
+  });
+  assert.deepEqual(pointerDown, { prevented: false, stopped: true, immediate: true });
+  const pointerUp = loaded.dispatch('pointerup', [identity.element, identity.slot], {
+    isTrusted: true, button: 0, pointerId: 7, isPrimary: true
+  });
+  assert.deepEqual(pointerUp, { prevented: false, stopped: true, immediate: true });
+  assertBlocked(loaded.dispatch('click', [identity.element, identity.slot], {
+    isTrusted: true, button: 0, detail: 1
+  }));
+  assert.equal(activations, 1);
+
+  const keyDown = loaded.dispatch('keydown', [identity.element, identity.slot], {
+    isTrusted: true, key: 'Enter', repeat: false
+  });
+  const keyUp = loaded.dispatch('keyup', [identity.element, identity.slot], {
+    isTrusted: true, key: 'Enter', repeat: false
+  });
+  assert.deepEqual(keyDown, { prevented: false, stopped: true, immediate: true });
+  assert.deepEqual(keyUp, { prevented: false, stopped: true, immediate: true });
+  assertBlocked(loaded.dispatch('click', [identity.element, identity.slot], {
+    isTrusted: true, button: 0, detail: 0
+  }));
+  assert.equal(activations, 2);
 });
 
 test('isolated native guard treats missing malformed and failed settings reads as enabled', async () => {

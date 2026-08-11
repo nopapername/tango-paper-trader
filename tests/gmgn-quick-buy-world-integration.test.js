@@ -126,9 +126,6 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
     registrations.push({ world, type, listener, options });
   };
   let guardContext;
-  let relayIsolatedMessage = () => {
-    throw new Error('isolated message relay was not installed');
-  };
   const pageContext = {
     console,
     Element: FakeElement,
@@ -139,13 +136,7 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
     fetch: async () => ({ ok: false, headers: { get: () => '' } }),
     document: { documentElement: { classList: { contains: () => false } } },
     addEventListener: register('main'),
-    postMessage(message) {
-      if (message?.source === 'TANGO_GMGN_PAGE'
-        && ['PAPER_QUICK_BUY_INTENT', 'PAPER_QUICK_BUY_CLICK'].includes(message.type)) {
-        paperOrders.push(message);
-        relayIsolatedMessage(message);
-      }
-    },
+    postMessage() {},
     Tango: { GMGNQuotes: { extract: () => [], extractNativePrices: () => [], mergeObservation: (_, next) => next } }
   };
   pageContext.window = pageContext;
@@ -180,18 +171,6 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
   vm.runInNewContext(source('src/adapters/gmgn.js'), guardContext, {
     filename: 'src/adapters/gmgn.js'
   });
-  guardContext.__adapterMessageListener = registrations.find((entry) =>
-    entry.world === 'guard' && entry.type === 'message'
-  )?.listener;
-  assert.equal(typeof guardContext.__adapterMessageListener, 'function');
-  relayIsolatedMessage = (message) => {
-    guardContext.__mainWorldMessage = message;
-    return vm.runInNewContext(
-      '__adapterMessageListener({ source: window, data: __mainWorldMessage })',
-      guardContext,
-      { filename: 'tests/isolated-message-relay.js' }
-    );
-  };
   vm.runInNewContext(source('src/core/chains.js'), pageContext, { filename: 'src/core/chains.js' });
   vm.runInNewContext(source('src/core/supply.js'), pageContext, { filename: 'src/core/supply.js' });
   vm.runInNewContext(source('src/adapters/gmgn-quotes.js'), pageContext, { filename: 'src/adapters/gmgn-quotes.js' });
@@ -365,9 +344,10 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
     return state;
   }
 
-  function dispatchTrustedPair(paper) {
-    dispatchTrusted('pointerdown', paper, { pointerId: 11 });
-    dispatchTrusted('pointerup', paper, { pointerId: 11 });
+  function dispatchTrustedActivation(paper, detail = 1) {
+    dispatchTrusted('pointerdown', paper, { pointerId: 11, isTrusted: true });
+    dispatchTrusted('pointerup', paper, { pointerId: 11, isTrusted: true });
+    dispatchTrusted('click', paper, { button: 0, detail, isTrusted: true });
   }
 
   function mutateCore(mounted, drift) {
@@ -381,18 +361,14 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
 
   return {
     mountReadyPaper, mountResolvingPaper, replaceNativeAncestor,
-    dispatchTrusted, dispatchTrustedPair, mutateCore,
+    dispatchTrusted, dispatchTrustedActivation, mutateCore,
     paperOrders,
     paperAssets,
     clock,
     setRoute(href) { guardContext.location.href = href; },
     deliver(message) {
-      relayIsolatedMessage(message);
-    },
-    poisonExportedDispatcher() {
-      guardContext.Tango.GMGN._invokeQuickBuyAction = () => {
-        throw new Error('MAIN relay bypassed the production message listener');
-      };
+      const listeners = registrations.filter((entry) => entry.world === 'guard' && entry.type === 'message');
+      for (const entry of listeners) entry.listener({ source: guardContext, data: message });
     },
     get paperCallbacks() { return paperCallbacks; },
     get nativeCaptureCalls() { return nativeCaptureCalls; },
@@ -410,20 +386,45 @@ test('React ancestor replacement never exposes a native callback or duplicates p
   world.dispatchTrusted('pointerup', mounted.paper, { pointerId: 11 });
   world.replaceNativeAncestor(mounted.slot, 'after-activation');
 
-  assert.equal(world.paperOrders.length, 1);
+  world.dispatchTrusted('click', mounted.paper, { button: 0, detail: 1, isTrusted: true });
+  assert.equal(world.paperOrders.length, 0);
   assert.equal(world.paperCallbacks, 1);
   assert.equal(world.nativeCaptureCalls, 0);
   assert.equal(world.nativeBubbleCalls, 0);
 });
 
-test('MAIN postMessage crosses the production isolated message listener before the action map', () => {
+test('trusted isolated activation invokes paper once without a MAIN action message', () => {
   const world = loadIntegratedQuickBuyWorld();
   const mounted = world.mountReadyPaper({ chain: 'base', address: EVM_ADDRESS });
-  world.poisonExportedDispatcher();
-  world.dispatchTrustedPair(mounted.paper);
+  world.dispatchTrustedActivation(mounted.paper);
   assert.equal(world.paperCallbacks, 1);
+  assert.equal(world.paperOrders.length, 0);
   assert.equal(world.nativeCaptureCalls, 0);
   assert.equal(world.nativeBubbleCalls, 0);
+});
+
+test('forged public identity messages cannot mutate ready or resolving paper assets', async () => {
+  const world = loadIntegratedQuickBuyWorld();
+  const ready = world.mountReadyPaper({ chain: 'base', address: EVM_ADDRESS });
+  const resolving = world.mountResolvingPaper();
+  const before = structuredClone(world.paperAssets);
+
+  for (const mounted of [ready, resolving]) {
+    world.deliver({
+      source: 'TANGO_GMGN_PAGE',
+      type: mounted.binding.state === 'resolving-identity'
+        ? 'PAPER_QUICK_BUY_INTENT' : 'PAPER_QUICK_BUY_CLICK',
+      actionId: mounted.paper.dataset.tangoActionId,
+      bindingNonce: mounted.paper.dataset.tangoBindingNonce
+    });
+  }
+  resolving.exposeHref();
+  resolving.reconcile();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(world.paperCallbacks, 0);
+  assert.deepEqual(world.paperAssets, before);
+  assert.equal(world.nativeCaptureCalls + world.nativeBubbleCalls, 0);
 });
 
 for (const drift of ['actionId', 'bindingNonce', 'card', 'slot', 'chain', 'address']) {
@@ -431,18 +432,18 @@ for (const drift of ['actionId', 'bindingNonce', 'card', 'slot', 'chain', 'addre
     const world = loadIntegratedQuickBuyWorld();
     const mounted = world.mountReadyPaper({ chain: 'base', address: EVM_ADDRESS });
     world.mutateCore(mounted, drift);
-    world.dispatchTrustedPair(mounted.paper);
+    world.dispatchTrustedActivation(mounted.paper);
     assert.equal(world.paperOrders.length, 0);
     assert.equal(world.paperCallbacks, 0);
     assert.equal(world.nativeCaptureCalls + world.nativeBubbleCalls, 0);
   });
 }
 
-test('resolving publication accepts a MAIN-world message without invoking paper or native callbacks', () => {
+test('trusted resolving activation retains its paper state without invoking native callbacks', () => {
   const world = loadIntegratedQuickBuyWorld();
   const mounted = world.mountResolvingPaper();
-  world.dispatchTrustedPair(mounted.paper);
-  assert.equal(world.paperOrders.length, 1);
+  world.dispatchTrustedActivation(mounted.paper);
+  assert.equal(world.paperOrders.length, 0);
   assert.equal(world.paperCallbacks, 0);
   assert.equal(mounted.paper.dataset.tangoPaperState, 'resolving-identity');
   assert.equal(mounted.paper.disabled, false);
@@ -450,14 +451,14 @@ test('resolving publication accepts a MAIN-world message without invoking paper 
   assert.equal(world.nativeBubbleCalls, 0);
 });
 
-test('href present immediately before MAIN resolving dispatch promotes and calls real onQuickBuy once', async () => {
+test('href present immediately before trusted resolving activation promotes and calls real onQuickBuy once', async () => {
   const world = loadIntegratedQuickBuyWorld();
   const mounted = world.mountResolvingPaper();
   mounted.exposeHref();
-  world.dispatchTrustedPair(mounted.paper);
+  world.dispatchTrustedActivation(mounted.paper);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(world.paperCallbacks, 1);
-  assert.equal(world.paperOrders.length, 1);
+  assert.equal(world.paperOrders.length, 0);
   assert.ok(['ready', 'in-flight'].includes(mounted.paper.dataset.tangoPaperState));
   assert.equal(mounted.paper.disabled, false);
   assert.equal(world.nativeCaptureCalls, 0);
@@ -465,10 +466,10 @@ test('href present immediately before MAIN resolving dispatch promotes and calls
 });
 
 for (const [elapsed, expectedCallbacks] of [[300, 1], [301, 0]]) {
-  test(`MAIN-world resolving completion at ${elapsed} ms invokes ${expectedCallbacks} paper callback`, async () => {
+  test(`trusted resolving completion at ${elapsed} ms invokes ${expectedCallbacks} paper callback`, async () => {
     const world = loadIntegratedQuickBuyWorld();
     const mounted = world.mountResolvingPaper();
-    world.dispatchTrustedPair(mounted.paper);
+    world.dispatchTrustedActivation(mounted.paper);
     world.clock.now = 1_000 + elapsed;
     mounted.exposeHref();
     mounted.reconcile();
@@ -482,7 +483,7 @@ for (const [elapsed, expectedCallbacks] of [[300, 1], [301, 0]]) {
 test('real Guard registration failure restores resolving publication and retries within TTL', async () => {
   const world = loadIntegratedQuickBuyWorld();
   const mounted = world.mountResolvingPaper();
-  world.dispatchTrustedPair(mounted.paper);
+  world.dispatchTrustedActivation(mounted.paper);
   mounted.exposeHref();
   const originalContains = mounted.card.contains.bind(mounted.card);
   let failOnce = true;
@@ -501,7 +502,7 @@ test('real Guard registration failure restores resolving publication and retries
   assert.equal(world.nativeBubbleCalls, 0);
 });
 
-test('twenty duplicated and reordered MAIN messages execute at most one real paper callback', async () => {
+test('twenty duplicated and reordered public messages execute no paper callback', async () => {
   const world = loadIntegratedQuickBuyWorld();
   const mounted = world.mountResolvingPaper();
   mounted.exposeHref();
@@ -519,8 +520,7 @@ test('twenty duplicated and reordered MAIN messages execute at most one real pap
     world.deliver(index % 2 ? intentMessage : readyMessage);
   }
   await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(world.paperCallbacks <= 1);
-  assert.equal(world.paperCallbacks, 1);
+  assert.equal(world.paperCallbacks, 0);
   assert.equal(world.nativeCaptureCalls, 0);
   assert.equal(world.nativeBubbleCalls, 0);
 });
@@ -547,7 +547,7 @@ for (const [drift, applyDrift] of Object.entries(worldIdentityDrifts)) {
     const world = loadIntegratedQuickBuyWorld();
     const mounted = world.mountResolvingPaper();
     if (drift === 'pre-existing-attribute-hydration') applyDrift(world, mounted);
-    world.dispatchTrustedPair(mounted.paper);
+    world.dispatchTrustedActivation(mounted.paper);
     if (drift !== 'pre-existing-attribute-hydration') applyDrift(world, mounted);
 
     if (drift === 'href-removed' || drift === 'href-rewritten') {

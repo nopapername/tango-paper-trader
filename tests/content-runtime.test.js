@@ -10,10 +10,19 @@ const Chains = require('../src/core/chains.js');
 const Supply = require('../src/core/supply.js');
 delete global.Tango.Supply;
 require('../src/shared/constants.js');
+const runtimePaperActions = new WeakMap();
 global.Tango.NativeQuickBuyGuard = {
-  registerPaperAction: () => true,
+  registerPaperAction(element, _identity, activate) {
+    if (typeof activate !== 'function') {
+      runtimePaperActions.delete(element);
+      return false;
+    }
+    runtimePaperActions.set(element, activate);
+    return true;
+  },
   isPaperActionTrusted: () => true,
-  revokePaperAction: () => true
+  revokePaperAction(element) { return runtimePaperActions.delete(element); },
+  invokeRegistered(element) { return runtimePaperActions.get(element)?.(); }
 };
 const RealState = require('../src/core/state.js');
 const RealEngine = require('../src/core/engine.js');
@@ -2814,11 +2823,7 @@ async function mutationProvenanceScenario() {
     async clickResolvingShell(expectedIntents = 1) {
       const paper = harness.replacement;
       assert.equal(paper?.disabled, false);
-      RealGMGN._invokeQuickBuyAction(
-        paper.dataset.tangoActionId,
-        paper.dataset.tangoBindingNonce,
-        'PAPER_QUICK_BUY_INTENT'
-      );
+      global.Tango.NativeQuickBuyGuard.invokeRegistered(paper);
       await new Promise((resolve) => setImmediate(resolve));
       assert.equal(RealGMGN._quickBuyIntentCount(), expectedIntents);
     },

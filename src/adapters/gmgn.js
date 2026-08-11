@@ -1,6 +1,5 @@
 (function initGmgnAdapter(global) {
   const Tango = global.Tango = global.Tango || {};
-  const quickBuyActions = new Map();
   const quickBuyIntents = new Map();
   const quickBuyCardGenerations = new WeakMap();
   let quickBuyCardBirths = new WeakMap();
@@ -24,22 +23,6 @@
   const FAST_QUICK_BUY_SLOT_LIMIT = 24;
   let chartTrustByFrame = new WeakMap();
   const CHART_FRAME_SELECTOR = 'iframe[title="Financial Chart"], iframe[title="TradingView"], [data-sentry-component="TradingView"] iframe';
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('message', (event) => {
-      if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE') return;
-      invokeQuickBuyAction(event.data?.actionId, event.data?.bindingNonce, event.data?.type);
-    });
-  }
-
-  function invokeQuickBuyAction(actionId, bindingNonce, type) {
-    const action = quickBuyActions.get(String(actionId || ''));
-    const expectedKind = type === 'PAPER_QUICK_BUY_INTENT' ? 'intent'
-      : (type === 'PAPER_QUICK_BUY_CLICK' ? 'execute' : '');
-    if (!action || !expectedKind || action.kind !== expectedKind
-      || action.bindingNonce !== String(bindingNonce || '')) return undefined;
-    return action.invoke();
-  }
 
   function cardGeneration(card) {
     if (!quickBuyCardGenerations.has(card)) {
@@ -1507,7 +1490,7 @@
     return Tango.NativeQuickBuyGuard?.registerPaperAction?.(replacement, {
       slot, card, binding, actionId: expectedActionId, bindingNonce, generation, state,
       chain, address, href, amountNative
-    }) === true;
+    }, binding.action?.invoke) === true;
   }
 
   function paperGuardIdentity(binding) {
@@ -1535,8 +1518,7 @@
       replacementDataset: { ...(binding?.replacement?.dataset || {}) },
       original: slot?.__tangoOriginalQuickBuy,
       replacement: slot?.__tangoReplacementQuickBuy,
-      card: slot?.__tangoQuickBuyCard,
-      handler: slot?.__tangoQuickBuyHandler
+      card: slot?.__tangoQuickBuyCard
     };
   }
 
@@ -1553,8 +1535,6 @@
     else delete slot.__tangoReplacementQuickBuy;
     if (snapshot.card !== undefined) slot.__tangoQuickBuyCard = snapshot.card;
     else delete slot.__tangoQuickBuyCard;
-    if (snapshot.handler !== undefined) slot.__tangoQuickBuyHandler = snapshot.handler;
-    else delete slot.__tangoQuickBuyHandler;
   }
 
   function stagePaperBinding(slot, binding) {
@@ -1566,7 +1546,6 @@
     slot.__tangoQuickBuyBinding = binding;
     slot.__tangoReplacementQuickBuy = binding.replacement;
     slot.__tangoQuickBuyCard = binding.card;
-    slot.__tangoQuickBuyHandler = binding.action?.invoke;
     if (!binding.replacement.isConnected) mountQuickBuyReplacement(slot, null, binding.replacement);
   }
 
@@ -1574,7 +1553,6 @@
     const binding = previous.binding;
     if (!binding || binding === nextBinding) return;
     cancelQuickBuyIdentityIntent(binding, 'superseded');
-    quickBuyActions.delete(String(binding.actionId || ''));
     if (binding.repairTimer) global.clearTimeout?.(binding.repairTimer);
     for (const target of binding.resizeTargets || []) binding.resizeObserver?.unobserve?.(target);
     binding.resizeObserver?.disconnect?.();
@@ -1603,7 +1581,6 @@
           previous.binding.replacement.dataset.tangoPublished = '1';
         } else {
           Tango.NativeQuickBuyGuard?.revokePaperAction?.(previous.binding.replacement);
-          quickBuyActions.delete(String(previous.binding.actionId || ''));
           previous.binding.replacement.dataset.tangoPublished = '0';
         }
       }
@@ -1615,10 +1592,8 @@
       }
       return false;
     }
-    quickBuyActions.set(nextBinding.actionId, action);
     nextBinding.replacement.dataset.tangoPublished = '1';
     retirePreviousPaperBinding(previous, nextBinding);
-    slot.__tangoQuickBuyHandler = action.invoke;
     mountQuickBuyReplacement(slot, nextBinding.nativeControl, nextBinding.replacement);
     replaceAdditionalNativeQuickBuyControls(slot, nextBinding);
     return true;
@@ -2757,7 +2732,6 @@
     Tango.NativeQuickBuyGuard?.revokePaperAction?.(replacement);
     cancelQuickBuyIdentityIntent(binding, 'restored');
     trackedQuickBuySlots.delete(slot);
-    quickBuyActions.delete(String(binding?.actionId || slot?.dataset?.tangoActionId || ''));
     if (binding?.repairTimer) global.clearTimeout?.(binding.repairTimer);
     for (const target of binding?.resizeTargets || [slot]) {
       binding?.resizeObserver?.unobserve?.(target);
@@ -2777,7 +2751,6 @@
     delete slot.__tangoOriginalQuickBuy;
     delete slot.__tangoReplacementQuickBuy;
     delete slot.__tangoQuickBuyCard;
-    delete slot.__tangoQuickBuyHandler;
     slot.classList.remove('tango-native-buy-overridden', 'tango-quick-expanded', 'tango-quick-narrow');
     delete slot.dataset.tangoQuickBuy;
     delete slot.dataset.tangoTokenAddress;
@@ -2819,7 +2792,6 @@
     _quickBuyIdentityIntentTtlMs: QUICK_BUY_IDENTITY_INTENT_TTL_MS,
     _cardAddressEvidence: cardAddressEvidence,
     _quickBuyBirthForRoot: (root) => quickBuyCardBirths.get(root) || null,
-    _invokeQuickBuyAction: invokeQuickBuyAction,
     _quickBuyIntentCount: () => quickBuyIntents.size,
     _markChartFrameReady: markChartFrameReady, _invalidateChartFrame: invalidateChartFrame,
     _clearChartTrust: clearChartTrust, _hasTrustedChart: hasTrustedChart,

@@ -11,11 +11,7 @@ global.Tango = {};
 require('../src/core/chains.js');
 require('../src/core/supply.js');
 require('../src/shared/constants.js');
-global.Tango.NativeQuickBuyGuard = {
-  registerPaperAction: () => true,
-  isPaperActionTrusted: () => true,
-  revokePaperAction: () => true
-};
+global.Tango.NativeQuickBuyGuard = guardHarness();
 const State = require('../src/core/state.js');
 const Engine = require('../src/core/engine.js');
 const GMGN = require('../src/adapters/gmgn.js');
@@ -939,12 +935,7 @@ function quickBuyHarness({
     visibleTrustedPaperCount: { get: () =>
       replacement?.isConnected && replacement.dataset.tangoPublished === '1' ? 1 : 0 }
   });
-  harness.invokePaperAction = () => GMGN._invokeQuickBuyAction(
-    replacement.dataset.tangoActionId,
-    replacement.dataset.tangoBindingNonce,
-    replacement.dataset.tangoPaperState === 'resolving-identity'
-      ? 'PAPER_QUICK_BUY_INTENT' : 'PAPER_QUICK_BUY_CLICK'
-  );
+  harness.invokePaperAction = () => global.Tango.NativeQuickBuyGuard?.invokeRegistered?.(replacement);
   harness.exposeCardHref = (nextHref) => {
     href = nextHref;
   };
@@ -953,6 +944,7 @@ function quickBuyHarness({
 }
 
 function guardHarness({ registerResult = true } = {}) {
+  const actions = new WeakMap();
   return {
     registerResult,
     failNext: false,
@@ -960,13 +952,17 @@ function guardHarness({ registerResult = true } = {}) {
     trusted: false,
     descriptor: null,
     registrations: [],
-    registerPaperAction(element, descriptor) {
-      this.descriptor = { element, ...descriptor };
+    registerPaperAction(element, descriptor, activate) {
+      this.descriptor = { element, ...descriptor, activate };
       this.registrations.push(this.descriptor);
-      const result = this.failNext || this.failRegistrations > 0 ? false : this.registerResult;
+      const result = typeof activate === 'function'
+        && !(this.failNext || this.failRegistrations > 0)
+        && this.registerResult;
       this.failNext = false;
       if (this.failRegistrations > 0) this.failRegistrations -= 1;
       this.trusted = result;
+      if (result) actions.set(element, activate);
+      else actions.delete(element);
       return result;
     },
     isPaperActionTrusted(element, descriptor) {
@@ -974,9 +970,13 @@ function guardHarness({ registerResult = true } = {}) {
         && descriptor.actionId === this.descriptor?.actionId
         && descriptor.bindingNonce === this.descriptor?.bindingNonce;
     },
-    revokePaperAction() {
+    revokePaperAction(element) {
       this.trusted = false;
+      actions.delete(element);
       return true;
+    },
+    invokeRegistered(element) {
+      return actions.get(element)?.();
     }
   };
 }
@@ -4877,7 +4877,7 @@ test('an in-flight paper click stays clickable and deduplicated through metadata
       return gate.promise;
     }), 1);
     const replacement = harness.replacement;
-    const clickPromise = harness.slot.__tangoQuickBuyHandler();
+    const clickPromise = harness.invokePaperAction();
     assert.equal(paperCalls, 1);
     assert.equal(replacement.disabled, false);
     assert.equal(replacement.dataset.tangoPaperState, 'in-flight');
@@ -4926,7 +4926,7 @@ test('same-token recovery cannot reopen an in-flight paper action after the cool
       return gate.promise;
     }), 1);
     const replacement = harness.replacement;
-    const firstClick = harness.slot.__tangoQuickBuyHandler();
+    const firstClick = harness.invokePaperAction();
     assert.equal(paperCalls, 1);
 
     harness.card.innerText = 'loading';
@@ -4939,7 +4939,7 @@ test('same-token recovery cannot reopen an in-flight paper action after the cool
     assert.equal(replacement.disabled, false);
 
     replacement.dataset.tangoLastClickAt = String(Date.now() - 1_000);
-    const secondClick = harness.slot.__tangoQuickBuyHandler();
+    const secondClick = harness.invokePaperAction();
     assert.equal(paperCalls, 1);
 
     gate.resolve();
@@ -4981,7 +4981,7 @@ test('React leaf rebuild cannot reopen an in-flight paper action with a new acti
     assert.equal(freshGmgn.discoverTokenCards(onQuickBuy), 1);
     const firstReplacement = harness.replacement;
     const firstActionId = harness.slot.dataset.tangoActionId;
-    const firstClick = harness.slot.__tangoQuickBuyHandler();
+    const firstClick = harness.invokePaperAction();
     assert.equal(paperCalls, 1);
 
     firstReplacement.isConnected = false;
@@ -5001,7 +5001,7 @@ test('React leaf rebuild cannot reopen an in-flight paper action with a new acti
     assert.equal(rebuiltReplacement.disabled, false);
     assert.equal(rebuiltReplacement.dataset.tangoPaperState, 'in-flight');
 
-    const secondClick = harness.slot.__tangoQuickBuyHandler();
+    const secondClick = harness.invokePaperAction();
     assert.equal(paperCalls, 1);
     assert.equal(rebuiltNative.realHandlerCalls, 0);
 
@@ -5485,12 +5485,9 @@ test('promotion failure may retry only inside the original inclusive 300 ms inte
       GMGN.discoverTokenCards((order) => orders.push(order), 1, 'PAPER', [harness.card], {
         fast: true, policyKey: 'policy:enabled'
       });
-      const attemptedSuccessor = guard.registrations.at(-2);
       assert.equal(harness.slot.__tangoQuickBuyBinding, predecessor);
       assert.equal(harness.replacement.dataset.tangoPublished, '1');
-      assert.equal(GMGN._invokeQuickBuyAction(
-        attemptedSuccessor.actionId, attemptedSuccessor.bindingNonce, 'PAPER_QUICK_BUY_CLICK'
-      ), undefined);
+      assert.equal(GMGN._invokeQuickBuyAction, undefined);
 
       clock.now = retryAt;
       GMGN.discoverTokenCards((order) => orders.push(order), 1, 'PAPER', [harness.card], {
@@ -5512,26 +5509,16 @@ test('successor and predecessor registration failure leaves both actions unpubli
       fast: true, addedRoots: [harness.card], policyKey: 'policy:enabled'
     });
     const predecessor = harness.slot.__tangoQuickBuyBinding;
-    const predecessorAction = {
-      actionId: predecessor.actionId, bindingNonce: predecessor.bindingNonce
-    };
     await harness.invokePaperAction();
     guard.failRegistrations = 2;
     harness.exposeCardHref(`https://gmgn.ai/base/token/${EVM_ADDRESS}`);
     GMGN.discoverTokenCards((order) => orders.push(order), 1, 'PAPER', [harness.card], {
       fast: true, policyKey: 'policy:enabled'
     });
-    const failedSuccessor = guard.registrations.at(-2);
-
     assert.equal(harness.slot.__tangoQuickBuyBinding, predecessor);
     assert.equal(harness.replacement.dataset.tangoPublished, '0');
     assert.equal(guard.trusted, false);
-    assert.equal(GMGN._invokeQuickBuyAction(
-      failedSuccessor.actionId, failedSuccessor.bindingNonce, 'PAPER_QUICK_BUY_CLICK'
-    ), undefined);
-    assert.equal(GMGN._invokeQuickBuyAction(
-      predecessorAction.actionId, predecessorAction.bindingNonce, 'PAPER_QUICK_BUY_INTENT'
-    ), undefined);
+    assert.equal(GMGN._invokeQuickBuyAction, undefined);
     await harness.flushPaperActions();
     assert.equal(orders.length, 0);
     assert.equal(harness.nativeControl.isConnected, false);
