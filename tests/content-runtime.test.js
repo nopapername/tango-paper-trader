@@ -321,9 +321,15 @@ function loadContent({
     static now() { return clock.now; }
   }
   const shellLists = new Map();
+  const shellListeners = new Map();
   const shell = {
     className: '', innerHTML: '',
-    addEventListener() {}, querySelectorAll(selector) { return shellLists.get(selector) || []; }, querySelector() { return null; }
+    addEventListener(type, listener, options) {
+      const entries = shellListeners.get(type) || [];
+      entries.push({ listener, options });
+      shellListeners.set(type, entries);
+    },
+    querySelectorAll(selector) { return shellLists.get(selector) || []; }, querySelector() { return null; }
   };
   const shadowLists = new Map();
   const shadowSingles = new Map();
@@ -551,7 +557,7 @@ function loadContent({
   api.runtime.activeChainId = Chains.fromUrl(href)?.id || null;
   return {
     api, calls, clock, context, createDomNode: genericElement, documentSingles, messages, pageMessages,
-    shadowLists, shadowSingles, shell, shellLists, windowListeners,
+    shadowLists, shadowSingles, shell, shellLists, shellListeners, windowListeners,
     dispatchStorageChange(changes, areaName = 'local') {
       storageChangeListeners.forEach((listener) => listener(changes, areaName));
     }
@@ -1537,12 +1543,23 @@ function setPresetInputs(loaded, {
   loaded.shadowLists.set('[data-preset-side="sell"]', sell.map((value) => ({ value })));
 }
 
-function eventElement({ dataset = {}, value = '' } = {}) {
+function eventElement({ dataset = {}, value = '', checked = false } = {}) {
   const listeners = new Map();
   return {
-    dataset, value,
-    addEventListener(type, listener) { listeners.set(type, listener); },
-    emit(type, event) { return listeners.get(type)?.(event); }
+    dataset, value, checked, style: {},
+    addEventListener(type, listener) {
+      const entries = listeners.get(type) || [];
+      entries.push(listener);
+      listeners.set(type, entries);
+    },
+    removeEventListener(type, listener) {
+      listeners.set(type, (listeners.get(type) || []).filter((entry) => entry !== listener));
+    },
+    emit(type, event = {}) {
+      let result;
+      for (const listener of listeners.get(type) || []) result = listener(event);
+      return result;
+    }
   };
 }
 
@@ -1985,6 +2002,142 @@ test('content contains preset patch rejection and shows the settings error UI', 
   assert.equal(loaded.api.runtime.toast.type, 'error');
 });
 
+test('synthetic shell events cannot buy sell close confirm or patch settings', async () => {
+  const loaded = loadContent();
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.rememberNativePrice('eth', 2_000, loaded.clock.now);
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 1,
+    costBasisNative: 1, averageEntryPriceUsd: 2, lastPriceUsd: 2,
+    lastNativePriceUsd: 2_000, quoteObservedAt: loaded.clock.now
+  };
+  let modalActions = 0;
+  loaded.api.runtime.modal = { type: 'confirm', action: () => { modalActions += 1; } };
+
+  const buyButton = eventElement({ dataset: { buy: '1' } });
+  const sellButton = eventElement({ dataset: { sell: '100' } });
+  const closeAll = eventElement({ dataset: { action: 'close-all' } });
+  const confirm = eventElement({ dataset: { action: 'confirm-modal' } });
+  const collapse = eventElement({ dataset: { action: 'collapse-panel' } });
+  loaded.shellLists.set('[data-buy]', [buyButton]);
+  loaded.shellLists.set('[data-sell]', [sellButton]);
+  loaded.shellLists.set('[data-action]', [closeAll, confirm, collapse]);
+  loaded.api.bindEvents();
+
+  const synthetic = {
+    isTrusted: false,
+    preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}
+  };
+  await buyButton.emit('click', synthetic);
+  await sellButton.emit('click', synthetic);
+  await closeAll.emit('click', synthetic);
+  await confirm.emit('click', synthetic);
+  await collapse.emit('click', synthetic);
+
+  assert.equal(loaded.calls.buy, 0);
+  assert.equal(loaded.calls.sell, 0);
+  assert.equal(loaded.calls.closeAll, 0);
+  assert.equal(loaded.calls.patches.length, 0);
+  assert.equal(modalActions, 0);
+});
+
+test('synthetic preset save drag and confirmation suppression cannot persist', async () => {
+  const loaded = loadContent();
+  const save = eventElement({ dataset: { action: 'save-presets' } });
+  const editor = eventElement();
+  const confirm = eventElement({ dataset: { action: 'confirm-modal' } });
+  const checkbox = eventElement({ checked: true });
+  const handle = eventElement();
+  const element = eventElement();
+  element.getBoundingClientRect = () => ({ left: 100, top: 100, width: 200, height: 100 });
+  loaded.shellLists.set('[data-action]', [save, confirm]);
+  loaded.shellLists.set('.tango-preset-editor', [editor]);
+  loaded.shadowSingles.set('#tango-skip-session-confirm', checkbox);
+  loaded.shadowSingles.set('[data-drag-handle]', handle);
+  loaded.shadowSingles.set('.tango-panel', element);
+  setPresetInputs(loaded);
+  loaded.api.runtime.modal = { type: 'confirm', title: 'Confirm', rows: [], allowSessionSuppress: true, action: async () => undefined };
+  loaded.api.bindEvents();
+
+  const synthetic = {
+    isTrusted: false, key: 'Enter',
+    preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}
+  };
+  checkbox.emit('change', synthetic);
+  await save.emit('click', synthetic);
+  await editor.emit('keydown', synthetic);
+  await confirm.emit('click', synthetic);
+  handle.emit('pointerdown', { ...synthetic, target: { closest: () => null }, clientX: 10, clientY: 10 });
+
+  assert.equal(loaded.windowListeners.has('pointermove'), false);
+  assert.equal(loaded.calls.patches.length, 0);
+  assert.equal(loaded.messages.some((message) => message.type === 'TANGO_SET_SESSION_CONFIRM'), false);
+  assert.equal(loaded.api.runtime.suppressConfirmForSession, false);
+  assert.equal(checkbox.checked, false);
+
+  const trusted = { ...synthetic, isTrusted: true };
+  handle.emit('pointerdown', { ...trusted, target: { closest: () => null }, clientX: 10, clientY: 10 });
+  loaded.windowListeners.get('pointermove')({ ...synthetic, clientX: 30, clientY: 40 });
+  await loaded.windowListeners.get('pointerup')(synthetic);
+
+  assert.equal(loaded.api.runtime.settings.panelPosition, null);
+  assert.equal(loaded.calls.patches.length, 0);
+});
+
+test('trusted click keyboard drag and confirmation suppression preserve existing behavior', async () => {
+  const loaded = loadContent();
+  const save = eventElement({ dataset: { action: 'save-presets' } });
+  const editor = eventElement();
+  const confirm = eventElement({ dataset: { action: 'confirm-modal' } });
+  const checkbox = eventElement({ checked: true });
+  loaded.shellLists.set('[data-action]', [save, confirm]);
+  loaded.shellLists.set('.tango-preset-editor', [editor]);
+  loaded.shadowSingles.set('#tango-skip-session-confirm', checkbox);
+  setPresetInputs(loaded);
+  loaded.api.runtime.modal = { type: 'confirm', title: 'Confirm', rows: [], allowSessionSuppress: true, action: async () => undefined };
+  loaded.api.bindEvents();
+
+  const trusted = {
+    isTrusted: true,
+    preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}
+  };
+  checkbox.emit('change', trusted);
+  await editor.emit('keydown', { ...trusted, key: 'Enter' });
+  await confirm.emit('click', trusted);
+
+  assert.equal(loaded.calls.patches.length, 1);
+  assert.equal(loaded.messages.some((message) => (
+    message.type === 'TANGO_SET_SESSION_CONFIRM' && message.suppressed === true
+  )), true);
+  assert.equal(loaded.api.runtime.suppressConfirmForSession, true);
+});
+
+test('trusted confirmation cannot suppress the session without trusted checkbox provenance', async () => {
+  const loaded = loadContent();
+  const confirm = eventElement({ dataset: { action: 'confirm-modal' } });
+  const checkbox = eventElement({ checked: true });
+  let modalActions = 0;
+  loaded.shellLists.set('[data-action]', [confirm]);
+  loaded.shadowSingles.set('#tango-skip-session-confirm', checkbox);
+  loaded.api.runtime.modal = {
+    type: 'confirm', title: 'Confirm', rows: [], allowSessionSuppress: true,
+    action: async () => { modalActions += 1; }
+  };
+  loaded.api.bindEvents();
+
+  await confirm.emit('click', {
+    isTrusted: true,
+    preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}
+  });
+
+  assert.equal(modalActions, 1);
+  assert.equal(loaded.messages.some((message) => (
+    message.type === 'TANGO_SET_SESSION_CONFIRM' && message.suppressed === true
+  )), false);
+  assert.equal(loaded.api.runtime.suppressConfirmForSession, false);
+});
+
 test('content preset click contains persistence rejection', async () => {
   const loaded = loadContent({ patchSettings: async () => { throw new Error('write failed'); } });
   const saveButton = eventElement({ dataset: { action: 'save-presets' } });
@@ -1992,7 +2145,7 @@ test('content preset click contains persistence rejection', async () => {
   setPresetInputs(loaded);
   loaded.api.bindEvents();
 
-  const rejection = await saveButton.emit('click', { stopPropagation() {} }).then(() => null, (error) => error);
+  const rejection = await saveButton.emit('click', { isTrusted: true, stopPropagation() {} }).then(() => null, (error) => error);
 
   assert.equal(rejection, null);
   assert.equal(loaded.api.runtime.toast.message, 'settingsSaveFailed');
@@ -2009,7 +2162,7 @@ test('content collapse and sound controls contain rejected settings writes and r
     loaded.shellLists.set('[data-action]', [button]);
     loaded.api.bindEvents();
 
-    const rejection = await button.emit('click', { stopPropagation() {} }).then(() => null, (error) => error);
+    const rejection = await button.emit('click', { isTrusted: true, stopPropagation() {} }).then(() => null, (error) => error);
 
     assert.equal(rejection, null, action);
     assert.equal(loaded.api.runtime.settings[field], authoritative, action);
@@ -2031,12 +2184,13 @@ test('content drag persistence rejection restores the authoritative position wit
   loaded.api.bindDraggable('[data-drag-handle]', '.tango-panel', 'panelPosition');
 
   handle.emit('pointerdown', {
+    isTrusted: true,
     target: { closest: () => null },
     clientX: 10,
     clientY: 10
   });
-  loaded.windowListeners.get('pointermove')({ clientX: 30, clientY: 40, preventDefault() {} });
-  const rejection = await loaded.windowListeners.get('pointerup')().then(() => null, (error) => error);
+  loaded.windowListeners.get('pointermove')({ isTrusted: true, clientX: 30, clientY: 40, preventDefault() {} });
+  const rejection = await loaded.windowListeners.get('pointerup')({ isTrusted: true }).then(() => null, (error) => error);
 
   assert.equal(rejection, null);
   assert.equal(loaded.api.runtime.settings.panelPosition, null);
@@ -2155,7 +2309,7 @@ test('content preset Enter handler returns the contained save promise', async ()
   setPresetInputs(loaded);
   loaded.api.bindEvents();
 
-  const saving = editor.emit('keydown', { key: 'Enter' });
+  const saving = editor.emit('keydown', { isTrusted: true, key: 'Enter' });
 
   assert.equal(typeof saving?.then, 'function');
   await saving;
@@ -5767,7 +5921,7 @@ test('PnL calendar exposes current-chain trade history and sends the active chai
   loaded.shellLists.set('[data-action]', [history]);
   loaded.api.bindEvents();
 
-  await history.emit('click', { stopPropagation() {} });
+  await history.emit('click', { isTrusted: true, stopPropagation() {} });
 
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.messages.at(-1))), {
     type: 'TANGO_OPEN_DASHBOARD', tab: 'history', chain: 'eth'
