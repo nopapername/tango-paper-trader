@@ -2211,18 +2211,36 @@ test('trusted buy sell position header and drag handlers preserve shell behavior
   const header = loaded.documentSingles.get('#tango-header-account-summary');
   loaded.api.bindEvents();
 
-  const trusted = (key = '') => ({
-    isTrusted: true, key,
-    preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}
-  });
+  const trusted = (key = '') => {
+    const calls = { prevented: 0, stopped: 0, immediate: 0 };
+    return {
+      isTrusted: true, key,
+      preventDefault() { calls.prevented += 1; },
+      stopPropagation() { calls.stopped += 1; },
+      stopImmediatePropagation() { calls.immediate += 1; },
+      calls
+    };
+  };
   await buy.emit('click', trusted());
   await sell.emit('click', trusted());
   openPosition.emit('click', trusted());
   await Promise.resolve();
   await sellPosition.emit('click', trusted());
-  header.onclick(trusted());
-  header.onkeydown(trusted('Enter'));
-  header.onkeydown(trusted(' '));
+  const headerClick = trusted();
+  assert.equal(loaded.api.runtime.calendarOpen, false);
+  header.onclick(headerClick);
+  assert.equal(loaded.api.runtime.calendarOpen, true);
+  assert.deepEqual(headerClick.calls, { prevented: 1, stopped: 1, immediate: 0 });
+  const headerEnter = trusted('Enter');
+  assert.equal(loaded.api.runtime.calendarOpen, true);
+  header.onkeydown(headerEnter);
+  assert.equal(loaded.api.runtime.calendarOpen, false);
+  assert.equal(headerEnter.calls.prevented, 1);
+  const headerSpace = trusted(' ');
+  assert.equal(loaded.api.runtime.calendarOpen, false);
+  header.onkeydown(headerSpace);
+  assert.equal(loaded.api.runtime.calendarOpen, true);
+  assert.equal(headerSpace.calls.prevented, 1);
   handle.emit('pointerdown', { ...trusted(), target: { closest: () => null }, clientX: 10, clientY: 10 });
   loaded.windowListeners.get('pointermove')({ ...trusted(), clientX: 30, clientY: 40 });
   await loaded.windowListeners.get('pointerup')(trusted());
@@ -2236,7 +2254,6 @@ test('trusted buy sell position header and drag handlers preserve shell behavior
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.messages.find((message) => message.type === 'TANGO_OPEN_TOKEN'))), {
     type: 'TANGO_OPEN_TOKEN', url: `https://gmgn.ai/eth/token/${ADDRESS_A}`
   });
-  assert.equal(loaded.api.runtime.calendarOpen, true);
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.api.runtime.settings.panelPosition)), { x: 120, y: 130 });
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [{ panelPosition: { x: 120, y: 130 } }]);
   assert.equal(panel.style.left, '120px');
