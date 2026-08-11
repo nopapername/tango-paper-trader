@@ -17,25 +17,43 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 }
 
 .BuyButton-continer.tango-native-buy-overridden {
+  align-items: center !important;
+  display: flex !important;
+  justify-content: center !important;
   isolation: isolate;
+  min-height: 36px !important;
   min-width: 0;
   overflow: hidden;
   position: relative !important;
 }
-.tango-list-quick-buy {
+.BuyButton-continer.tango-native-buy-overridden .tango-quick-buy-action-host {
   align-items: center !important;
-  align-self: stretch !important;
+  display: flex !important;
+  flex: 1 1 100% !important;
+  justify-content: center !important;
+  min-height: 36px !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+.tango-list-quick-buy {
+  --tango-quick-buy-accent: #7dd3fc;
+  --tango-quick-buy-display-text: 14px;
+  --tango-quick-buy-label-text: 10px;
+  align-items: center !important;
+  align-self: center !important;
   background: transparent !important;
   border: 0 !important;
+  border-radius: 6px !important;
   box-sizing: border-box;
   box-shadow: none !important;
+  color: var(--tango-quick-buy-accent) !important;
   cursor: pointer;
   display: inline-flex !important;
-  flex: 1 1 auto !important;
-  height: 100% !important;
-  inset: auto !important;
+  flex: 0 0 auto !important;
+  height: 36px !important;
   justify-content: center !important;
-  min-height: 0 !important;
+  max-height: 36px !important;
+  min-height: 36px !important;
   min-width: 0 !important;
   outline: 0 !important;
   padding: 0 !important;
@@ -43,21 +61,10 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   pointer-events: auto !important;
   position: static !important;
   transform: none !important;
-  vertical-align: top !important;
   white-space: nowrap;
   width: 100% !important;
   z-index: 1 !important;
 }
-.BuyButton-continer.tango-native-buy-overridden[data-tango-quick-buy="1"] .tango-list-quick-buy {
-  align-content: center !important;
-  align-items: center !important;
-  align-self: stretch !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  justify-content: center !important;
-  text-align: center !important;
-}
-.tango-quick-buy-fallback { color: inherit; }
 .tango-list-quick-buy:hover {
   filter: brightness(1.12);
 }
@@ -65,13 +72,13 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 .tango-list-quick-buy[data-tango-paper-state="in-flight"] { cursor: wait; opacity: .65; }
 .tango-quick-buy-content {
   align-items: center !important;
-  background: color-mix(in srgb, var(--customize-button-ultra-color, #7dd3fc) 16%, transparent) !important;
-  border-radius: inherit;
+  background: color-mix(in srgb, var(--tango-quick-buy-accent) 16%, transparent) !important;
+  border-radius: 6px !important;
   box-sizing: border-box;
   display: inline-flex !important;
   flex: 1 1 100% !important;
   flex-direction: column !important;
-  font-size: var(--tango-quick-buy-display-text, 11px) !important;
+  font-size: var(--tango-quick-buy-display-text) !important;
   gap: 0 !important;
   height: 100% !important;
   justify-content: center !important;
@@ -85,27 +92,11 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   pointer-events: none !important;
   width: 100% !important;
 }
-.tango-list-quick-buy[data-tango-quick-buy-size="small"] {
-  --tango-quick-buy-display-text: 11px;
-  --tango-quick-buy-label-text: 8px;
-}
-.tango-list-quick-buy[data-tango-quick-buy-size="large"] {
-  --tango-quick-buy-display-text: 12px;
-  --tango-quick-buy-label-text: 9px;
-}
-.tango-list-quick-buy[data-tango-quick-buy-size="extra-large"] {
-  --tango-quick-buy-display-text: 13px;
-  --tango-quick-buy-label-text: 9px;
-}
-.tango-list-quick-buy[data-tango-quick-buy-size="giant"] {
-  --tango-quick-buy-display-text: 14px;
-  --tango-quick-buy-label-text: 10px;
-}
 .tango-list-quick-buy:hover .tango-quick-buy-content {
-  background: color-mix(in srgb, var(--customize-button-ultra-color, #7dd3fc) 24%, transparent) !important;
+  background: color-mix(in srgb, var(--tango-quick-buy-accent) 24%, transparent) !important;
 }
 .tango-list-quick-buy:focus-visible .tango-quick-buy-content {
-  outline: 1px solid var(--customize-button-ultra-color, #7dd3fc) !important;
+  outline: 1px solid var(--tango-quick-buy-accent) !important;
   outline-offset: -1px !important;
 }
 .tango-paper-hint {
@@ -114,7 +105,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   border-radius: 3px;
   color: #fff;
   flex: 0 0 auto;
-  font-size: var(--tango-quick-buy-label-text, 8px) !important;
+  font-size: var(--tango-quick-buy-label-text) !important;
   font-weight: 950;
   line-height: .9 !important;
   min-width: max-content;
@@ -133,7 +124,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: 0 0 9px color-mix(in srgb, var(--customize-button-ultra-color, #00ffee) 45%, transparent);
+  text-shadow: 0 0 9px color-mix(in srgb, var(--tango-quick-buy-accent) 45%, transparent);
   line-height: .9 !important;
   white-space: nowrap;
 }

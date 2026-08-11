@@ -242,6 +242,7 @@ test('quick-buy lifecycle has a cheap 750ms drift probe and observes presentatio
   assert.match(start, /attributeFilter:\s*\['href', 'class', 'style', 'data-testid'\]/);
 });
 
+/* Retired GMGN-owned quick-buy presentation assertions.
 test('paper quick-buy content fills the GMGN-owned outer control without imposing profile geometry', () => {
   const buttonRule = cssSource.match(/(?:^|\n)\.tango-list-quick-buy\s*\{([^}]*)\}/)?.[1] || '';
   const wrapperRule = cssSource.match(/\.tango-quick-buy-content\s*\{([^}]*)\}/)?.[1] || '';
@@ -316,6 +317,35 @@ test('fallback paper quick-buy keeps outer geometry owned while allowing its inn
   assert.doesNotMatch(fallbackRule, /background\s*:/);
   assert.match(fallbackRule, /color:\s*inherit/);
   assert.doesNotMatch(fallbackRule, /color:\s*#07110e/);
+});
+
+*/
+
+test('paper quick-buy owns one exact locked Giant presentation', () => {
+  const slotRule = cssSource.match(/\.BuyButton-continer\.tango-native-buy-overridden\s*\{([^}]*)\}/)?.[1] || '';
+  const hostRule = cssSource.match(/\.BuyButton-continer\.tango-native-buy-overridden\s+\.tango-quick-buy-action-host\s*\{([^}]*)\}/)?.[1] || '';
+  const buttonRule = cssSource.match(/(?:^|\n)\.tango-list-quick-buy\s*\{([^}]*)\}/)?.[1] || '';
+  const wrapperRule = cssSource.match(/\.tango-quick-buy-content\s*\{([^}]*)\}/)?.[1] || '';
+  const hintRule = cssSource.match(/\.tango-paper-hint\s*\{([^}]*)\}/)?.[1] || '';
+  const amountRule = cssSource.match(/\.tango-buy-amount\s*\{([^}]*)\}/)?.[1] || '';
+  const hoverRule = cssSource.match(/\.tango-list-quick-buy:hover\s+\.tango-quick-buy-content\s*\{([^}]*)\}/)?.[1] || '';
+  const focusRule = cssSource.match(/\.tango-list-quick-buy:focus-visible\s+\.tango-quick-buy-content\s*\{([^}]*)\}/)?.[1] || '';
+  assert.ok(slotRule && hostRule && buttonRule && wrapperRule && hintRule && amountRule && hoverRule && focusRule);
+  assert.match(slotRule, /display:\s*flex\s*!important/);
+  assert.match(slotRule, /min-height:\s*36px\s*!important/);
+  assert.match(hostRule, /min-height:\s*36px\s*!important/);
+  assert.match(buttonRule, /height:\s*36px\s*!important/);
+  assert.match(buttonRule, /border-radius:\s*6px\s*!important/);
+  assert.match(buttonRule, /color:\s*var\(--tango-quick-buy-accent\)\s*!important/);
+  assert.match(buttonRule, /--tango-quick-buy-display-text:\s*14px/);
+  assert.match(buttonRule, /--tango-quick-buy-label-text:\s*10px/);
+  assert.match(wrapperRule, /background:\s*color-mix\(in srgb,\s*var\(--tango-quick-buy-accent\)\s*16%,\s*transparent\)\s*!important/i);
+  assert.match(wrapperRule, /border-radius:\s*6px\s*!important/);
+  assert.match(hintRule, /font-size:\s*var\(--tango-quick-buy-label-text\)\s*!important/);
+  assert.match(amountRule, /font-size:\s*1em\s*!important/);
+  assert.match(hoverRule, /var\(--tango-quick-buy-accent\)/);
+  assert.match(focusRule, /var\(--tango-quick-buy-accent\)/);
+  assert.doesNotMatch(`${slotRule}\n${hostRule}\n${buttonRule}\n${wrapperRule}\n${hintRule}\n${amountRule}\n${hoverRule}\n${focusRule}`, /customize-button-ultra-color/);
 });
 
 test('quick-buy activation fail-closes any live GMGN native leaf until the paper shell takes over', () => {
