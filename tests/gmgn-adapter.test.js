@@ -356,15 +356,24 @@ body { background: #0c0d12; font: 13px/1 Arial, sans-serif; }
   }));
   const focusPaper = controls[0].paper;
   focusPaper.focus({ focusVisible: true });
-  const focusWrapperStyle = getComputedStyle(controls[0].wrapper);
-  document.title = btoa(JSON.stringify({
-    states,
-    focus: {
+  const writeFocusTelemetry = (attempt = 0) => {
+    const focusWrapperStyle = getComputedStyle(controls[0].wrapper);
+    const focus = {
       active: document.activeElement === focusPaper,
+      focusVisible: focusPaper.matches(':focus-visible'),
       wrapperOutlineWidth: Number.parseFloat(focusWrapperStyle.outlineWidth),
-      wrapperOutlineStyle: focusWrapperStyle.outlineStyle
+      wrapperOutlineStyle: focusWrapperStyle.outlineStyle,
+      attempts: attempt
+    };
+    if ((!focus.active || !focus.focusVisible || focus.wrapperOutlineStyle !== 'solid'
+      || focus.wrapperOutlineWidth < 1) && attempt < 30) {
+      focusPaper.focus({ focusVisible: true });
+      requestAnimationFrame(() => writeFocusTelemetry(attempt + 1));
+      return;
     }
-  }));
+    document.title = btoa(JSON.stringify({ states, focus }));
+  };
+  requestAnimationFrame(() => writeFocusTelemetry(1));
 })();
 </script></body></html>`;
     fs.writeFileSync(pagePath, page, 'utf8');
@@ -399,6 +408,9 @@ test('headless Chrome centers an exact 36px Tango control in short equal and tal
     assert.notEqual(state.wrapperBackground, 'rgba(0, 0, 0, 0)', `${state.fixture}: painted surface`);
   }
   assert.equal(report.focus.active, true);
+  assert.equal(report.focus.focusVisible, true);
+  assert.ok(Number.isInteger(report.focus.attempts) && report.focus.attempts >= 1
+    && report.focus.attempts <= 30, 'focus telemetry must come from the bounded frame condition');
   assert.equal(report.focus.wrapperOutlineStyle, 'solid');
   assert.ok(report.focus.wrapperOutlineWidth >= 1);
 });
