@@ -387,9 +387,12 @@ test('GMGN adapter cannot authorize a paper action without the complete cross-wo
     className: '', dataset: {}, style: { cssText: '' },
     getAttributeNames: () => [], getAttribute: () => ''
   });
-  loaded.context.Tango.GMGN._applyInertPresentation(
-    replacement, null, { className: '', styleText: '', signature: '' }
-  );
+  const profile = loaded.context.Tango.GMGN._applyLockedQuickBuyPresentation(replacement);
+  assert.equal(profile.id, 'giant');
+  assert.equal(profile.heightPx, 36);
+  assert.equal(replacement.className, 'tango-list-quick-buy');
+  assert.equal(replacement.style.cssText, '');
+  assert.equal(replacement.dataset.tangoQuickBuySize, 'giant');
   const nativeSlot = new loaded.FakeElement(['.BuyButton-continer']);
   assertBlocked(
     loaded.dispatch('click', [replacement, nativeSlot]),
