@@ -3263,7 +3263,13 @@ test('startup immediately installs a clickable resolving-identity paper shell fo
     assert.ok(harness.replacement);
     assert.equal(harness.replacement.disabled, false);
     assert.equal(harness.replacement.dataset.tangoPaperState, 'resolving-identity');
-    assert.equal(typeof harness.slot.__tangoQuickBuyHandler, 'function');
+    assert.equal(
+      global.Tango.NativeQuickBuyGuard.invokeRegistered(harness.replacement)?.status,
+      'REJECTED'
+    );
+    assert.equal(RealGMGN._quickBuyIntentCount(), 0);
+    assert.equal(loaded.calls.buy, 0);
+    assert.equal(loaded.api.runtime.modal, null);
     assert.ok(harness.slot.dataset.tangoActionId);
     assert.ok(harness.slot.dataset.tangoBindingNonce);
     assert.equal(harness.nativeControl.isConnected, false);
@@ -3281,17 +3287,16 @@ test('content mutations promote changed card descendants into real GMGN live-slo
   let observerCallback;
   let observerOptions;
   const timers = [];
-  const observed = [];
-  const unobserved = [];
-  let disconnects = 0;
+  let resizeObserverCreates = 0;
   class CapturingMutationObserver {
     constructor(callback) { observerCallback = callback; }
     observe(_target, options) { observerOptions = options; }
   }
   class CapturingResizeObserver {
-    observe(slot) { observed.push(slot); }
-    unobserve(slot) { unobserved.push(slot); }
-    disconnect() { disconnects += 1; }
+    constructor() { resizeObserverCreates += 1; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
   }
   const harness = mutationQuickBuyHarness();
   const loaded = loadContent({
@@ -3317,7 +3322,6 @@ test('content mutations promote changed card descendants into real GMGN live-slo
     }]);
     const firstControl = harness.replacement;
     const firstActionId = harness.slot.dataset.tangoActionId;
-    const firstHandler = harness.slot.__tangoQuickBuyHandler;
     assert.equal(harness.slot.dataset.tangoTokenAddress, ADDRESS_A);
 
     harness.setAddress(ADDRESS_B);
@@ -3328,16 +3332,18 @@ test('content mutations promote changed card descendants into real GMGN live-slo
 
     assert.equal(firstControl.isConnected, false);
     assert.notEqual(harness.slot.dataset.tangoActionId, firstActionId);
-    assert.notEqual(harness.slot.__tangoQuickBuyHandler, firstHandler);
+    assert.equal(global.Tango.NativeQuickBuyGuard.invokeRegistered(firstControl), undefined);
     assert.equal(harness.slot.dataset.tangoBindingKey, `base:${ADDRESS_B}`);
     assert.equal(harness.slot.dataset.tangoTokenAddress, ADDRESS_B);
     assert.equal(harness.paperControlCount, 1);
-    assert.deepEqual(observed, [
-      harness.slot, firstControl, harness.card,
-      harness.slot, harness.replacement, harness.card
-    ]);
-    assert.deepEqual(unobserved, [harness.slot, firstControl, harness.card]);
-    assert.equal(disconnects, 1);
+    assert.equal(harness.replacement.className, 'tango-list-quick-buy');
+    assert.equal(harness.replacement.dataset.tangoQuickBuySize, 'giant');
+    assert.equal(harness.replacement.dataset.tangoPublished, '1');
+    assert.equal(harness.replacement.style.cssText, '');
+    assert.equal(harness.slot.dataset.tangoQuickBuySize, 'giant');
+    await global.Tango.NativeQuickBuyGuard.invokeRegistered(harness.replacement);
+    assert.equal(loaded.api.runtime.modal?.type, 'confirm');
+    assert.equal(resizeObserverCreates, 0);
     assert.equal(harness.nativeControl.restored, 0);
     assert.deepEqual(JSON.parse(JSON.stringify(observerOptions)), {
       childList: true, subtree: true, attributes: true,
