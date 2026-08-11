@@ -281,7 +281,6 @@
           .forEach((chain) => rememberNativePrice(chain.id, price.priceUsd, price.observedAt));
       }
       queueRender();
-      queueImmediateCurrentCalibration();
       return;
     }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
@@ -290,10 +289,7 @@
       clearChainContext();
       return;
     }
-    const positionsByAddress = new Map(Tango.ChainView.positions(runtime.state, chain.id)
-      .map((position) => [Tango.Chains.normalizeAddress(chain.id, position.tokenAddress), position]));
     const routeToken = detailRouteToken();
-    const metadataUpdates = [];
     let currentQuoteChanged = false;
     (event.data.quotes || []).forEach((quote) => {
       if (quote?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, quote?.address)) return;
@@ -336,17 +332,6 @@
         mergeQuote(runtime.current, cachedQuote);
         currentQuoteChanged = true;
       }
-      const position = positionsByAddress.get(address);
-      const symbol = String(cachedQuote.symbol || '').replace(/^\$/, '').replace(/\s+/g, ' ').trim().slice(0, 32);
-      const name = String(cachedQuote.name || '').replace(/\s+/g, ' ').trim().slice(0, 100);
-      const logoUrl = String(cachedQuote.logoUrl || '').trim().slice(0, 1000);
-      if (position && (!isPlaceholderTokenLabel(symbol) || !isPlaceholderTokenLabel(name) || logoUrl)) {
-        metadataUpdates.push({
-          chain: position.chain, address: position.tokenAddress,
-          symbol, name, logoUrl,
-          metadataVerified: true, metadataSource: 'GMGN_NETWORK'
-        });
-      }
     });
     if (runtime.gmgnQuotes.size > 2000) {
       const overflow = runtime.gmgnQuotes.size - 2000;
@@ -355,11 +340,7 @@
     if (currentQuoteChanged) {
       publishChartMarkers();
       queueRender();
-      queueImmediateCurrentCalibration();
     }
-    if (metadataUpdates.length) Tango.Store.updatePositionMetadataBatch(metadataUpdates)
-      .then((state) => { runtime.state = state; queueRender(); })
-      .catch(() => null);
   }
   window.addEventListener('message', handlePageMessage);
   window.postMessage({ source: 'TANGO_PAPER_CONTENT', type: 'REQUEST_QUOTES' }, '*');

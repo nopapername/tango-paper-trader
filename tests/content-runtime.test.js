@@ -3688,6 +3688,28 @@ test('passive native prices update every chain sharing the symbol without mergin
   assert.notEqual(baseAccount, robinhoodAccount);
 });
 
+test('page NATIVE_PRICES cannot schedule delayed calibration', async () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/eth/token/${ADDRESS_A}` });
+  const key = `eth:${ADDRESS_A}`;
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 1,
+    costBasisNative: 1, averageEntryPriceUsd: 1, lastPriceUsd: 1,
+    lastNativePriceUsd: 1, quoteObservedAt: loaded.clock.now - 1,
+    needsCalibration: true, provisional: true,
+    syntheticNativePrice: true, provisionalNativePrice: true
+  };
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES',
+    prices: [{ symbol: 'ETH', priceUsd: 2_000, observedAt: loaded.clock.now }]
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.api.runtime.nativePrices.get('eth'), 2_000);
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+});
+
 test('an older native observation cannot replace a newer cached price', () => {
   const loaded = loadContent();
   loaded.api.rememberNativePrice('eth', 3_500, loaded.clock.now);
@@ -5043,17 +5065,11 @@ test('trench and invalid token routes do not create placeholder detail contexts'
   }
 });
 
-test('an exact GMGN supply immediately calibrates the current provisional position inside the mark throttle', async () => {
+test('an exact GMGN page supply stays ephemeral inside the mark throttle', async () => {
   const key = `base:${ADDRESS_A}`;
   const loaded = loadContent({
     href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
-    requestAnimationFrame: (callback) => { callback(); return 1; },
-    updatePositionQuote(_token, _quote, state) {
-      return {
-        ...state,
-        positions: { ...state.positions, [key]: { ...state.positions[key], quantity: 50 } }
-      };
-    }
+    requestAnimationFrame: (callback) => { callback(); return 1; }
   });
   loaded.api.runtime.current = {
     token: { chain: 'base', address: ADDRESS_A, symbol: 'OLD', launchpad: 'Clanker' }, quote: {}
@@ -5079,12 +5095,10 @@ test('an exact GMGN supply immediately calibrates the current provisional positi
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
-  assert.equal(loaded.calls.updatePositionQuotes[0].quote.totalSupply, 1_000_000_000);
-  assert.equal(loaded.calls.updatePositionQuotes[0].quote.supplySource, 'GMGN_EXACT');
-  assert.equal(loaded.calls.updatePositionQuotes[0].quote.priceUsd, 0.000002);
-  assert.equal(loaded.api.runtime.state.positions[key].quantity, 50);
-  assert.match(loaded.api.renderPanel(), /50 OLD/);
+  assert.equal(loaded.api.runtime.gmgnQuotes.get(key).totalSupply, 1_000_000_000);
+  assert.equal(loaded.api.runtime.current.quote.totalSupply, 1_000_000_000);
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+  assert.equal(loaded.api.runtime.state.positions[key].quantity, 100);
 });
 
 test('a duplicate in-flight calibration target does not schedule a redundant retry', async () => {
@@ -5128,13 +5142,20 @@ test('a duplicate in-flight calibration target does not schedule a redundant ret
   assert.equal(loaded.calls.updatePositionQuotes.length, 1);
 });
 
-test('a stronger native observation during supply calibration reruns immediately after settlement', async () => {
+test('a stronger background native observation during supply calibration reruns immediately after settlement', async () => {
   const key = `base:${ADDRESS_A}`;
   const firstWrite = deferred();
   const secondWrite = deferred();
   let writeIndex = 0;
-  const loaded = loadContent({
+  let loaded;
+  loaded = loadContent({
     href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    sendMessage(message) {
+      if (message.type === 'TANGO_GET_NATIVE_PRICE') {
+        return Promise.resolve({ ok: true, price: 2_000, observedAt: loaded.clock.now });
+      }
+      return Promise.resolve({ ok: true });
+    },
     updatePositionQuote(_token, quote, state) {
       writeIndex += 1;
       const next = structuredClone(state);
@@ -5176,10 +5197,8 @@ test('a stronger native observation during supply calibration reruns immediately
 
   const firstRequest = loaded.api.queueImmediateCurrentCalibration();
   assert.equal(loaded.calls.updatePositionQuotes.length, 1);
-  loaded.api.dispatchPageMessage({
-    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES',
-    prices: [{ symbol: 'ETH', priceUsd: 2_000, observedAt: loaded.clock.now }]
-  });
+  loaded.api.ensureNativePrice(loaded.api.runtime.current);
+  await loaded.api.runtime.nativePricePromises.get('base');
   assert.equal(loaded.calls.updatePositionQuotes.length, 1);
 
   firstWrite.resolve();
@@ -5250,7 +5269,7 @@ test('late verified Pump Mayhem mode is a same-rank immediate calibration upgrad
   assert.equal(loaded.api.positionCalibrationUpgrade(position, quote), true);
 });
 
-test('supply-only observations preserve synthetic price dimensions until real observations arrive', async () => {
+test('page supply-only observations update cache and display without rewriting synthetic positions', async () => {
   const key = `base:${ADDRESS_A}`;
   const loaded = loadContent({
     href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
@@ -5277,10 +5296,10 @@ test('supply-only observations preserve synthetic price dimensions until real ob
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
-  assert.equal(loaded.calls.updatePositionQuotes[0].quote.syntheticTokenPrice, true);
-  assert.equal(loaded.calls.updatePositionQuotes[0].quote.syntheticNativePrice, true);
-  assert.equal(loaded.calls.updatePositionQuotes[0].quote.provisional, true);
+  assert.equal(loaded.api.runtime.gmgnQuotes.get(key).totalSupply, 1_000_000_000);
+  assert.equal(loaded.api.runtime.current.quote.totalSupply, 1_000_000_000);
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+  assert.equal(loaded.api.runtime.state.positions[key].syntheticTokenPrice, true);
 
   loaded.api.rememberNativePrice('base', 2_000, loaded.clock.now);
   loaded.clock.now += 1;
@@ -5293,16 +5312,24 @@ test('supply-only observations preserve synthetic price dimensions until real ob
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(loaded.calls.updatePositionQuotes.length, 2);
-  assert.equal(loaded.calls.updatePositionQuotes[1].quote.syntheticTokenPrice, false);
-  assert.equal(loaded.calls.updatePositionQuotes[1].quote.syntheticNativePrice, false);
+  assert.equal(loaded.api.runtime.gmgnQuotes.get(key).priceUsd, 2);
+  assert.equal(loaded.api.runtime.current.quote.priceUsd, 2);
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+  assert.equal(loaded.api.runtime.state.positions[key].syntheticNativePrice, true);
 });
 
-test('a passive native-price arrival immediately calibrates the current position without timer advancement', async () => {
+test('a background native-price response immediately calibrates the current position without timer advancement', async () => {
   const key = `base:${ADDRESS_A}`;
-  const loaded = loadContent({
+  let loaded;
+  loaded = loadContent({
     href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
-    requestAnimationFrame: (callback) => { callback(); return 1; }
+    requestAnimationFrame: (callback) => { callback(); return 1; },
+    sendMessage(message) {
+      if (message.type === 'TANGO_GET_NATIVE_PRICE') {
+        return Promise.resolve({ ok: true, price: 2_000, observedAt: loaded.clock.now });
+      }
+      return Promise.resolve({ ok: true });
+    }
   });
   loaded.api.runtime.current = {
     token: { chain: 'base', address: ADDRESS_A, symbol: 'NATIVE' },
@@ -5317,11 +5344,8 @@ test('a passive native-price arrival immediately calibrates the current position
     provisionalTokenPrice: false, provisionalNativePrice: true, openedAt: 1
   };
 
-  loaded.api.dispatchPageMessage({
-    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES', prices: [{
-      symbol: 'ETH', priceUsd: 2_000, observedAt: loaded.clock.now
-    }]
-  });
+  loaded.api.ensureNativePrice(loaded.api.runtime.current);
+  await loaded.api.runtime.nativePricePromises.get('base');
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(loaded.calls.updatePositionQuotes.length, 1);
@@ -5977,6 +6001,36 @@ test('content preserves the background native observation timestamp instead of r
   assert.equal(loaded.api.freshNativePrice('eth'), 0);
 });
 
+test('background native response still persists an eligible calibration', async () => {
+  let loaded;
+  loaded = loadContent({
+    href: `https://gmgn.ai/eth/token/${ADDRESS_A}`,
+    sendMessage(message) {
+      if (message.type === 'TANGO_GET_NATIVE_PRICE') {
+        return Promise.resolve({ ok: true, price: 2_000, observedAt: loaded.clock.now });
+      }
+      return Promise.resolve({ ok: true });
+    }
+  });
+  const key = `eth:${ADDRESS_A}`;
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 1,
+    costBasisNative: 1, averageEntryPriceUsd: 1, lastPriceUsd: 1,
+    lastNativePriceUsd: 1, quoteObservedAt: loaded.clock.now - 1,
+    needsCalibration: true, provisional: true,
+    syntheticNativePrice: true, provisionalNativePrice: true
+  };
+
+  loaded.api.ensureNativePrice(loaded.api.runtime.current);
+  await loaded.api.runtime.nativePricePromises.get('eth');
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(loaded.api.runtime.nativePrices.get('eth'), 2_000);
+  assert.equal(loaded.calls.updatePositionQuotes.length, 1);
+  assert.equal(loaded.calls.updatePositionQuotes[0].quote.nativePriceUsd, 2_000);
+});
+
 test('execution uses a stale local native observation immediately and refreshes it in background', async () => {
   const loaded = loadContent({
     sendMessage: async (message) => message.type === 'TANGO_GET_NATIVE_PRICE'
@@ -6040,13 +6094,16 @@ test('position drawer sell uses the position last-known quote instead of failing
   assert.equal(loaded.calls.sellOrders[0].quote.paperFallback, true);
 });
 
-test('exact-chain GMGN network metadata corrects only the matching position', async () => {
-  const loaded = loadContent();
-  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = {
-    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'WRONG', name: 'Wrong', logoUrl: 'wrong.png'
-  };
-  loaded.api.runtime.state.positions[`eth:${ADDRESS_B}`] = {
-    chain: 'eth', tokenAddress: ADDRESS_B, symbol: 'OTHER', name: 'Other', logoUrl: 'other.png'
+test('page TOKEN_QUOTES remain ephemeral and cannot persist metadata or calibration', async () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/eth/token/${ADDRESS_A}` });
+  const key = `eth:${ADDRESS_A}`;
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'OLD', name: 'Old', quantity: 1,
+    costBasisNative: 1, averageEntryPriceUsd: 1, lastPriceUsd: 1,
+    lastNativePriceUsd: 2_000, quoteObservedAt: loaded.clock.now - 1,
+    totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    needsCalibration: true, provisional: true, syntheticTokenPrice: true
   };
 
   loaded.api.dispatchPageMessage({
@@ -6058,12 +6115,10 @@ test('exact-chain GMGN network metadata corrects only the matching position', as
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(loaded.calls.metadataBatches.length, 1);
-  assert.equal(loaded.calls.metadataBatches[0].length, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.metadataBatches[0][0])), {
-    chain: 'eth', address: ADDRESS_A, symbol: 'RIGHT', name: 'Right Token', logoUrl: 'right.png',
-    metadataVerified: true, metadataSource: 'GMGN_NETWORK'
-  });
+  assert.equal(loaded.api.runtime.gmgnQuotes.get(key).priceUsd, 2);
+  assert.equal(loaded.calls.metadataBatches.length, 0);
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+  assert.equal(loaded.api.runtime.state.positions[key].symbol, 'OLD');
 });
 
 test('PnL calendar exposes current-chain trade history and sends the active chain', async () => {
