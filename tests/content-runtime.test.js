@@ -2113,6 +2113,136 @@ test('trusted click keyboard drag and confirmation suppression preserve existing
   assert.equal(loaded.api.runtime.suppressConfirmForSession, true);
 });
 
+test('shell capture gate blocks every synthetic mutation event and admits trusted events', () => {
+  const loaded = loadContent();
+  const captureListeners = (type) => (loaded.shellListeners.get(type) || [])
+    .filter(({ options }) => options?.capture === true || options === true);
+  const event = (isTrusted) => {
+    const calls = { prevented: 0, stopped: 0, immediate: 0 };
+    return {
+      isTrusted,
+      preventDefault() { calls.prevented += 1; },
+      stopPropagation() { calls.stopped += 1; },
+      stopImmediatePropagation() { calls.immediate += 1; },
+      calls
+    };
+  };
+
+  for (const type of ['click', 'keydown', 'change', 'pointerdown']) {
+    const synthetic = event(false);
+    captureListeners(type).forEach(({ listener }) => listener(synthetic));
+    assert.deepEqual(synthetic.calls, { prevented: 1, stopped: 1, immediate: 1 }, type);
+
+    const trusted = event(true);
+    captureListeners(type).forEach(({ listener }) => listener(trusted));
+    assert.deepEqual(trusted.calls, { prevented: 0, stopped: 0, immediate: 0 }, type);
+  }
+  assert.equal(loaded.api.runtime.interactionUntil, loaded.clock.now + 500);
+});
+
+test('synthetic direct position and header handlers cannot mutate shell state', async () => {
+  const loaded = loadContent();
+  const position = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 1,
+    costBasisNative: 1, averageEntryPriceUsd: 2, lastPriceUsd: 2,
+    lastNativePriceUsd: 2_000, quoteObservedAt: loaded.clock.now
+  };
+  loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = position;
+  const open = eventElement({ dataset: { key: `eth:${ADDRESS_A}` } });
+  const sell = eventElement({ dataset: { key: `eth:${ADDRESS_A}`, positionSell: '100' } });
+  loaded.shellLists.set('[data-position-open]', [open]);
+  loaded.shellLists.set('[data-position-sell]', [sell]);
+  const anchor = loaded.createDomNode();
+  loaded.documentSingles.set('[data-testid="header-actions"]', anchor);
+  loaded.api.renderHeaderAccountSummary({});
+  const header = loaded.documentSingles.get('#tango-header-account-summary');
+  loaded.api.bindEvents();
+
+  const synthetic = (key = '') => {
+    const calls = { prevented: 0, stopped: 0, immediate: 0 };
+    return {
+      isTrusted: false, key,
+      preventDefault() { calls.prevented += 1; },
+      stopPropagation() { calls.stopped += 1; },
+      stopImmediatePropagation() { calls.immediate += 1; },
+      calls
+    };
+  };
+  const openEvent = synthetic();
+  const sellEvent = synthetic();
+  const clickEvent = synthetic();
+  const enterEvent = synthetic('Enter');
+  const spaceEvent = synthetic(' ');
+  open.emit('click', openEvent);
+  await sell.emit('click', sellEvent);
+  header.onclick(clickEvent);
+  header.onkeydown(enterEvent);
+  header.onkeydown(spaceEvent);
+
+  assert.equal(loaded.messages.some((message) => message.type === 'TANGO_OPEN_TOKEN'), false);
+  assert.equal(loaded.calls.sell, 0);
+  assert.equal(loaded.api.runtime.calendarOpen, false);
+  for (const item of [openEvent, sellEvent, clickEvent, enterEvent, spaceEvent]) {
+    assert.deepEqual(item.calls, { prevented: 1, stopped: 1, immediate: 1 });
+  }
+});
+
+test('trusted buy sell position header and drag handlers preserve shell behavior', async () => {
+  const loaded = loadContent();
+  loaded.api.runtime.settings.confirmationEnabled = false;
+  loaded.api.rememberNativePrice('eth', 2_000, loaded.clock.now);
+  seedHeldDetailPosition(loaded);
+  const buy = eventElement({ dataset: { buy: '1' } });
+  const sell = eventElement({ dataset: { sell: '100' } });
+  const openPosition = eventElement({ dataset: { key: `eth:${ADDRESS_A}` } });
+  const sellPosition = eventElement({ dataset: { key: `eth:${ADDRESS_A}`, positionSell: '25' } });
+  const handle = eventElement();
+  const panel = eventElement();
+  panel.getBoundingClientRect = () => ({ left: 100, top: 100, width: 200, height: 100 });
+  loaded.shellLists.set('[data-buy]', [buy]);
+  loaded.shellLists.set('[data-sell]', [sell]);
+  loaded.shellLists.set('[data-position-open]', [openPosition]);
+  loaded.shellLists.set('[data-position-sell]', [sellPosition]);
+  loaded.shadowSingles.set('[data-drag-handle]', handle);
+  loaded.shadowSingles.set('.tango-panel', panel);
+  const anchor = loaded.createDomNode();
+  loaded.documentSingles.set('[data-testid="header-actions"]', anchor);
+  loaded.api.renderHeaderAccountSummary({});
+  const header = loaded.documentSingles.get('#tango-header-account-summary');
+  loaded.api.bindEvents();
+
+  const trusted = (key = '') => ({
+    isTrusted: true, key,
+    preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}
+  });
+  await buy.emit('click', trusted());
+  await sell.emit('click', trusted());
+  openPosition.emit('click', trusted());
+  await Promise.resolve();
+  await sellPosition.emit('click', trusted());
+  header.onclick(trusted());
+  header.onkeydown(trusted('Enter'));
+  header.onkeydown(trusted(' '));
+  handle.emit('pointerdown', { ...trusted(), target: { closest: () => null }, clientX: 10, clientY: 10 });
+  loaded.windowListeners.get('pointermove')({ ...trusted(), clientX: 30, clientY: 40 });
+  await loaded.windowListeners.get('pointerup')(trusted());
+
+  assert.equal(loaded.calls.buyOrders[0].amountNative, 1);
+  assert.equal(loaded.calls.sellOrders.length, 2);
+  assert.equal(loaded.calls.sellOrders[0].percent, 100);
+  assert.equal(loaded.calls.sellOrders[1].percent, 25);
+  assert.equal(loaded.api.runtime.tradePending, false);
+  assert.equal(loaded.api.runtime.toast.type, 'success');
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.messages.find((message) => message.type === 'TANGO_OPEN_TOKEN'))), {
+    type: 'TANGO_OPEN_TOKEN', url: `https://gmgn.ai/eth/token/${ADDRESS_A}`
+  });
+  assert.equal(loaded.api.runtime.calendarOpen, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.api.runtime.settings.panelPosition)), { x: 120, y: 130 });
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.patches)), [{ panelPosition: { x: 120, y: 130 } }]);
+  assert.equal(panel.style.left, '120px');
+  assert.equal(panel.style.top, '130px');
+});
+
 test('trusted confirmation cannot suppress the session without trusted checkbox provenance', async () => {
   const loaded = loadContent();
   const confirm = eventElement({ dataset: { action: 'confirm-modal' } });
