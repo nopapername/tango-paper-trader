@@ -1,7 +1,7 @@
 # GMGN Paper Trading Hardening, Locked Giant Quick-Buy, and Chart Marker Design
 
 **Date:** 2026-08-11
-**Status:** Approved in conversation; awaiting written-spec review
+**Status:** Approved
 **Scope:** GMGN trench quick-buy presentation and activation, chart marker projection, CSV export safety, and bounded `storage.local` persistence
 
 ## Goal
