@@ -8,8 +8,9 @@ const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
 const EVM_ADDRESS_2 = '0x2222222222222222222222222222222222222222';
 const source = (file) => fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
 
-function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
+function loadIntegratedQuickBuyWorld({ now = 1_000, reintroducePublicBridge = false } = {}) {
   const registrations = [];
+  const reintroducedQuickBuyActions = reintroducePublicBridge ? new Map() : null;
   const paperOrders = [];
   const clock = { now };
   let paperCallbacks = 0;
@@ -171,6 +172,20 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
   vm.runInNewContext(source('src/adapters/gmgn.js'), guardContext, {
     filename: 'src/adapters/gmgn.js'
   });
+  if (reintroducedQuickBuyActions) {
+    guardContext.Tango.__reintroducedQuickBuyActions = reintroducedQuickBuyActions;
+    vm.runInNewContext(`
+      window.addEventListener('message', (event) => {
+        if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE') return;
+        const action = Tango.__reintroducedQuickBuyActions.get(String(event.data?.actionId || ''));
+        const expectedKind = event.data?.type === 'PAPER_QUICK_BUY_INTENT' ? 'intent'
+          : (event.data?.type === 'PAPER_QUICK_BUY_CLICK' ? 'execute' : '');
+        if (!action || !expectedKind || action.kind !== expectedKind
+          || action.bindingNonce !== String(event.data?.bindingNonce || '')) return;
+        action.invoke();
+      });
+    `, guardContext, { filename: 'tests/reintroduced-same-window-bridge-mutant.js' });
+  }
   vm.runInNewContext(source('src/core/chains.js'), pageContext, { filename: 'src/core/chains.js' });
   vm.runInNewContext(source('src/core/supply.js'), pageContext, { filename: 'src/core/supply.js' });
   vm.runInNewContext(source('src/adapters/gmgn-quotes.js'), pageContext, { filename: 'src/adapters/gmgn-quotes.js' });
@@ -210,9 +225,11 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
     };
     addNativeSentinels(slot);
     addNativeSentinels(root);
-    assert.equal(guardContext.Tango.GMGN._commitPaperQuickBuy(slot, binding, {
+    const action = {
       bindingNonce, kind: 'execute', invoke: commitPaperCallback
-    }), true);
+    };
+    assert.equal(guardContext.Tango.GMGN._commitPaperQuickBuy(slot, binding, action), true);
+    reintroducedQuickBuyActions?.set(actionId, action);
     return mounted;
   }
 
@@ -255,6 +272,7 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
       invoke: () => guardContext.Tango.GMGN._acceptQuickBuyIdentityActivation(binding, context)
     };
     assert.equal(guardContext.Tango.GMGN._commitPaperQuickBuy(slot, binding, action), true);
+    reintroducedQuickBuyActions?.set(actionId, action);
     addNativeSentinels(slot);
     addNativeSentinels(outerRoot);
     return {
@@ -368,7 +386,13 @@ function loadIntegratedQuickBuyWorld({ now = 1_000 } = {}) {
     setRoute(href) { guardContext.location.href = href; },
     deliver(message) {
       const listeners = registrations.filter((entry) => entry.world === 'guard' && entry.type === 'message');
-      for (const entry of listeners) entry.listener({ source: guardContext, data: message });
+      guardContext.__deliveredMessage = message;
+      for (const entry of listeners) {
+        guardContext.__deliveredListener = entry.listener;
+        vm.runInNewContext('__deliveredListener({ source: window, data: __deliveredMessage })', guardContext, {
+          filename: 'tests/same-window-message-delivery.js'
+        });
+      }
     },
     get paperCallbacks() { return paperCallbacks; },
     get nativeCaptureCalls() { return nativeCaptureCalls; },
@@ -425,6 +449,25 @@ test('forged public identity messages cannot mutate ready or resolving paper ass
   assert.equal(world.paperCallbacks, 0);
   assert.deepEqual(world.paperAssets, before);
   assert.equal(world.nativeCaptureCalls + world.nativeBubbleCalls, 0);
+});
+
+test('forged-message assertion kills an equivalent same-window bridge mutant', async () => {
+  const world = loadIntegratedQuickBuyWorld({ reintroducePublicBridge: true });
+  const mounted = world.mountReadyPaper({ chain: 'base', address: EVM_ADDRESS });
+  const before = structuredClone(world.paperAssets);
+
+  world.deliver({
+    source: 'TANGO_GMGN_PAGE', type: 'PAPER_QUICK_BUY_CLICK',
+    actionId: mounted.paper.dataset.tangoActionId,
+    bindingNonce: mounted.paper.dataset.tangoBindingNonce
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.throws(() => {
+    assert.equal(world.paperCallbacks, 0);
+    assert.deepEqual(world.paperAssets, before);
+  });
+  assert.equal(world.paperCallbacks, 1);
 });
 
 for (const drift of ['actionId', 'bindingNonce', 'card', 'slot', 'chain', 'address']) {
