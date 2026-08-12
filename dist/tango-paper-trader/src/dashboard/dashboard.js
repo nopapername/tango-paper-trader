@@ -597,8 +597,12 @@
       showToast(t('dataImported'));
     } catch (error) {
       if (error?.code === 'importTooLarge'
+        && error?.message === error.code
         && Number.isSafeInteger(error.measuredBytes)
-        && Number.isSafeInteger(error.budgetBytes)) {
+        && error.measuredBytes >= 0
+        && Number.isSafeInteger(error.budgetBytes)
+        && error.budgetBytes > 0
+        && error.measuredBytes > error.budgetBytes) {
         const toMiB = (bytes) => (bytes / (1024 * 1024)).toFixed(2);
         showToast(t('importTooLarge', {
           measured: toMiB(error.measuredBytes),

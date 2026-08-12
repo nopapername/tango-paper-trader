@@ -361,12 +361,13 @@
         remaining.set(id, (remaining.get(id) || 0) + 1);
       }
       const indexes = [];
-      next.forEach((record, index) => {
+      for (let index = next.length - 1; index >= 0; index -= 1) {
+        const record = next[index];
         const id = String(record?.id || '');
         const count = remaining.get(id) || 0;
         if (count > 0) remaining.set(id, count - 1);
         else indexes.push(index);
-      });
+      }
       return indexes;
     }
 
@@ -447,15 +448,14 @@
 
     function mutate(command) {
       return serialized(async () => {
-        const genericMutation = ![
-          'INITIALIZE', 'SAVE_SETTINGS', 'PATCH_SETTINGS', 'IMPORT',
-          'RESET_ALL_WITH_BALANCE', 'RESET_CHAIN'
-        ].includes(command?.type);
         const { state, settings, migrationPending } = await readSnapshot({
-          persistMigration: !genericMutation
-            && !['RESET_CHAIN', 'RESET_ALL_WITH_BALANCE', 'IMPORT'].includes(command?.type),
-          migrateInMemory: genericMutation
+          persistMigration: false,
+          migrateInMemory: true
         });
+        const storedRevision = Math.max(
+          0,
+          Number(state.stateRevision || 0) - (migrationPending ? 1 : 0)
+        );
         if (command?.type === 'INITIALIZE') {
           const nextSettings = Tango.State.normalizeSettings({ ...settings, language: command.language });
           const balance = Number(command.defaultBalanceNative ?? 10);
@@ -472,8 +472,12 @@
         }
         if (command?.type === 'SAVE_SETTINGS') {
           const nextSettings = Tango.State.normalizeSettings(command.settings);
-          await writeStored({ [Tango.SETTINGS_KEY]: nextSettings }, state);
-          return { state, settings: nextSettings };
+          const nextState = migrationPending ? prepareState(state, nextSettings).state : state;
+          await writeStored({
+            ...(migrationPending ? { [Tango.STORAGE_KEY]: nextState } : {}),
+            [Tango.SETTINGS_KEY]: nextSettings
+          }, nextState);
+          return { state: nextState, settings: nextSettings };
         }
         if (command?.type === 'PATCH_SETTINGS') {
           const patch = command.patch;
@@ -498,8 +502,12 @@
             ...topLevelPatch,
             chains
           }, { strict: true, requireAllChains: true });
-          await writeStored({ [Tango.SETTINGS_KEY]: nextSettings }, state);
-          return { state, settings: nextSettings };
+          const nextState = migrationPending ? prepareState(state, nextSettings).state : state;
+          await writeStored({
+            ...(migrationPending ? { [Tango.STORAGE_KEY]: nextState } : {}),
+            [Tango.SETTINGS_KEY]: nextSettings
+          }, nextState);
+          return { state: nextState, settings: nextSettings };
         }
         if (command?.type === 'IMPORT') {
           const payload = command.payload;
@@ -516,7 +524,7 @@
             migrationNow: payload.exportedAt
           });
           importedState.initialized = true;
-          importedState.stateRevision = Number(state.stateRevision || 0) + 1;
+          importedState.stateRevision = storedRevision + 1;
           const measuredBytes = serializedStateBytes(importedState);
           if (measuredBytes > stateBudgetBytes) {
             throw storageBudgetError('importTooLarge', measuredBytes, stateBudgetBytes);
@@ -560,7 +568,7 @@
             }]))
           }, { strict: true, requireAllChains: true });
           const nextState = Tango.State.resetAll(nextSettings, now());
-          nextState.stateRevision = Number(state.stateRevision || 0) + 1;
+          nextState.stateRevision = storedRevision + 1;
           const prepared = prepareState(nextState, nextSettings);
           await writeStored({
             [Tango.STORAGE_KEY]: prepared.state,
@@ -605,7 +613,7 @@
             throw new Error('invalidResetPrincipal');
           }
           const nextState = Tango.State.resetChain(state, chain.id, balanceNative, now());
-          nextState.stateRevision = Number(state.stateRevision || 0) + 1;
+          nextState.stateRevision = storedRevision + 1;
           const nextSettings = Tango.State.normalizeSettings({
             ...settings,
             chains: {

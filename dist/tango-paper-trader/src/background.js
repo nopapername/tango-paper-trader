@@ -31,8 +31,12 @@ function coordinatorFailureResponse(error) {
     error: error?.message || 'storageFailed'
   };
   if (['storageFull', 'importTooLarge'].includes(error?.code)
+    && error?.message === error.code
     && Number.isSafeInteger(error?.measuredBytes)
-    && Number.isSafeInteger(error?.budgetBytes)) {
+    && error.measuredBytes >= 0
+    && Number.isSafeInteger(error?.budgetBytes)
+    && error.budgetBytes > 0
+    && (error.code !== 'importTooLarge' || error.measuredBytes > error.budgetBytes)) {
     response.errorDetails = {
       code: error.code,
       measuredBytes: error.measuredBytes,
