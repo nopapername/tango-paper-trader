@@ -1771,6 +1771,88 @@ test('raw v1 migration compacts before its one atomic migration write', async ()
   assert.equal(persistence.writes.length, 1);
 });
 
+test('raw v1 REPLACE_STATE budget overflow rejects before migration writes or revision advances', async () => {
+  const legacy = {
+    schemaVersion: 1,
+    stateRevision: 4,
+    account: {
+      initialBalanceSol: 10,
+      cashBalanceSol: 10,
+      realizedPnlSol: 0,
+      createdAt: 1,
+      updatedAt: 1
+    },
+    positions: {},
+    trades: [],
+    dailyRealized: {},
+    initialized: true
+  };
+  const settings = State.normalizeSettings({});
+  const original = structuredClone(legacy);
+  const replacement = storageStateFixture();
+  replacement.padding = '🔟'.repeat(512);
+  const normalizedLegacy = State.normalizeState(legacy, settings, { migrationNow: 2_000 });
+  const persistence = memoryPersistence(legacy, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000,
+    stateBudgetBytes: stateBytes(normalizedLegacy) + 1
+  });
+
+  await assert.rejects(
+    coordinator.mutate({
+      type: 'REPLACE_STATE',
+      state: replacement,
+      expectedRevision: 5
+    }),
+    (error) => {
+      assert.equal(error.code, 'storageFull');
+      return true;
+    }
+  );
+  assert.equal(persistence.writes.length, 0);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], original);
+  assert.equal(persistence.values[global.Tango.STORAGE_KEY].stateRevision, 4);
+});
+
+test('a successful generic mutation on raw v1 commits migration only in its final atomic write', async () => {
+  const legacy = {
+    schemaVersion: 1,
+    stateRevision: 4,
+    account: {
+      initialBalanceSol: 10,
+      cashBalanceSol: 10,
+      realizedPnlSol: 0,
+      createdAt: 1,
+      updatedAt: 1
+    },
+    positions: {},
+    trades: [],
+    dailyRealized: {},
+    initialized: true
+  };
+  const settings = State.normalizeSettings({});
+  const replacement = State.normalizeState(legacy, settings, { migrationNow: 2_000 });
+  const persistence = memoryPersistence(legacy, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000
+  });
+
+  const result = await coordinator.mutate({
+    type: 'REPLACE_STATE',
+    state: replacement,
+    expectedRevision: 5
+  });
+
+  assert.equal(persistence.writes.length, 1);
+  assert.equal(result.state.schemaVersion, 2);
+  assert.equal(result.state.stateRevision, 6);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], result.state);
+});
+
 test('RESET_CHAIN compacts retained history from other chains before its atomic state-and-settings write', async () => {
   const state = storageStateFixture();
   state.trades = [

@@ -383,29 +383,38 @@
       return result;
     }
 
-    async function readSnapshot({ persistMigration = true } = {}) {
+    async function readSnapshot({
+      persistMigration = true,
+      migrateInMemory = persistMigration
+    } = {}) {
       const raw = await readRaw([Tango.STORAGE_KEY, Tango.SETTINGS_KEY]);
       const settings = Tango.State.normalizeSettings(raw[Tango.SETTINGS_KEY]);
       const storedState = raw[Tango.STORAGE_KEY];
       let state = Tango.State.normalizeState(storedState, settings, { migrationNow: now() });
-      if (persistMigration && Number(storedState?.schemaVersion) === 1) {
+      const migrationPending = Number(storedState?.schemaVersion) === 1;
+      if (migrationPending && migrateInMemory) {
         state.stateRevision = Number(storedState.stateRevision || 0) + 1;
         state = prepareState(state, settings).state;
+      }
+      if (migrationPending && persistMigration) {
         await writeRaw({
           [Tango.STORAGE_KEY]: state,
           [Tango.SETTINGS_KEY]: settings
         });
       }
-      return { state, settings };
+      return { state, settings, migrationPending: migrationPending && migrateInMemory };
     }
 
-    async function commitState(previous, next, settings) {
+    async function commitState(previous, next, settings, { persistSettings = false } = {}) {
       const revised = {
         ...next,
         stateRevision: Number(previous.stateRevision || 0) + 1
       };
       const prepared = prepareState(revised, settings, historyProtection(previous, revised));
-      await writeRaw({ [Tango.STORAGE_KEY]: prepared.state });
+      await writeRaw({
+        [Tango.STORAGE_KEY]: prepared.state,
+        ...(persistSettings ? { [Tango.SETTINGS_KEY]: settings } : {})
+      });
       return prepared.state;
     }
 
@@ -415,8 +424,14 @@
 
     function mutate(command) {
       return serialized(async () => {
-        const { state, settings } = await readSnapshot({
-          persistMigration: !['RESET_CHAIN', 'RESET_ALL_WITH_BALANCE', 'IMPORT'].includes(command?.type)
+        const genericMutation = ![
+          'INITIALIZE', 'SAVE_SETTINGS', 'PATCH_SETTINGS', 'IMPORT',
+          'RESET_ALL_WITH_BALANCE', 'RESET_CHAIN'
+        ].includes(command?.type);
+        const { state, settings, migrationPending } = await readSnapshot({
+          persistMigration: !genericMutation
+            && !['RESET_CHAIN', 'RESET_ALL_WITH_BALANCE', 'IMPORT'].includes(command?.type),
+          migrateInMemory: genericMutation
         });
         if (command?.type === 'INITIALIZE') {
           const nextSettings = Tango.State.normalizeSettings({ ...settings, language: command.language });
@@ -589,8 +604,18 @@
         } else {
           throw new Error('unsupportedMutation');
         }
-        if (result.state === state) return result;
-        const committed = await commitState(state, result.state, settings);
+        if (result.state === state) {
+          if (!migrationPending) return result;
+          const prepared = prepareState(state, settings);
+          await writeRaw({
+            [Tango.STORAGE_KEY]: prepared.state,
+            [Tango.SETTINGS_KEY]: settings
+          });
+          return { ...result, state: prepared.state };
+        }
+        const committed = await commitState(state, result.state, settings, {
+          persistSettings: migrationPending
+        });
         return { ...result, state: committed };
       });
     }
