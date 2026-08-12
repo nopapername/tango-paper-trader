@@ -361,12 +361,13 @@
         remaining.set(id, (remaining.get(id) || 0) + 1);
       }
       const indexes = [];
-      next.forEach((record, index) => {
+      for (let index = next.length - 1; index >= 0; index -= 1) {
+        const record = next[index];
         const id = String(record?.id || '');
         const count = remaining.get(id) || 0;
         if (count > 0) remaining.set(id, count - 1);
         else indexes.push(index);
-      });
+      }
       return indexes;
     }
 

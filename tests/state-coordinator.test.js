@@ -133,6 +133,20 @@ function storageCalibrationFixture({ id, createdAt, tokenAddress = EVM_HISTORY_A
   };
 }
 
+async function withRandomUUID(randomUUID, work) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { randomUUID: () => randomUUID }
+  });
+  try {
+    return await work();
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, 'crypto', descriptor);
+    else delete globalThis.crypto;
+  }
+}
+
 function fallbackTradeFixture({ id, tokenAddress, side, executedAt }) {
   return {
     ...storageTradeFixture({ id, tokenAddress, side, executedAt }),
@@ -1647,6 +1661,157 @@ test('a near-budget BUY retains the current trade, advances once, and drops only
   assert.ok(stateBytes(result.state) <= stateBytes(state) - 1);
   assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], result.state);
   assert.equal(persistence.writes.length, 1);
+});
+
+test('a near-budget BUY protects the newly prepended trade when its ID duplicates older history', async () => {
+  const executionNow = 3_000;
+  const duplicateId = `${executionNow}-duplicate`;
+  const state = storageStateFixture();
+  state.stateRevision = 4;
+  state.trades = [storageTradeFixture({
+    id: duplicateId,
+    executedAt: 1_000,
+    sourceUrl: `https://gmgn.ai/${'x'.repeat(4_096)}`
+  })];
+  const settings = State.normalizeSettings({
+    slippageBps: 0,
+    platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 } }
+  });
+  const expected = await withRandomUUID('duplicate', () => Promise.resolve(
+    Engine.executeBuy(state, {
+      token: {
+        chain: 'eth',
+        address: '0xc333333333333333333333333333333333333333',
+        symbol: 'CURRENT'
+      },
+      quote: {
+        priceUsd: 2,
+        nativePriceUsd: 2_000,
+        observedAt: executionNow,
+        nativePriceObservedAt: executionNow,
+        source: 'GMGN_NETWORK',
+        valuationMode: 'PRICE',
+        priceProvenance: 'OBSERVED_PRICE'
+      },
+      amountNative: 1
+    }, settings, executionNow).state
+  ));
+  expected.stateRevision = state.stateRevision + 1;
+  expected.trades = [expected.trades[0]];
+  const budgetBytes = stateBytes(State.normalizeState(expected, settings));
+  const persistence = memoryPersistence(state, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => executionNow,
+    stateBudgetBytes: budgetBytes
+  });
+
+  const result = await withRandomUUID('duplicate', () => coordinator.mutate({
+    type: 'EXECUTE_BUY',
+    order: {
+      token: {
+        chain: 'eth',
+        address: '0xc333333333333333333333333333333333333333',
+        symbol: 'CURRENT'
+      },
+      quote: {
+        priceUsd: 2,
+        nativePriceUsd: 2_000,
+        observedAt: executionNow,
+        nativePriceObservedAt: executionNow,
+        source: 'GMGN_NETWORK',
+        valuationMode: 'PRICE',
+        priceProvenance: 'OBSERVED_PRICE'
+      },
+      amountNative: 1
+    }
+  }));
+
+  assert.equal(result.trade.id, duplicateId);
+  assert.equal(result.state.trades.some((trade) => (
+    trade.id === duplicateId && trade.executedAt === executionNow
+  )), true);
+  assert.equal(result.state.trades.some((trade) => (
+    trade.id === duplicateId && trade.executedAt === 1_000
+  )), false);
+  assert.ok(stateBytes(result.state) <= budgetBytes);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], result.state);
+});
+
+test('a near-budget quote update protects the newly prepended calibration when its ID duplicates older history', async () => {
+  const token = {
+    chain: 'eth',
+    address: '0xc333333333333333333333333333333333333333',
+    symbol: 'CURRENT',
+    metadataVerified: true,
+    metadataSource: 'GMGN_NETWORK'
+  };
+  const settings = State.normalizeSettings({
+    slippageBps: 0,
+    platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 } }
+  });
+  const initial = storageStateFixture();
+  const state = await withRandomUUID('initial-buy', () => Promise.resolve(Engine.executeBuy(initial, {
+    token,
+    quote: {
+      priceUsd: 1,
+      nativePriceUsd: 1,
+      observedAt: 1_000,
+      nativePriceObservedAt: 1_000,
+      source: 'TANGO_SYNTHETIC',
+      provisional: true,
+      syntheticTokenPrice: true,
+      syntheticNativePrice: true,
+      valuationMode: 'PRICE',
+      priceProvenance: 'SYNTHETIC_PRICE'
+    },
+    amountNative: 1
+  }, settings, 1_000).state));
+  const executionNow = 3_000;
+  const duplicateId = `${executionNow}-duplicate`;
+  state.calibrations = [storageCalibrationFixture({
+    id: duplicateId,
+    createdAt: 1_000,
+    tokenAddress: token.address
+  })];
+  const quote = {
+    priceUsd: 2,
+    nativePriceUsd: 3_000,
+    observedAt: executionNow,
+    nativePriceObservedAt: executionNow,
+    source: 'GMGN_NETWORK',
+    valuationMode: 'PRICE',
+    priceProvenance: 'OBSERVED_PRICE'
+  };
+  const expected = await withRandomUUID('duplicate', () => Promise.resolve(
+    Engine.updatePositionQuote(state, token, quote, executionNow)
+  ));
+  expected.stateRevision = state.stateRevision + 1;
+  expected.calibrations = [expected.calibrations[0]];
+  const budgetBytes = stateBytes(State.normalizeState(expected, settings));
+  const persistence = memoryPersistence(state, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => executionNow,
+    stateBudgetBytes: budgetBytes
+  });
+
+  const result = await withRandomUUID('duplicate', () => coordinator.mutate({
+    type: 'UPDATE_POSITION_QUOTE', token, quote
+  }));
+
+  assert.equal(result.state.calibrations.some((calibration) => (
+    calibration.id === duplicateId && calibration.createdAt === executionNow
+  )), true);
+  assert.equal(result.state.calibrations.some((calibration) => (
+    calibration.id === duplicateId && calibration.createdAt === 1_000
+  )), false);
+  assert.ok(stateBytes(result.state) <= budgetBytes);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], result.state);
 });
 
 test('oversized IMPORT reports exact bytes and leaves current state and settings unchanged', async () => {
