@@ -1750,6 +1750,167 @@ for (const [name, command] of [
   });
 }
 
+function rawV1AtomicFixture() {
+  return {
+    schemaVersion: 1,
+    stateRevision: 40,
+    account: {
+      initialBalanceSol: 10,
+      cashBalanceSol: 9,
+      realizedPnlSol: -1,
+      createdAt: 10,
+      updatedAt: 20
+    },
+    positions: {},
+    trades: [{
+      id: 'legacy-large',
+      chain: 'sol',
+      tokenAddress: 'So11111111111111111111111111111111111111112',
+      symbol: 'LEGACY',
+      side: 'BUY',
+      quantity: 1,
+      amountSol: 1,
+      observedPriceUsd: 2,
+      executionPriceUsd: 2,
+      marketCapUsd: 0,
+      liquidityUsd: 0,
+      solPriceUsd: 100,
+      slippageBps: 0,
+      platformFeeSol: 0,
+      networkFeeSol: 0,
+      realizedPnlSol: 0,
+      sourceUrl: `https://gmgn.ai/${'x'.repeat(2_048)}`,
+      executedAt: 1
+    }],
+    dailyRealized: {},
+    initialized: true
+  };
+}
+
+const rawV1AtomicCommands = [
+  {
+    name: 'INITIALIZE',
+    command: { type: 'INITIALIZE', language: 'zh-CN', defaultBalanceNative: 42 },
+    matchesRequested: (values) => values[global.Tango.SETTINGS_KEY]?.language === 'zh-CN',
+    assertRequested(result) {
+      assert.equal(result.settings.language, 'zh-CN');
+      assert.equal(result.state.accounts.eth.cashBalanceNative, 42);
+      assert.equal(result.state.stateRevision, 42);
+    }
+  },
+  {
+    name: 'SAVE_SETTINGS',
+    command: {
+      type: 'SAVE_SETTINGS',
+      settings: State.normalizeSettings({ selectedChain: 'bsc', language: 'zh-CN' })
+    },
+    matchesRequested: (values) => values[global.Tango.SETTINGS_KEY]?.selectedChain === 'bsc',
+    assertRequested(result) {
+      assert.equal(result.settings.selectedChain, 'bsc');
+      assert.equal(result.settings.language, 'zh-CN');
+      assert.equal(result.state.stateRevision, 41);
+    }
+  },
+  {
+    name: 'PATCH_SETTINGS',
+    command: { type: 'PATCH_SETTINGS', patch: { selectedChain: 'base', language: 'zh-CN' } },
+    matchesRequested: (values) => values[global.Tango.SETTINGS_KEY]?.selectedChain === 'base',
+    assertRequested(result) {
+      assert.equal(result.settings.selectedChain, 'base');
+      assert.equal(result.settings.language, 'zh-CN');
+      assert.equal(result.state.stateRevision, 41);
+    }
+  }
+];
+
+for (const { name, command, matchesRequested, assertRequested } of rawV1AtomicCommands) {
+  test(`raw v1 ${name} folds migration and the requested result into one compacted write`, async () => {
+    const legacy = rawV1AtomicFixture();
+    const legacySettings = {
+      selectedChain: 'sol',
+      language: 'en',
+      buyPresets: [0.25, 0.75],
+      sellPresets: [25, 100],
+      networkFeeSol: 0.0042,
+      initialBalanceSol: 10
+    };
+    const normalizedSettings = State.normalizeSettings(legacySettings);
+    const compactedMigration = State.normalizeState(legacy, normalizedSettings, { migrationNow: 2_000 });
+    compactedMigration.stateRevision = 41;
+    compactedMigration.trades = [];
+    const initialized = State.createInitialState({
+      now: 2_000,
+      initialBalances: Object.fromEntries(global.Tango.Chains.all().map((chain) => [chain.id, 42]))
+    });
+    initialized.initialized = true;
+    initialized.stateRevision = 42;
+    const budgetBytes = Math.max(stateBytes(compactedMigration), stateBytes(initialized));
+    const persistence = memoryPersistence(legacy, legacySettings);
+    const coordinator = StateCoordinator.create({
+      readRaw: persistence.readRaw,
+      writeRaw: persistence.writeRaw,
+      now: () => 2_000,
+      stateBudgetBytes: budgetBytes
+    });
+
+    const result = await coordinator.mutate(command);
+
+    assert.equal(persistence.writes.length, 1);
+    assert.deepEqual(Object.keys(persistence.writes[0]).sort(), [
+      global.Tango.SETTINGS_KEY,
+      global.Tango.STORAGE_KEY
+    ].sort());
+    assert.equal(matchesRequested(persistence.writes[0]), true);
+    assert.deepEqual(persistence.writes[0][global.Tango.STORAGE_KEY], result.state);
+    assert.deepEqual(persistence.writes[0][global.Tango.SETTINGS_KEY], result.settings);
+    assert.ok(stateBytes(result.state) <= budgetBytes);
+    if (name !== 'INITIALIZE') {
+      assert.equal(result.state.trades.some(({ id }) => id === 'legacy-large'), false);
+    }
+    assertRequested(result);
+  });
+
+  test(`raw v1 ${name} quota failure leaves migration and requested data wholly unpersisted`, async () => {
+    const legacy = rawV1AtomicFixture();
+    const legacySettings = {
+      selectedChain: 'sol',
+      language: 'en',
+      buyPresets: [0.25, 0.75],
+      sellPresets: [25, 100],
+      networkFeeSol: 0.0042,
+      initialBalanceSol: 10
+    };
+    const persistence = memoryPersistence(legacy, legacySettings);
+    const successfulWrites = [];
+    let attempts = 0;
+    const writeRaw = async (values) => {
+      attempts += 1;
+      if (matchesRequested(values)) {
+        const error = new Error('QUOTA_BYTES quota exceeded');
+        error.name = 'QuotaExceededError';
+        throw error;
+      }
+      successfulWrites.push(structuredClone(values));
+      Object.assign(persistence.values, structuredClone(values));
+    };
+    const coordinator = StateCoordinator.create({
+      readRaw: persistence.readRaw,
+      writeRaw,
+      now: () => 2_000
+    });
+
+    await assert.rejects(
+      coordinator.mutate(command),
+      (error) => error.code === 'storageFull'
+    );
+
+    assert.equal(attempts, 1);
+    assert.equal(successfulWrites.length, 0);
+    assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], legacy);
+    assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], legacySettings);
+  });
+}
+
 test('raw v1 migration compacts before its one atomic migration write', async () => {
   const address = 'So11111111111111111111111111111111111111112';
   const legacy = {
