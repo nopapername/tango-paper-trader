@@ -48,6 +48,7 @@
     'WORKER_ONLY',
     'RENDERED'
   ]);
+  let observedFrameProbe = null;
   let activeFrameContext = null;
   let chartDiagnostic = {
     reason: 'IDLE',
@@ -498,7 +499,21 @@
       frameGeneration: activeFrameContext.frameGeneration,
       probeId: activeFrameContext.probeId
     };
-    const signature = `${selectedWithContext.frameGeneration}:${selectedWithContext.probeId}:${axisHint}:${selected.type}:${selected.factor}:${selected.sourceId}:${selected.axisGeneration}:${selected.backingStoreSignature}:${selected.geometrySignature}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
+    const signature = JSON.stringify([
+      selectedWithContext.frameGeneration,
+      selectedWithContext.probeId,
+      axisHint,
+      selected.type,
+      selected.factor,
+      selected.sourceId,
+      selected.axisGeneration,
+      selected.backingStoreSignature,
+      selected.geometrySignature,
+      selected.fit.logarithmic,
+      selected.fit.slope,
+      selected.fit.intercept,
+      selected.points.map((point) => [point.x, point.y, point.value])
+    ]);
     const sameMode = stableScale?.type === selected.type
       && stableScale?.factor === selected.factor
       && stableScale?.frameGeneration === selectedWithContext.frameGeneration
@@ -543,6 +558,11 @@
     });
     const visibleMarkers = markers.filter((marker) => !hiddenMarkerIds.has(marker.id));
     if (!visibleMarkers.length) {
+      if (root.childElementCount) root.replaceChildren();
+      renderedSignature = '';
+      return;
+    }
+    if (!frameContextMatchesObservedProbe(activeFrameContext)) {
       if (root.childElementCount) root.replaceChildren();
       renderedSignature = '';
       return;
@@ -785,6 +805,35 @@
     return true;
   }
 
+  function observeFrameProbe(probeId, frameGeneration) {
+    if (typeof probeId !== 'string'
+      || !probeId
+      || probeId.length > CHART_PROBE_ID_MAX_CHARS
+      || !Number.isSafeInteger(frameGeneration)
+      || frameGeneration <= 0
+      || (observedFrameProbe && frameGeneration < observedFrameProbe.frameGeneration)) {
+      return false;
+    }
+    if (observedFrameProbe?.probeId === probeId
+      && observedFrameProbe.frameGeneration === frameGeneration) return true;
+    if (observedFrameProbe) {
+      markerAxisSequenceFloor = axisLabelSequence;
+      frameContextTextFloor = textCallSequence;
+      activeFrameContext = null;
+      clearScaleAndPlacementCaches();
+      setChartDiagnostic('IDLE');
+    }
+    observedFrameProbe = { probeId, frameGeneration };
+    return true;
+  }
+
+  function frameContextMatchesObservedProbe(context) {
+    return Boolean(context
+      && observedFrameProbe
+      && context.probeId === observedFrameProbe.probeId
+      && context.frameGeneration === observedFrameProbe.frameGeneration);
+  }
+
   function announceReady(probeId = '', frameGeneration = 0) {
     const message = { source: 'TANGO_PAPER_CHART', type: 'READY' };
     if (probeId && Number.isSafeInteger(frameGeneration) && frameGeneration > 0) {
@@ -803,10 +852,7 @@
     if (event.data.type === 'CHART_READY_PROBE') {
       const probeId = typeof event.data.probeId === 'string' ? event.data.probeId : '';
       const frameGeneration = event.data.frameGeneration;
-      if (probeId
-        && probeId.length <= CHART_PROBE_ID_MAX_CHARS
-        && Number.isSafeInteger(frameGeneration)
-        && frameGeneration > 0) {
+      if (observeFrameProbe(probeId, frameGeneration)) {
         announceReady(probeId, frameGeneration);
       }
       return;
@@ -830,7 +876,7 @@
       nextState = { ...payload, chain: payloadIdentity.chain, tokenAddress: payloadIdentity.address };
     } else if (payload.markers.length || Object.keys(payload).length !== 1) return;
     const nextFrameContext = normalizedFrameContext(event.data.context);
-    if (!nextFrameContext) return;
+    if (!frameContextMatchesObservedProbe(nextFrameContext)) return;
     if (!applyFrameContext(nextFrameContext)) return;
     const hasTokenIdentity = (state) => Boolean(state?.chain && state?.tokenAddress);
     const identityChanged = hasTokenIdentity(markerState)

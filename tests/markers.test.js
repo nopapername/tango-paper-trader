@@ -96,6 +96,7 @@ function loadChartBridge({
         return {
           markerState, lastScaleMode, stableScale, stableSignature, renderedSignature,
           frameContext: typeof activeFrameContext === 'undefined' ? null : activeFrameContext,
+          observedProbe: typeof observedFrameProbe === 'undefined' ? null : observedFrameProbe,
           markerPositions: [...markerPositions], markerEconomicCoordinateCount: markerEconomicCoordinates.size,
           overlayChildren: overlay?.childElementCount || 0,
           overlayTops: overlay?.children?.map((node) => node.style.top) || [],
@@ -161,29 +162,43 @@ function loadChartBridge({
   require('node:vm').runInNewContext(instrumented, context.window, { filename: 'src/content/chart-main.js' });
   const canvas = new FakeHTMLCanvasElement(canvasRect);
   const canvasContext = new FakeCanvasRenderingContext2D(canvas);
+  const dispatchMessage = (data, source = context.window.parent) => {
+    listeners.get('message')({ data, source });
+  };
+  const dispatchProbe = (frameContext = defaultFrameContext) => {
+    dispatchMessage({
+      source: 'TANGO_PAPER_PARENT',
+      type: 'CHART_READY_PROBE',
+      probeId: frameContext?.probeId,
+      frameGeneration: frameContext?.frameGeneration
+    });
+  };
   return {
     api: context.window.__chartTest, bridgeInitialized: Boolean(context.window.__tangoPaperChartBridge),
     clock, canvasContext, parentMessages,
     message: (data, source = context.window.parent) => {
-      const delivered = data?.source === 'TANGO_PAPER_PARENT'
+      const isParentMarker = source === context.window.parent
+        && data?.source === 'TANGO_PAPER_PARENT'
+        && data?.type === 'CHART_MARKERS';
+      const delivered = isParentMarker
         && data?.type === 'CHART_MARKERS'
         && !Object.prototype.hasOwnProperty.call(data, 'context')
         ? { ...data, context: { ...defaultFrameContext } }
         : data;
-      listeners.get('message')({ data: delivered, source });
+      if (isParentMarker) dispatchProbe(delivered.context);
+      dispatchMessage(delivered, source);
     },
     rawMessage: (data, source = context.window.parent) => {
-      listeners.get('message')({ data, source });
+      dispatchMessage(data, source);
     },
+    probe: dispatchProbe,
     markers: (payload, frameContext = defaultFrameContext) => {
-      listeners.get('message')({
-        source: context.window.parent,
-        data: {
-          source: 'TANGO_PAPER_PARENT',
-          type: 'CHART_MARKERS',
-          context: { ...frameContext },
-          payload
-        }
+      dispatchProbe(frameContext);
+      dispatchMessage({
+        source: 'TANGO_PAPER_PARENT',
+        type: 'CHART_MARKERS',
+        context: { ...frameContext },
+        payload
       });
     },
     setHref: (nextHref) => { location.href = nextHref; },
@@ -221,7 +236,12 @@ test('chart child recovers a dropped startup READY from one exact probe without 
   assert.equal(readyMessages()[0].frameGeneration, 1, 'the child echoes the exact probe generation');
 
   for (let index = 0; index < 20; index += 1) {
-    chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [] } });
+    chart.rawMessage({
+      source: 'TANGO_PAPER_PARENT',
+      type: 'CHART_MARKERS',
+      context: { axisHint: 'UNKNOWN', frameGeneration: 1, probeId: 'probe-1' },
+      payload: { markers: [] }
+    });
   }
   assert.equal(readyMessages().length, 1, 'marker delivery never creates a READY feedback loop');
 });
@@ -869,6 +889,7 @@ test('an empty marker payload clears overlay and every cached chart placement', 
     stableSignature: '',
     renderedSignature: '',
     frameContext: { axisHint: 'UNKNOWN', frameGeneration: 1, probeId: 'test:1' },
+    observedProbe: { probeId: 'test:1', frameGeneration: 1 },
     markerPositions: [],
     markerEconomicCoordinateCount: 0,
     overlayChildren: 0,
@@ -1093,6 +1114,98 @@ test('malformed frame context cannot replace or clear current chart state', () =
   assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), before);
 });
 
+test('an unissued high-generation marker context cannot poison a legal lower-generation clear', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  const issuedContext = {
+    axisHint: 'PRICE', frameGeneration: 1, probeId: 'issued:1'
+  };
+  chart.markers(tiedAxisPayload(), issuedContext);
+  const before = JSON.parse(JSON.stringify(chart.api.snapshot()));
+
+  chart.rawMessage({
+    source: 'TANGO_PAPER_PARENT',
+    type: 'CHART_MARKERS',
+    context: {
+      axisHint: 'MARKET_CAP', frameGeneration: 99, probeId: 'never-issued:99'
+    },
+    payload: tiedAxisPayload()
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), before);
+
+  chart.rawMessage({
+    source: 'TANGO_PAPER_PARENT',
+    type: 'CHART_MARKERS',
+    context: issuedContext,
+    payload: { markers: [] }
+  });
+  const cleared = chart.api.snapshot();
+  assert.deepEqual(JSON.parse(JSON.stringify(cleared.markerState)), { markers: [] });
+  assert.equal(cleared.overlayChildren, 0);
+  assert.equal(cleared.frameContext.frameGeneration, 1);
+});
+
+test('a delayed same-generation old-probe replay is inert after a newly observed probe', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  const oldContext = {
+    axisHint: 'PRICE', frameGeneration: 1, probeId: 'issued:old'
+  };
+  const newContext = {
+    axisHint: 'MARKET_CAP', frameGeneration: 1, probeId: 'issued:new'
+  };
+  chart.markers(tiedAxisPayload(), oldContext);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.probe(newContext);
+  const afterNewProbe = JSON.parse(JSON.stringify(chart.api.snapshot()));
+  assert.equal(afterNewProbe.observedProbe.probeId, newContext.probeId);
+  assert.equal(afterNewProbe.frameContext, null);
+  assert.equal(afterNewProbe.stableScale, null);
+  assert.equal(afterNewProbe.overlayChildren, 0);
+
+  chart.probe(newContext);
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), afterNewProbe);
+
+  for (const [text, y] of [['$1', 420], ['$2', 320], ['$3', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), afterNewProbe);
+
+  chart.rawMessage({
+    source: 'TANGO_PAPER_PARENT',
+    type: 'CHART_MARKERS',
+    context: oldContext,
+    payload: tiedAxisPayload()
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), afterNewProbe);
+
+  chart.rawMessage({
+    source: 'TANGO_PAPER_PARENT',
+    type: 'CHART_MARKERS',
+    context: newContext,
+    payload: tiedAxisPayload()
+  });
+  const recovered = chart.api.snapshot();
+  assert.equal(recovered.frameContext.probeId, newContext.probeId);
+  assert.equal(recovered.stableScale.type, 'MARKET_CAP');
+  assert.equal(recovered.overlayChildren, 1);
+
+  chart.rawMessage({
+    source: 'TANGO_PAPER_PARENT',
+    type: 'CHART_MARKERS',
+    context: newContext,
+    payload: { markers: [] }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
 test('same marker id follows a changed economic value below the jitter deadband', () => {
   const chart = loadChartBridge();
   for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
@@ -1143,6 +1256,32 @@ test('unchanged economics and plot bounds retain the visual deadband for a two p
   chart.api.render();
 
   assert.equal(chart.api.snapshot().overlayTops[0], firstTop);
+});
+
+test('a one pixel anchor change removes a marker when the newest fit crosses the plot boundary', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  const payload = {
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 4,
+    currentMarketCap: 0,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 4, label: 'Paper Buy' }]
+  };
+  chart.markers(payload, {
+    axisHint: 'PRICE', frameGeneration: 1, probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '100px');
+
+  chart.api.record(chart.canvasContext, '$2', 950, 299);
+  chart.api.render();
+
+  const snapshot = chart.api.snapshot();
+  assert.equal(snapshot.stableScale.fit.intercept < 500, true);
+  assert.equal(snapshot.overlayChildren, 0);
+  assert.equal(snapshot.diagnostic.reason, 'OUT_OF_PLOT');
 });
 
 test('economic cache prunes a removed marker before that id reappears', () => {
