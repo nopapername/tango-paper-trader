@@ -331,10 +331,50 @@
     return { ...order, quote: canonicalQuote };
   }
 
-  function create({ readRaw, writeRaw, now = () => Date.now() } = {}) {
+  function create({
+    readRaw,
+    writeRaw,
+    now = () => Date.now(),
+    stateBudgetBytes = Tango.STATE_STORAGE_BUDGET_BYTES
+  } = {}) {
     if (typeof readRaw !== 'function' || typeof writeRaw !== 'function') {
       throw new Error('invalidCoordinatorStorage');
     }
+    if (!Number.isSafeInteger(Number(stateBudgetBytes)) || Number(stateBudgetBytes) <= 0) {
+      throw new Error('invalidStorageBudget');
+    }
+    stateBudgetBytes = Number(stateBudgetBytes);
+
+    function addedRecordIndexes(previous = [], next = []) {
+      const remaining = new Map();
+      for (const record of previous) {
+        const id = String(record?.id || '');
+        remaining.set(id, (remaining.get(id) || 0) + 1);
+      }
+      const indexes = [];
+      next.forEach((record, index) => {
+        const id = String(record?.id || '');
+        const count = remaining.get(id) || 0;
+        if (count > 0) remaining.set(id, count - 1);
+        else indexes.push(index);
+      });
+      return indexes;
+    }
+
+    function historyProtection(previous, next) {
+      return {
+        protectedTradeIndexes: addedRecordIndexes(previous?.trades, next?.trades),
+        protectedCalibrationIndexes: addedRecordIndexes(previous?.calibrations, next?.calibrations)
+      };
+    }
+
+    function prepareState(state, settings, protection = {}) {
+      return compactStateForStorage(state, settings, {
+        budgetBytes: stateBudgetBytes,
+        ...protection
+      });
+    }
+
     let tail = Promise.resolve();
 
     function serialized(work) {
@@ -347,9 +387,10 @@
       const raw = await readRaw([Tango.STORAGE_KEY, Tango.SETTINGS_KEY]);
       const settings = Tango.State.normalizeSettings(raw[Tango.SETTINGS_KEY]);
       const storedState = raw[Tango.STORAGE_KEY];
-      const state = Tango.State.normalizeState(storedState, settings, { migrationNow: now() });
+      let state = Tango.State.normalizeState(storedState, settings, { migrationNow: now() });
       if (persistMigration && Number(storedState?.schemaVersion) === 1) {
         state.stateRevision = Number(storedState.stateRevision || 0) + 1;
+        state = prepareState(state, settings).state;
         await writeRaw({
           [Tango.STORAGE_KEY]: state,
           [Tango.SETTINGS_KEY]: settings
@@ -358,13 +399,14 @@
       return { state, settings };
     }
 
-    async function commitState(previous, next) {
-      const state = {
+    async function commitState(previous, next, settings) {
+      const revised = {
         ...next,
         stateRevision: Number(previous.stateRevision || 0) + 1
       };
-      await writeRaw({ [Tango.STORAGE_KEY]: state });
-      return state;
+      const prepared = prepareState(revised, settings, historyProtection(previous, revised));
+      await writeRaw({ [Tango.STORAGE_KEY]: prepared.state });
+      return prepared.state;
     }
 
     function getAll() {
@@ -383,11 +425,12 @@
           const initialized = Tango.State.createInitialState({ now: now(), initialBalances });
           initialized.initialized = true;
           initialized.stateRevision = Number(state.stateRevision || 0) + 1;
+          const prepared = prepareState(initialized, nextSettings);
           await writeRaw({
-            [Tango.STORAGE_KEY]: initialized,
+            [Tango.STORAGE_KEY]: prepared.state,
             [Tango.SETTINGS_KEY]: nextSettings
           });
-          return { state: initialized, settings: nextSettings };
+          return { state: prepared.state, settings: nextSettings };
         }
         if (command?.type === 'SAVE_SETTINGS') {
           const nextSettings = Tango.State.normalizeSettings(command.settings);
@@ -436,6 +479,10 @@
           });
           importedState.initialized = true;
           importedState.stateRevision = Number(state.stateRevision || 0) + 1;
+          const measuredBytes = serializedStateBytes(importedState);
+          if (measuredBytes > stateBudgetBytes) {
+            throw storageBudgetError('importTooLarge', measuredBytes, stateBudgetBytes);
+          }
           await writeRaw({
             [Tango.STORAGE_KEY]: importedState,
             [Tango.SETTINGS_KEY]: importedSettings
@@ -476,11 +523,12 @@
           }, { strict: true, requireAllChains: true });
           const nextState = Tango.State.resetAll(nextSettings, now());
           nextState.stateRevision = Number(state.stateRevision || 0) + 1;
+          const prepared = prepareState(nextState, nextSettings);
           await writeRaw({
-            [Tango.STORAGE_KEY]: nextState,
+            [Tango.STORAGE_KEY]: prepared.state,
             [Tango.SETTINGS_KEY]: nextSettings
           });
-          return { state: nextState, settings: nextSettings };
+          return { state: prepared.state, settings: nextSettings };
         }
         let result;
         if (command?.type === 'EXECUTE_BUY') {
@@ -527,11 +575,12 @@
               [chain.id]: { ...settings.chains[chain.id], initialBalanceNative: balanceNative }
             }
           });
+          const prepared = prepareState(nextState, nextSettings);
           await writeRaw({
-            [Tango.STORAGE_KEY]: nextState,
+            [Tango.STORAGE_KEY]: prepared.state,
             [Tango.SETTINGS_KEY]: nextSettings
           });
-          return { state: nextState, settings: nextSettings };
+          return { state: prepared.state, settings: nextSettings };
         } else if (command?.type === 'RESET_ALL') {
           result = { state: Tango.State.resetAll(settings, now()) };
         } else if (command?.type === 'REPLACE_STATE') {
@@ -541,7 +590,7 @@
           throw new Error('unsupportedMutation');
         }
         if (result.state === state) return result;
-        const committed = await commitState(state, result.state);
+        const committed = await commitState(state, result.state, settings);
         return { ...result, state: committed };
       });
     }

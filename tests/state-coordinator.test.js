@@ -1562,3 +1562,305 @@ test('forged trade market-cap provenance writes nothing and does not poison late
   assert.equal(recovered.settings.selectedChain, 'bsc');
   assert.equal(persistence.writes.length, 1);
 });
+
+test('a near-budget BUY retains the current trade, advances once, and drops only oldest history', async () => {
+  const state = storageStateFixture();
+  state.stateRevision = 4;
+  state.trades = [
+    storageTradeFixture({ id: 'newer-history', executedAt: 2_000 }),
+    storageTradeFixture({
+      id: 'oldest-large-trade',
+      executedAt: 1_000,
+      sourceUrl: `https://gmgn.ai/${'x'.repeat(4_096)}`
+    })
+  ];
+  const settings = State.normalizeSettings({
+    slippageBps: 0,
+    platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 } }
+  });
+  const persistence = memoryPersistence(state, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 3_000,
+    stateBudgetBytes: stateBytes(state) - 1
+  });
+  const order = {
+    token: {
+      chain: 'eth',
+      address: '0xc333333333333333333333333333333333333333',
+      symbol: 'CURRENT'
+    },
+    quote: {
+      priceUsd: 2,
+      nativePriceUsd: 2_000,
+      observedAt: 3_000,
+      nativePriceObservedAt: 3_000,
+      source: 'GMGN_NETWORK',
+      valuationMode: 'PRICE',
+      priceProvenance: 'OBSERVED_PRICE'
+    },
+    amountNative: 1
+  };
+
+  const result = await coordinator.mutate({ type: 'EXECUTE_BUY', order });
+
+  assert.equal(result.state.stateRevision, 5);
+  assert.equal(result.state.trades.some(({ id }) => id === result.trade.id), true);
+  assert.equal(result.state.trades.some(({ id }) => id === 'newer-history'), true);
+  assert.equal(result.state.trades.some(({ id }) => id === 'oldest-large-trade'), false);
+  assert.ok(stateBytes(result.state) <= stateBytes(state) - 1);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], result.state);
+  assert.equal(persistence.writes.length, 1);
+});
+
+test('oversized IMPORT reports exact bytes and leaves current state and settings unchanged', async () => {
+  const current = storageStateFixture();
+  const settings = State.normalizeSettings({ selectedChain: 'eth' });
+  const imported = storageStateFixture();
+  imported.padding = '🔟'.repeat(256);
+  const payload = {
+    product: 'Tango Paper Trader',
+    version: 'test',
+    exportedAt: 1_500,
+    state: imported,
+    settings
+  };
+  const measuredState = State.normalizeState(imported, settings, { strict: true });
+  measuredState.initialized = true;
+  measuredState.stateRevision = 1;
+  const measuredBytes = stateBytes(measuredState);
+  const persistence = memoryPersistence(current, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000,
+    stateBudgetBytes: measuredBytes - 1
+  });
+
+  await assert.rejects(
+    coordinator.mutate({ type: 'IMPORT', payload }),
+    (error) => {
+      assert.equal(error.code, 'importTooLarge');
+      assert.equal(error.measuredBytes, measuredBytes);
+      assert.equal(error.budgetBytes, measuredBytes - 1);
+      return true;
+    }
+  );
+  assert.equal(persistence.writes.length, 0);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], current);
+  assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], settings);
+});
+
+test('essential-state overflow returns storageFull without a write or revision advance', async () => {
+  const current = storageStateFixture();
+  current.stateRevision = 7;
+  const settings = State.normalizeSettings({});
+  const replacement = storageStateFixture();
+  replacement.stateRevision = 7;
+  replacement.padding = '🔟'.repeat(512);
+  const persistence = memoryPersistence(current, settings);
+  const budgetBytes = stateBytes(current) + 1;
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    stateBudgetBytes: budgetBytes
+  });
+
+  await assert.rejects(
+    coordinator.mutate({
+      type: 'REPLACE_STATE',
+      state: replacement,
+      expectedRevision: 7
+    }),
+    (error) => {
+      assert.equal(error.code, 'storageFull');
+      assert.ok(error.measuredBytes > budgetBytes);
+      assert.equal(error.budgetBytes, budgetBytes);
+      return true;
+    }
+  );
+  assert.equal(persistence.writes.length, 0);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], current);
+});
+
+for (const [name, command] of [
+  ['INITIALIZE', { type: 'INITIALIZE', language: 'en', defaultBalanceNative: 10 }],
+  ['RESET_ALL_WITH_BALANCE', { type: 'RESET_ALL_WITH_BALANCE', balanceNative: 10 }]
+]) {
+  test(`${name} applies the byte policy before its direct atomic write`, async () => {
+    const current = storageStateFixture();
+    current.stateRevision = 9;
+    const settings = State.normalizeSettings({});
+    const persistence = memoryPersistence(current, settings);
+    const coordinator = StateCoordinator.create({
+      readRaw: persistence.readRaw,
+      writeRaw: persistence.writeRaw,
+      now: () => 2_000,
+      stateBudgetBytes: 1
+    });
+
+    await assert.rejects(
+      coordinator.mutate(command),
+      (error) => {
+        assert.equal(error.code, 'storageFull');
+        assert.ok(error.measuredBytes > 1);
+        assert.equal(error.budgetBytes, 1);
+        return true;
+      }
+    );
+    assert.equal(persistence.writes.length, 0);
+    assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], current);
+    assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], settings);
+  });
+}
+
+test('raw v1 migration compacts before its one atomic migration write', async () => {
+  const address = 'So11111111111111111111111111111111111111112';
+  const legacy = {
+    schemaVersion: 1,
+    stateRevision: 0,
+    account: {
+      initialBalanceSol: 10,
+      cashBalanceSol: 10,
+      realizedPnlSol: 0,
+      createdAt: 1,
+      updatedAt: 1
+    },
+    positions: {},
+    trades: [{
+      id: 'legacy-large',
+      chain: 'sol',
+      tokenAddress: address,
+      symbol: 'LEGACY',
+      side: 'BUY',
+      quantity: 1,
+      amountSol: 1,
+      observedPriceUsd: 2,
+      executionPriceUsd: 2,
+      marketCapUsd: 0,
+      liquidityUsd: 0,
+      solPriceUsd: 100,
+      slippageBps: 0,
+      platformFeeSol: 0,
+      networkFeeSol: 0,
+      realizedPnlSol: 0,
+      sourceUrl: `https://gmgn.ai/${'x'.repeat(2_048)}`,
+      executedAt: 1
+    }],
+    dailyRealized: {},
+    initialized: true
+  };
+  const settings = State.normalizeSettings({});
+  const expected = State.normalizeState(legacy, settings, { migrationNow: 2_000 });
+  expected.stateRevision = 1;
+  expected.trades = [];
+  const persistence = memoryPersistence(legacy, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 2_000,
+    stateBudgetBytes: stateBytes(expected)
+  });
+
+  const migrated = await coordinator.getAll();
+
+  assert.deepEqual(migrated.state, expected);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], expected);
+  assert.equal(persistence.writes.length, 1);
+});
+
+test('RESET_CHAIN compacts retained history from other chains before its atomic state-and-settings write', async () => {
+  const state = storageStateFixture();
+  state.trades = [
+    { ...storageTradeFixture({ id: 'bsc-old', executedAt: 1_000, sourceUrl: 'x'.repeat(2_048) }),
+      chain: 'bsc', tokenAddress: '0xd444444444444444444444444444444444444444', nativeSymbol: 'BNB' },
+    storageTradeFixture({ id: 'eth-reset-away', executedAt: 2_000 })
+  ];
+  const settings = State.normalizeSettings({});
+  const expectedEssential = State.resetChain(state, 'eth', 42, 3_000);
+  expectedEssential.trades = [];
+  expectedEssential.stateRevision = state.stateRevision + 1;
+  const persistence = memoryPersistence(state, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => 3_000,
+    stateBudgetBytes: stateBytes(expectedEssential)
+  });
+
+  const result = await coordinator.mutate({ type: 'RESET_CHAIN', chain: 'eth', balanceNative: 42 });
+
+  assert.deepEqual(result.state, expectedEssential);
+  assert.equal(result.settings.chains.eth.initialBalanceNative, 42);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], result.state);
+  assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], result.settings);
+  assert.equal(persistence.writes.length, 1);
+});
+
+test('representative 10k trade plus 10k calibration state commits below 8 MiB under a 10 MiB quota', async () => {
+  const state = storageStateFixture();
+  state.trades = Array.from({ length: 10_000 }, (_, index) => storageTradeFixture({
+    id: `trade-${String(index).padStart(5, '0')}`,
+    executedAt: index + 1,
+    sourceUrl: `https://gmgn.ai/${'x'.repeat(700)}`
+  }));
+  state.calibrations = Array.from({ length: 10_000 }, (_, index) => storageCalibrationFixture({
+    id: `cal-${String(index).padStart(5, '0')}`,
+    createdAt: index + 1
+  }));
+  const settings = State.normalizeSettings({
+    slippageBps: 0,
+    platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 } }
+  });
+  const values = {
+    [global.Tango.STORAGE_KEY]: structuredClone(state),
+    [global.Tango.SETTINGS_KEY]: structuredClone(settings)
+  };
+  const writes = [];
+  const quotaBytes = 10 * 1024 * 1024;
+  const readRaw = async (keys) => Object.fromEntries(
+    keys.filter((key) => key in values).map((key) => [key, structuredClone(values[key])])
+  );
+  const writeRaw = async (next) => {
+    const merged = { ...values, ...structuredClone(next) };
+    if (Buffer.byteLength(JSON.stringify(merged), 'utf8') > quotaBytes) {
+      const error = new Error('QUOTA_BYTES quota exceeded');
+      error.name = 'QuotaExceededError';
+      throw error;
+    }
+    writes.push(structuredClone(next));
+    Object.assign(values, structuredClone(next));
+  };
+  assert.ok(stateBytes(state) > quotaBytes);
+  await assert.rejects(writeRaw({ [global.Tango.STORAGE_KEY]: state }), /QUOTA_BYTES/);
+  const coordinator = StateCoordinator.create({ readRaw, writeRaw, now: () => 20_000 });
+
+  const result = await coordinator.mutate({
+    type: 'EXECUTE_BUY',
+    order: {
+      token: {
+        chain: 'eth',
+        address: '0xe555555555555555555555555555555555555555',
+        symbol: 'CURRENT'
+      },
+      quote: {
+        priceUsd: 2,
+        nativePriceUsd: 2_000,
+        observedAt: 20_000,
+        nativePriceObservedAt: 20_000,
+        source: 'GMGN_NETWORK',
+        valuationMode: 'PRICE',
+        priceProvenance: 'OBSERVED_PRICE'
+      },
+      amountNative: 1
+    }
+  });
+
+  assert.ok(stateBytes(result.state) <= 8 * 1024 * 1024);
+  assert.equal(result.state.trades.some(({ id }) => id === result.trade.id), true);
+  assert.deepEqual(values[global.Tango.STORAGE_KEY], result.state);
+  assert.equal(writes.length, 1);
+});
