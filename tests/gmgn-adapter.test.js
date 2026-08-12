@@ -274,6 +274,30 @@ function overlappingColoredInk(labelImage, amountImage) {
   return overlap;
 }
 
+const HEADLESS_LAYOUT_PENDING_TITLE = 'TANGO_HEADLESS_PENDING';
+const HEADLESS_LAYOUT_COMPLETE_PREFIX = 'TANGO_HEADLESS_COMPLETE:';
+
+function decodeHeadlessLayoutTelemetry(title) {
+  if (!title?.startsWith(HEADLESS_LAYOUT_COMPLETE_PREFIX)) {
+    throw new Error(`Headless Chrome telemetry protocol incomplete: ${title || '<missing title>'}`);
+  }
+  const encoded = title.slice(HEADLESS_LAYOUT_COMPLETE_PREFIX.length);
+  try {
+    return JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+  } catch (error) {
+    throw new Error(`Headless Chrome telemetry completion payload is invalid: ${error.message}`, {
+      cause: error
+    });
+  }
+}
+
+test('headless telemetry rejects the initial title as an incomplete protocol state', () => {
+  assert.throws(
+    () => decodeHeadlessLayoutTelemetry('TANGO_HEADLESS_PENDING'),
+    /Headless Chrome telemetry protocol incomplete: TANGO_HEADLESS_PENDING/
+  );
+});
+
 
 function headlessLockedGiantQuickBuyLayoutReport() {
   const contentCss = fs.readFileSync(path.join(__dirname, '../src/content/content.css'), 'utf8');
@@ -282,7 +306,7 @@ function headlessLockedGiantQuickBuyLayoutReport() {
   const pagePath = path.join(tempRoot, 'layout.html');
   const userDataDir = path.join(tempRoot, 'chrome-profile');
   try {
-    const page = `<!doctype html><html><head><meta charset="utf-8"><title>pending</title><style>
+    const page = `<!doctype html><html><head><meta charset="utf-8"><title>${HEADLESS_LAYOUT_PENDING_TITLE}</title><style>
 ${safetyCss}
 ${contentCss}
 html, body { margin: 0; padding: 0; }
@@ -356,7 +380,7 @@ body { background: #0c0d12; font: 13px/1 Arial, sans-serif; }
   }));
   const focusPaper = controls[0].paper;
   focusPaper.focus({ focusVisible: true });
-  const writeFocusTelemetry = (attempt = 0) => {
+  const writeFocusTelemetry = (attempt) => {
     const focusWrapperStyle = getComputedStyle(controls[0].wrapper);
     const focus = {
       active: document.activeElement === focusPaper,
@@ -365,15 +389,27 @@ body { background: #0c0d12; font: 13px/1 Arial, sans-serif; }
       wrapperOutlineStyle: focusWrapperStyle.outlineStyle,
       attempts: attempt
     };
-    if ((!focus.active || !focus.focusVisible || focus.wrapperOutlineStyle !== 'solid'
-      || focus.wrapperOutlineWidth < 1) && attempt < 30) {
+    const complete = focus.active && focus.focusVisible && focus.wrapperOutlineStyle === 'solid'
+      && focus.wrapperOutlineWidth >= 1;
+    if (!complete && attempt < 30) {
       focusPaper.focus({ focusVisible: true });
-      requestAnimationFrame(() => writeFocusTelemetry(attempt + 1));
+      scheduleFocusTelemetry(attempt + 1);
       return;
     }
-    document.title = btoa(JSON.stringify({ states, focus }));
+    document.title = ${JSON.stringify(HEADLESS_LAYOUT_COMPLETE_PREFIX)}
+      + btoa(JSON.stringify({ states, focus }));
   };
-  requestAnimationFrame(() => writeFocusTelemetry(1));
+  const scheduleFocusTelemetry = (attempt) => {
+    let checked = false;
+    const check = () => {
+      if (checked) return;
+      checked = true;
+      writeFocusTelemetry(attempt);
+    };
+    requestAnimationFrame(check);
+    setTimeout(check, 16);
+  };
+  scheduleFocusTelemetry(1);
 })();
 </script></body></html>`;
     fs.writeFileSync(pagePath, page, 'utf8');
@@ -387,7 +423,7 @@ body { background: #0c0d12; font: 13px/1 Arial, sans-serif; }
     assert.equal(result.status, 0, `Headless Chrome exited ${result.status}: ${result.stderr || result.stdout}`);
     const title = result.stdout.match(/<title>([^<]+)<\/title>/i)?.[1];
     assert.ok(title, `Headless Chrome did not return locked Giant telemetry: ${result.stderr || result.stdout}`);
-    return JSON.parse(Buffer.from(title, 'base64').toString('utf8'));
+    return decodeHeadlessLayoutTelemetry(title);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
