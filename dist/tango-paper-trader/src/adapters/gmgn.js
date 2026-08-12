@@ -5,6 +5,7 @@
   let quickBuyCardBirths = new WeakMap();
   let quickBuySeenTokenRoots = new WeakSet();
   const quickBuyOperations = new Map();
+  const quickBuySlotIdentities = new WeakMap();
   const trackedQuickBuySlots = new Set();
   const trenchColumns = new WeakMap();
   const trenchSnapshots = new Map();
@@ -15,6 +16,7 @@
   let quickBuyProbeCursor = 0;
   let quickBuyGenerationSequence = 0;
   let quickBuyNonceSequence = 0;
+  let quickBuySlotIdentitySequence = 0;
   const TOKEN_ITEM_ROOT_SELECTOR =
     '[data-sentry-element="SimulateLinkByConfig"][data-sentry-source-file="TokenItem.tsx"]';
   const FAST_QUICK_BUY_SLOT_LIMIT = 24;
@@ -1213,7 +1215,7 @@
     });
     return Tango.NativeQuickBuyGuard?.registerPaperAction?.(replacement, {
       slot, card, binding, actionId: expectedActionId, bindingNonce, generation, state,
-      chain, address, href, amountNative
+      chain, address, href, amountNative, validate: binding.validate
     }, binding.action?.invoke) === true;
   }
 
@@ -1278,6 +1280,7 @@
     if (!binding || binding === nextBinding) return;
     cancelQuickBuyIdentityIntent(binding, 'superseded');
     binding.actionHost?.classList?.remove?.('tango-quick-buy-action-host');
+    clearLockedQuickBuyStructuralHosts(binding);
     if (binding.replacement !== nextBinding.replacement) {
       Tango.NativeQuickBuyGuard?.revokePaperAction?.(binding.replacement);
       binding.replacement?.remove?.();
@@ -1383,6 +1386,33 @@
     };
   }
 
+  function quickBuyOperationKey(bindingKey, slot) {
+    if (!quickBuySlotIdentities.has(slot)) {
+      quickBuySlotIdentities.set(slot, ++quickBuySlotIdentitySequence);
+    }
+    return `${bindingKey}:slot:${quickBuySlotIdentities.get(slot)}`;
+  }
+
+  function liveQuickBuyIdentityMatches(binding) {
+    const slot = binding?.slot;
+    const card = binding?.card;
+    if (!binding || !slot?.isConnected || !card?.isConnected || !binding.replacement?.isConnected
+      || slot.__tangoQuickBuyBinding !== binding
+      || slot.__tangoReplacementQuickBuy !== binding.replacement
+      || slot.__tangoQuickBuyCard !== card
+      || slot.matches?.('.BuyButton-continer') !== true
+      || slot.closest?.('[class~="group/a"]') !== card
+      || !isTrenchPage() || chainFromUrl() !== binding.chain
+      || cardGeneration(card) !== binding.generation) return false;
+    if (binding.state === 'resolving-identity') {
+      return !binding.birth || quickBuyBirthMatchesBinding(binding.birth, binding);
+    }
+    const evidence = cardAddressEvidence(card, binding.chain);
+    return Boolean(evidence && evidence.address === binding.address
+      && evidence.href === binding.href
+      && binding.key === `${binding.chain}:${binding.address}`);
+  }
+
   function claimQuickBuyIdentityIntent(binding, evidence, now = Date.now()) {
     const intent = quickBuyIntents.get(binding?.slot);
     const valid = Boolean(intent && evidence
@@ -1440,8 +1470,8 @@
     return promoted ? { status: 'PROMOTED', intent } : { status: 'REJECTED' };
   }
 
-  function activeQuickBuyOperation(bindingKey) {
-    const operation = quickBuyOperations.get(bindingKey);
+  function activeQuickBuyOperation(bindingKey, slot) {
+    const operation = quickBuyOperations.get(quickBuyOperationKey(bindingKey, slot));
     return operation?.inFlight ? operation : null;
   }
 
@@ -1495,6 +1525,21 @@
     return slot?.querySelector?.('[class~="group/btn"]') || null;
   }
 
+  function lockedQuickBuyStructuralHosts(slot, actionHost) {
+    const hosts = [];
+    for (let node = actionHost; node && node !== slot; node = node.parentElement) {
+      hosts.push(node);
+    }
+    return hosts.at(-1)?.parentElement === slot ? hosts : [];
+  }
+
+  function clearLockedQuickBuyStructuralHosts(binding) {
+    for (const host of binding?.structuralHosts || []) {
+      host?.classList?.remove?.('tango-quick-buy-structural-host');
+    }
+    if (binding) binding.structuralHosts = [];
+  }
+
   function applyLockedQuickBuyPresentation(replacement, slot = null) {
     if (!replacement) return LOCKED_QUICK_BUY_PROFILE;
     replacement.className = 'tango-list-quick-buy';
@@ -1507,9 +1552,13 @@
     if (binding?.actionHost && binding.actionHost !== actionHost) {
       binding.actionHost.classList?.remove?.('tango-quick-buy-action-host');
     }
+    clearLockedQuickBuyStructuralHosts(binding);
+    const structuralHosts = lockedQuickBuyStructuralHosts(slot, actionHost);
+    structuralHosts.forEach((host) => host.classList?.add?.('tango-quick-buy-structural-host'));
     actionHost?.classList?.add?.('tango-quick-buy-action-host');
     if (binding) {
       binding.actionHost = actionHost;
+      binding.structuralHosts = structuralHosts;
       binding.quickBuyProfile = LOCKED_QUICK_BUY_PROFILE;
     }
     return LOCKED_QUICK_BUY_PROFILE;
@@ -1573,11 +1622,14 @@
   function createQuickBuyHandler({
     slot, card, replacement, bindingKey, chain, address, actionId, onQuickBuy, amountNative
   }) {
+    const operationKey = quickBuyOperationKey(bindingKey, slot);
     return async () => {
       const binding = slot.__tangoQuickBuyBinding;
       if (!slot.isConnected || !card.isConnected || !replacement.isConnected
-        || binding?.actionId !== actionId || binding?.key !== bindingKey || binding?.state === 'resolving-identity') return;
-      const activeOperation = activeQuickBuyOperation(bindingKey);
+        || binding?.actionId !== actionId || binding?.key !== bindingKey
+        || binding?.state === 'resolving-identity'
+        || liveQuickBuyIdentityMatches(binding) !== true) return;
+      const activeOperation = activeQuickBuyOperation(bindingKey, slot);
       if (activeOperation) {
         binding.operation = activeOperation;
         setPaperState(slot, binding, 'in-flight');
@@ -1586,8 +1638,8 @@
       const now = Date.now();
       if (now - Number(replacement.dataset.tangoLastClickAt || 0) < 900) return;
       replacement.dataset.tangoLastClickAt = String(now);
-      const operation = { key: bindingKey, inFlight: true };
-      quickBuyOperations.set(bindingKey, operation);
+      const operation = { key: operationKey, inFlight: true };
+      quickBuyOperations.set(operationKey, operation);
       binding.operation = operation;
       if (!setPaperState(slot, binding, 'in-flight')) {
         releaseQuickBuyOperation(operation);
@@ -1657,6 +1709,7 @@
       cardGenerationIdentity: cardGenerationIdentity(card),
       actionHost: null, operation: null, additionalNativeControls: []
     };
+    binding.validate = () => liveQuickBuyIdentityMatches(binding);
     const action = {
       bindingNonce,
       kind: 'intent',
@@ -1702,9 +1755,10 @@
       policyKey, onQuickBuy, chainDefinition,
       cardGenerationIdentity: cardGenerationIdentity(card),
       nativeControl: verifiedNativeControl, pendingOnly: false,
-      operation: activeQuickBuyOperation(bindingKey),
+      operation: activeQuickBuyOperation(bindingKey, slot),
       actionHost: binding.actionHost || null
     });
+    nextBinding.validate = () => liveQuickBuyIdentityMatches(nextBinding);
     const action = { bindingNonce, kind: 'execute', invoke: handleClick };
     if (!commitPaperQuickBuy(slot, nextBinding, action)) {
       if (claimedIntent && claimedIntent.expiresAt >= Date.now()
@@ -1856,6 +1910,7 @@
       state: 'resolving-identity', pendingOnly: false, operation: null,
       cardGenerationIdentity: cardGenerationIdentity(binding.card)
     });
+    nextBinding.validate = () => liveQuickBuyIdentityMatches(nextBinding);
     const action = {
       bindingNonce,
       kind: 'intent',
@@ -2143,7 +2198,7 @@
         onQuickBuy, amountNative: amountSol
       });
       slot.classList.add('tango-native-buy-overridden');
-      const existingOperation = activeQuickBuyOperation(bindingKey);
+      const existingOperation = activeQuickBuyOperation(bindingKey, slot);
       const binding = {
         slot, key: bindingKey, chain, address, href, card, nativeControl, replacement,
         actionId, bindingNonce, generation, state: existingOperation ? 'in-flight' : 'ready',
@@ -2152,6 +2207,7 @@
         cardGenerationIdentity: liveCardGenerationIdentity,
         actionHost: null, additionalNativeControls: [], operation: existingOperation
       };
+      binding.validate = () => liveQuickBuyIdentityMatches(binding);
       const action = { bindingNonce, kind: 'execute', invoke: handleClick };
       applyPaperStateCopy(binding, binding.state);
       if (!commitPaperQuickBuy(slot, binding, action)) continue;
@@ -2190,6 +2246,7 @@
     cancelQuickBuyIdentityIntent(binding, 'restored');
     trackedQuickBuySlots.delete(slot);
     binding?.actionHost?.classList?.remove?.('tango-quick-buy-action-host');
+    clearLockedQuickBuyStructuralHosts(binding);
     const canRestore = restoreCurrent && replacement?.isConnected && original && !original.isConnected
       && original.parentNode == null
       && !nativeQuickBuyControl(slot)

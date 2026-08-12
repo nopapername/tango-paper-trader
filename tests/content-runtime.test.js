@@ -3710,6 +3710,56 @@ test('page NATIVE_PRICES cannot schedule delayed calibration', async () => {
   assert.equal(loaded.calls.updatePositionQuotes.length, 0);
 });
 
+test('page NATIVE_PRICES stay display-only after the next real quote tick', async () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/eth/token/${ADDRESS_A}` });
+  const key = `eth:${ADDRESS_A}`;
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 1,
+    costBasisNative: 1, averageEntryPriceUsd: 1, lastPriceUsd: 1,
+    lastNativePriceUsd: 1, quoteObservedAt: loaded.clock.now - 1,
+    needsCalibration: true, provisional: true,
+    syntheticNativePrice: true, provisionalNativePrice: true
+  };
+  loaded.context.Tango.Store.updatePositionMetadata = async () => loaded.api.runtime.state;
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES',
+    prices: [{ symbol: 'ETH', priceUsd: 2_000, observedAt: loaded.clock.now }]
+  });
+  assert.equal(loaded.api.runtime.persistentNativePrices.has('eth'), false);
+  assert.equal(loaded.api.runtime.nativePrices.get('eth'), 2_000,
+    'page price remains available to display and decision caches');
+
+  await loaded.api.performQuoteTick();
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0,
+    'a later tick must not launder a page observation into Store');
+});
+
+test('page NATIVE_PRICES cannot suppress the background authority refresh', async () => {
+  let loaded;
+  loaded = loadContent({
+    sendMessage: async (message) => message.type === 'TANGO_GET_NATIVE_PRICE'
+      ? { ok: true, price: 2_100, observedAt: loaded.clock.now }
+      : { ok: true }
+  });
+  const context = quoteContext();
+  loaded.api.runtime.current = context;
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES',
+    prices: [{ symbol: 'ETH', priceUsd: 2_000, observedAt: loaded.clock.now }]
+  });
+
+  loaded.api.ensureNativePrice(context);
+  const refresh = loaded.api.runtime.nativePricePromises.get('eth');
+
+  assert.ok(refresh, 'display-only page cache must not satisfy extension authority');
+  await refresh;
+  assert.equal(loaded.api.runtime.persistentNativePrices.get('eth'), 2_100);
+  assert.equal(context.quote.nativePriceUsd, 2_100);
+});
+
 test('an older native observation cannot replace a newer cached price', () => {
   const loaded = loadContent();
   loaded.api.rememberNativePrice('eth', 3_500, loaded.clock.now);
@@ -5121,6 +5171,9 @@ test('a duplicate in-flight calibration target does not schedule a redundant ret
       observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
     }
   };
+  loaded.api.runtime.persistentGmgnQuotes.set(key, {
+    ...loaded.api.runtime.current.quote, chain: 'base', address: ADDRESS_A
+  });
   loaded.api.runtime.state.positions[key] = {
     chain: 'base', tokenAddress: ADDRESS_A, symbol: 'CLANK', name: 'Clank', quantity: 100,
     costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 0.000002,
@@ -5185,6 +5238,9 @@ test('a stronger background native observation during supply calibration reruns 
       observedAt: loaded.clock.now, source: 'GMGN_NETWORK'
     }
   };
+  loaded.api.runtime.persistentGmgnQuotes.set(key, {
+    ...loaded.api.runtime.current.quote, chain: 'base', address: ADDRESS_A
+  });
   loaded.api.runtime.state.positions[key] = {
     chain: 'base', tokenAddress: ADDRESS_A, symbol: 'CLANK', name: 'Clank', quantity: 100,
     costBasisNative: 1, realizedPnlNative: 0, averageEntryPriceUsd: 0.000002,
@@ -5314,6 +5370,7 @@ test('page supply-only observations update cache and display without rewriting s
 
   assert.equal(loaded.api.runtime.gmgnQuotes.get(key).priceUsd, 2);
   assert.equal(loaded.api.runtime.current.quote.priceUsd, 2);
+  assert.equal(loaded.api.runtime.persistentGmgnQuotes.has(key), false);
   assert.equal(loaded.calls.updatePositionQuotes.length, 0);
   assert.equal(loaded.api.runtime.state.positions[key].syntheticNativePrice, true);
 });
@@ -6100,11 +6157,17 @@ test('page TOKEN_QUOTES remain ephemeral and cannot persist metadata or calibrat
   loaded.api.runtime.current = quoteContext();
   loaded.api.runtime.state.positions[key] = {
     chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'OLD', name: 'Old', quantity: 1,
-    costBasisNative: 1, averageEntryPriceUsd: 1, lastPriceUsd: 1,
+    costBasisNative: 1, averageEntryMarketCap: 500, averageEntryPriceUsd: 0.0000005,
+    lastPriceUsd: 0.0000005, lastMarketCapUsd: 500,
     lastNativePriceUsd: 2_000, quoteObservedAt: loaded.clock.now - 1,
     totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    valuationMode: 'MARKET_CAP', averageEntryPriceProvenance: 'MARKET_CAP_DERIVED',
     needsCalibration: true, provisional: true, syntheticTokenPrice: true
   };
+  loaded.api.runtime.state.trades = [{
+    id: 'buy-page-ephemeral', chain: 'eth', tokenAddress: ADDRESS_A, side: 'BUY',
+    marketCapUsd: 500, observedPriceUsd: 0.0000005, priceProvenance: 'MARKET_CAP_DERIVED'
+  }];
 
   loaded.api.dispatchPageMessage({
     source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
@@ -6119,6 +6182,51 @@ test('page TOKEN_QUOTES remain ephemeral and cannot persist metadata or calibrat
   assert.equal(loaded.calls.metadataBatches.length, 0);
   assert.equal(loaded.calls.updatePositionQuotes.length, 0);
   assert.equal(loaded.api.runtime.state.positions[key].symbol, 'OLD');
+});
+
+test('page TOKEN_QUOTES stay marker-visible but cannot persist on the next real quote tick', async () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/eth/token/${ADDRESS_A}` });
+  const key = `eth:${ADDRESS_A}`;
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.current.quote = {};
+  loaded.api.runtime.state.positions[key] = {
+    chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'OLD', name: 'Old', quantity: 1,
+    costBasisNative: 1, averageEntryMarketCap: 500, averageEntryPriceUsd: 0.0000005,
+    lastPriceUsd: 0.0000005, lastMarketCapUsd: 500,
+    lastNativePriceUsd: 2_000, quoteObservedAt: loaded.clock.now - 1,
+    totalSupply: 100_000_000_000, supplySource: 'LAUNCHPAD_RULE',
+    valuationMode: 'MARKET_CAP', averageEntryPriceProvenance: 'MARKET_CAP_DERIVED',
+    needsCalibration: true, provisional: true, syntheticTokenPrice: true
+  };
+  loaded.api.runtime.state.trades = [{
+    id: 'buy-page-ephemeral', chain: 'eth', tokenAddress: ADDRESS_A, side: 'BUY',
+    marketCapUsd: 500, observedPriceUsd: 0.0000005, priceProvenance: 'MARKET_CAP_DERIVED'
+  }];
+  loaded.api.rememberNativePrice('eth', 2_000, loaded.clock.now);
+  let metadataWrites = 0;
+  loaded.context.Tango.Store.updatePositionMetadata = async () => {
+    metadataWrites += 1;
+    return loaded.api.runtime.state;
+  };
+
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [{
+      chain: 'eth', address: ADDRESS_A, priceUsd: 2, marketCapUsd: 2_000,
+      symbol: 'PAGE', name: 'Page Token', logoUrl: 'page.png',
+      observedAt: loaded.clock.now, source: 'GMGN_NETWORK', priceProvenance: 'OBSERVED_PRICE'
+    }]
+  });
+  assert.equal(loaded.api.runtime.current.quote.priceUsd, 2);
+  assert.equal(loaded.api.runtime.persistentGmgnQuotes.has(key), false);
+  assert.equal(loaded.api.chartMarkerPayload().markers[0].price, 0.5,
+    'page quote remains available to the factual marker renderer');
+
+  await loaded.api.performQuoteTick();
+
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0,
+    'a later tick must not launder a page quote into Store');
+  assert.equal(metadataWrites, 0,
+    'a later tick must not launder page token metadata into Store');
 });
 
 test('PnL calendar exposes current-chain trade history and sends the active chain', async () => {

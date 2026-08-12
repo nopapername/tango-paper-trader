@@ -168,6 +168,9 @@ test('native prices and GMGN quotes are explicitly keyed by chain', () => {
   const quoteTick = between('async function performQuoteTick()', 'const tickQuote =');
   assert.match(source, /nativePrices:\s*new Map\(\)/);
   assert.match(source, /nativePriceObservedAt:\s*new Map\(\)/);
+  assert.match(source, /persistentNativePrices:\s*new Map\(\)/);
+  assert.match(source, /persistentNativePriceObservedAt:\s*new Map\(\)/);
+  assert.match(source, /persistentGmgnQuotes:\s*new Map\(\)/);
   assert.match(nativePrice, /freshNativePrice\(chain\.id\)/);
   assert.match(source, /TANGO_GET_NATIVE_PRICE/);
   assert.match(source, /gmgnQuoteKey\(chain, address\)/);
@@ -175,7 +178,9 @@ test('native prices and GMGN quotes are explicitly keyed by chain', () => {
   assert.doesNotMatch(nativePrice, /!context/);
   assert.match(quoteTick, /runtime\.current\.quote\.nativePriceUsd = freshNativePrice\(chain\.id\)/);
   assert.doesNotMatch(quoteTick, /lastNativePriceUsd|runtime\.nativePrices\.get/);
-  assert.match(quoteTick, /const executable = executableQuote\(runtime\.current\?\.token, runtime\.current\?\.quote\)/);
+  assert.match(quoteTick, /resolvePaperTradeQuote\(runtime\.current\?\.token, runtime\.current\?\.quote, \{[\s\S]*persistenceOnly: true/);
+  assert.match(quoteTick, /const executable = executableQuote\(runtime\.current\?\.token, paperQuote, \{ persistenceOnly: true \}\)/);
+  assert.doesNotMatch(quoteTick, /executableQuote\(runtime\.current\?\.token, runtime\.current\?\.quote\)/);
   assert.match(quoteTick, /updatePositionQuote\(runtime\.current\.token, executable\)/);
 });
 

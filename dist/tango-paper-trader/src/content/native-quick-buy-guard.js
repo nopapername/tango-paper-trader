@@ -50,6 +50,8 @@
       && identity.binding.address === identity.address
       && identity.binding.href === identity.href
       && Number(identity.binding.amountNative) === Number(identity.amountNative)
+      && identity.binding.validate === identity.validate
+      && typeof identity.validate === 'function'
       && typeof identity.activate === 'function'
       && identity.binding.action?.invoke === identity.activate
       && ['resolving-identity', 'ready', 'in-flight'].includes(state)
@@ -64,6 +66,8 @@
       && identity.slot.__tangoQuickBuyBinding === identity.binding
       && identity.slot.__tangoReplacementQuickBuy === element
       && identity.slot.contains?.(element) === true
+      && identity.slot.matches?.('.BuyButton-continer') === true
+      && identity.slot.closest?.('[class~="group/a"]') === identity.card
       && identity.slot.__tangoQuickBuyCard === identity.card
       && identity.card.contains?.(identity.slot) === true
       && element.isConnected === true
@@ -85,7 +89,11 @@
   function trustedPaperCoreIdentity(element) {
     const identity = trustedPaperActions.get(element);
     if (!identity) return null;
-    if (currentPaperCoreIdentity(element, identity)) return identity;
+    if (currentPaperCoreIdentity(element, identity)) {
+      try {
+        if (identity.validate() === true) return identity;
+      } catch {}
+    }
     trustedPaperActions.delete(element);
     return null;
   }
@@ -135,7 +143,8 @@
       } catch {}
       return;
     }
-    if (!elements.some(isNativeQuickBuy)) return;
+    if (!elements.some((element) => isNativeQuickBuy(element)
+      || element.matches?.('[data-tango-paper-action="quick-buy"]'))) return;
     stopActivation(event, true);
   }
 
@@ -181,6 +190,7 @@
           address: identity?.address,
           href: identity?.href,
           amountNative: identity?.amountNative,
+          validate: identity?.validate,
           activate,
           nativeAncestors: captureNativeAncestors(identity?.slot)
         });

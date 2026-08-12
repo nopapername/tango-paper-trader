@@ -45,6 +45,12 @@ function loadGuard(readResult) {
       this.children.add(element);
       return element;
     }
+    closest(selector) {
+      for (let node = this; node; node = node.parentElement) {
+        if (node.matches(selector)) return node;
+      }
+      return null;
+    }
     removeChild(element) {
       if (!this.children.delete(element)) throw new Error('Element is not a child');
       if (element.parentElement === this) element.parentElement = null;
@@ -125,10 +131,11 @@ function paperIdentity(loaded, actionId, patch = {}) {
   const generation = Number(patch.generation || 1);
   const bindingNonce = patch.bindingNonce || `nonce-${generation}`;
   const activate = patch.activate || (() => undefined);
+  const validate = patch.validate || (() => true);
   const binding = {
     replacement: element, slot, card, actionId, bindingNonce, generation, state,
     chain: 'base', address, href: `https://gmgn.ai/base/token/${address}`,
-    amountNative: 1, action: {
+    amountNative: 1, validate, action: {
       bindingNonce, kind: state === 'resolving-identity' ? 'intent' : 'execute', invoke: activate
     }
   };
@@ -150,7 +157,7 @@ function paperIdentity(loaded, actionId, patch = {}) {
   return {
     element, slot, card, binding, activate, actionId, bindingNonce, generation, state,
     chain: binding.chain, address: binding.address, href: binding.href,
-    amountNative: binding.amountNative
+    amountNative: binding.amountNative, validate
   };
 }
 
@@ -363,6 +370,44 @@ test('trusted pointer and browser keyboard clicks invoke one opaque paper callba
     isTrusted: true, button: 0, detail: 0
   }));
   assert.equal(activations, 2);
+});
+
+test('trusted click rechecks the live slot card path and opaque adapter identity', () => {
+  const loaded = loadGuard(new Promise(() => {}));
+  const guard = loaded.context.Tango.NativeQuickBuyGuard;
+  const cases = [
+    {
+      label: 'slot class removed',
+      mutate(identity) { identity.slot.selectors.delete('.BuyButton-continer'); }
+    },
+    {
+      label: 'slot moved to a different card',
+      mutate(identity) {
+        const otherCard = new loaded.FakeElement(['[class~="group/a"]']);
+        otherCard.appendChild(identity.slot);
+      }
+    },
+    {
+      label: 'adapter route identity revoked',
+      patch: { validate: () => false },
+      mutate() {}
+    }
+  ];
+  cases.forEach((item, index) => {
+    let activations = 0;
+    const identity = paperIdentity(loaded, `live-recheck-${index}`, {
+      ...item.patch,
+      activate: () => { activations += 1; }
+    });
+    assert.equal(guard.registerPaperAction(identity.element, identity, identity.activate), true);
+    item.mutate(identity);
+
+    assertBlocked(loaded.dispatch('click', [identity.element, identity.slot, identity.card], {
+      isTrusted: true, button: 0, detail: 1
+    }), item.label);
+    assert.equal(activations, 0, item.label);
+    assert.equal(guard.isPaperActionTrusted(identity.element, identity), false, item.label);
+  });
 });
 
 test('isolated native guard treats missing malformed and failed settings reads as enabled', async () => {

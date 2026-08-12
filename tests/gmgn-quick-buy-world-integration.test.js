@@ -205,6 +205,11 @@ function loadIntegratedQuickBuyWorld({ now = 1_000, reintroducePublicBridge = fa
       chain, address, href: `https://gmgn.ai/${chain}/token/${address}`,
       amountNative, pendingOnly: false
     };
+    binding.validate = () => slot.__tangoQuickBuyBinding === binding
+      && slot.__tangoReplacementQuickBuy === paper
+      && slot.__tangoQuickBuyCard === card
+      && slot.matches('.BuyButton-continer')
+      && slot.closest('[class~="group/a"]') === card;
     Object.assign(paper.dataset, {
       tangoPaperAction: 'quick-buy', tangoActionId: actionId,
       tangoBindingNonce: bindingNonce, tangoCardGeneration: String(generation), tangoPaperState: state
@@ -265,6 +270,11 @@ function loadIntegratedQuickBuyWorld({ now = 1_000, reintroducePublicBridge = fa
       onQuickBuy, chainDefinition, pendingOnly: false, additionalNativeControls: [],
       repairAttempts: 0, repairTimer: null, resizeObserver: null, resizeTargets: []
     };
+    binding.validate = () => slot.__tangoQuickBuyBinding === binding
+      && slot.__tangoReplacementQuickBuy === paper
+      && slot.__tangoQuickBuyCard === card
+      && slot.matches('.BuyButton-continer')
+      && slot.closest('[class~="group/a"]') === card;
     const context = { onQuickBuy, chainDefinition, paperLabel: 'PAPER', policyKey };
     const action = {
       bindingNonce,

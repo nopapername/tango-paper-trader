@@ -8,8 +8,10 @@
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
     presetEditing: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
     nativePrices: new Map(), nativePriceObservedAt: new Map(), nativePricePromises: new Map(),
+    persistentNativePrices: new Map(), persistentNativePriceObservedAt: new Map(),
     quoteRequests: new Map(), quoteRetryAt: new Map(),
-    gmgnQuotes: new Map(), quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
+    gmgnQuotes: new Map(), persistentGmgnQuotes: new Map(),
+    quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     refreshRetryTimer: null, refreshRetryDelay: 500,
     calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
@@ -201,9 +203,17 @@
     return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
       && value - Date.now() <= 5_000;
   }
-  function rememberNativePrice(chain, price, observedAt = Date.now()) {
+  function rememberNativePrice(chain, price, observedAt = Date.now(), persistenceEligible = true) {
     const numeric = Number(price || 0);
     const nextObservedAt = observedAt;
+    if (persistenceEligible) {
+      const previousPersistentAt = Number(runtime.persistentNativePriceObservedAt.get(chain) || 0);
+      if (Number.isFinite(numeric) && numeric > 0 && validObservationTime(nextObservedAt)
+        && nextObservedAt >= previousPersistentAt) {
+        runtime.persistentNativePrices.set(chain, numeric);
+        runtime.persistentNativePriceObservedAt.set(chain, nextObservedAt);
+      }
+    }
     const previousObservedAt = Number(runtime.nativePriceObservedAt.get(chain) || 0);
     if (!Number.isFinite(numeric) || !(numeric > 0) || !validObservationTime(nextObservedAt)
       || nextObservedAt < previousObservedAt) {
@@ -218,6 +228,11 @@
     const observedAt = Number(runtime.nativePriceObservedAt.get(chain) || 0);
     return price > 0 && observedAt > 0 && Date.now() - observedAt <= maxAgeMs ? price : 0;
   }
+  function freshPersistentNativePrice(chain, maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000)) {
+    const price = Number(runtime.persistentNativePrices.get(chain) || 0);
+    const observedAt = Number(runtime.persistentNativePriceObservedAt.get(chain) || 0);
+    return price > 0 && observedAt > 0 && Date.now() - observedAt <= maxAgeMs ? price : 0;
+  }
   function clearShellMarkup() {
     if (runtime.renderedMarkup !== '') shell.innerHTML = '';
     runtime.renderedMarkup = '';
@@ -228,6 +243,7 @@
     runtime.modal = null;
     runtime.calendarOpen = false;
     runtime.gmgnQuotes.clear();
+    runtime.persistentGmgnQuotes.clear();
     runtime.quoteRequests.clear();
     runtime.quoteRetryAt.clear();
     runtime.positionCalibrationPromises.clear();
@@ -278,7 +294,9 @@
       && event.data?.type === 'NATIVE_PRICES') {
       for (const price of event.data.prices || []) {
         Tango.Chains.all().filter((chain) => chain.nativeSymbol === price.symbol)
-          .forEach((chain) => rememberNativePrice(chain.id, price.priceUsd, price.observedAt));
+          .forEach((chain) => rememberNativePrice(
+            chain.id, price.priceUsd, price.observedAt, false
+          ));
       }
       queueRender();
       return;
@@ -679,8 +697,15 @@
     if (runtime.current?.token?.chain !== chain.id) runtime.current = null;
     if (runtime.current) {
       runtime.current.quote.nativePriceUsd = freshNativePrice(chain.id);
-      if (currentPosition()) {
-        runtime.state = await Tango.Store.updatePositionMetadata(runtime.current.token);
+      const observedAddress = observedCurrent?.token?.address || observedCurrent?.token?.tokenAddress;
+      const currentAddress = runtime.current.token?.address || runtime.current.token?.tokenAddress;
+      const observedTokenMatchesCurrent = observedCurrent?.token?.chain === chain.id
+        && Tango.Chains.validateAddress(chain.id, observedAddress)
+        && Tango.Chains.validateAddress(chain.id, currentAddress)
+        && Tango.Chains.normalizeAddress(chain.id, observedAddress)
+          === Tango.Chains.normalizeAddress(chain.id, currentAddress);
+      if (currentPosition() && observedTokenMatchesCurrent) {
+        runtime.state = await Tango.Store.updatePositionMetadata(observedCurrent.token);
         if (!routeCaptureIsCurrent(routeCapture)) return;
       }
     }
@@ -688,9 +713,11 @@
     ensureTokenQuote(runtime.current, routeCapture);
     const position = currentPosition();
     const paperQuote = position
-      ? resolvePaperTradeQuote(runtime.current?.token, runtime.current?.quote, { position }) : null;
+      ? resolvePaperTradeQuote(runtime.current?.token, runtime.current?.quote, {
+        position, persistenceOnly: true
+      }) : null;
     const calibrationUpgrade = positionCalibrationUpgrade(position, paperQuote);
-    const executable = executableQuote(runtime.current?.token, runtime.current?.quote);
+    const executable = executableQuote(runtime.current?.token, paperQuote, { persistenceOnly: true });
     if (routeCaptureIsCurrent(routeCapture) && position && calibrationUpgrade) {
       await queueImmediateCurrentCalibration(routeCapture);
       if (!routeCaptureIsCurrent(routeCapture)) return;
@@ -720,8 +747,8 @@
         context.quote.nativePriceUsd = cached;
         context.quote.nativePriceObservedAt = runtime.nativePriceObservedAt.get(chain.id);
       }
-      return;
     }
+    if (freshPersistentNativePrice(chain.id) > 0) return;
     if (runtime.nativePricePromises.has(chain.id)) return;
     const request = chrome.runtime.sendMessage({ type: 'TANGO_GET_NATIVE_PRICE', chain: activeChain().id })
       .then((response) => {
@@ -856,12 +883,12 @@
   function ensureTokenQuote(context, routeCapture = captureRoute()) {
     const chain = activeChain();
     if (!routeCaptureIsCurrent(routeCapture) || !chain || context?.token?.chain !== chain.id
-      || !context?.token?.address || acceptedTokenObservation(context.quote, context.token)) return;
+      || !context?.token?.address) return;
     const address = context.token.address;
     const requestKey = gmgnQuoteKey(chain.id, address);
-    const gmgnQuote = freshGmgnQuote(chain.id, address);
-    if (acceptedTokenObservation(gmgnQuote, context.token)) {
-      mergeQuote(context, gmgnQuote);
+    const persistentQuote = freshPersistentGmgnQuote(chain.id, address);
+    if (acceptedTokenObservation(persistentQuote, context.token)) {
+      mergeQuote(context, persistentQuote);
       queueRender();
       return;
     }
@@ -882,7 +909,9 @@
         if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== chain.id
           || runtime.current?.token?.chain !== chain.id
           || runtime.current.token.address !== address) return;
-        mergeQuote(runtime.current, quote);
+        const persistentQuote = rememberPersistentGmgnQuote(quote);
+        if (!persistentQuote) return;
+        mergeQuote(runtime.current, persistentQuote);
         queueRender();
       })
       .catch(() => {
@@ -900,6 +929,34 @@
   function freshGmgnQuote(chain, address, maxAgeMs = 30_000) {
     const quote = runtime.gmgnQuotes.get(gmgnQuoteKey(chain, address));
     return quote && Date.now() - Number(quote.observedAt || 0) <= maxAgeMs ? quote : null;
+  }
+
+  function freshPersistentGmgnQuote(chain, address, maxAgeMs = 30_000) {
+    const quote = runtime.persistentGmgnQuotes.get(gmgnQuoteKey(chain, address));
+    return quote && Date.now() - Number(quote.observedAt || 0) <= maxAgeMs ? quote : null;
+  }
+
+  function rememberPersistentGmgnQuote(quote) {
+    const chain = Tango.Chains.get(quote?.chain)?.id;
+    const address = quote?.address || quote?.tokenAddress;
+    if (!chain || !Tango.Chains.validateAddress(chain, address)) return null;
+    const normalizedAddress = Tango.Chains.normalizeAddress(chain, address);
+    const key = gmgnQuoteKey(chain, normalizedAddress);
+    const maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000);
+    const normalized = normalizeObservationDimensions(quote, maxAgeMs);
+    const persistent = normalizeObservationDimensions(
+      Tango.GMGNQuotes.mergeObservation(runtime.persistentGmgnQuotes.get(key), normalized),
+      maxAgeMs
+    );
+    if (!trustedCachedObservation(persistent, chain, normalizedAddress, maxAgeMs)) return null;
+    runtime.persistentGmgnQuotes.set(key, persistent);
+    const display = normalizeObservationDimensions(
+      Tango.GMGNQuotes.mergeObservation(runtime.gmgnQuotes.get(key), persistent), maxAgeMs
+    );
+    if (trustedCachedObservation(display, chain, normalizedAddress, maxAgeMs)) {
+      runtime.gmgnQuotes.set(key, display);
+    }
+    return persistent;
   }
 
   function cachedGmgnQuote(chain, address) {
@@ -1028,13 +1085,16 @@
     };
   }
 
-  function lastKnownNativeObservation(chainId, candidate, position) {
+  function lastKnownNativeObservation(chainId, candidate, position, persistenceOnly = false) {
     const chainPosition = Tango.ChainView.positions(runtime.state, chainId)
       .find((item) => Number(item.lastNativePriceUsd || 0) > 0);
     const observations = [
       {
-        price: Number(runtime.nativePrices.get(chainId) || 0),
-        observedAt: Number(runtime.nativePriceObservedAt.get(chainId) || 0), synthetic: false
+        price: Number((persistenceOnly
+          ? runtime.persistentNativePrices : runtime.nativePrices).get(chainId) || 0),
+        observedAt: Number((persistenceOnly
+          ? runtime.persistentNativePriceObservedAt : runtime.nativePriceObservedAt).get(chainId) || 0),
+        synthetic: false
       },
       {
         price: Number(candidate?.nativePriceUsd || 0),
@@ -1137,7 +1197,9 @@
     if (!chain || token?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, address)) return null;
     const normalizedAddress = Tango.Chains.normalizeAddress(chain.id, address);
     const position = options?.position === undefined ? persistedQuoteContext(token) : options.position;
-    const exact = runtime.gmgnQuotes.get(gmgnQuoteKey(chain.id, normalizedAddress)) || null;
+    const persistenceOnly = options?.persistenceOnly === true;
+    const exact = (persistenceOnly ? runtime.persistentGmgnQuotes : runtime.gmgnQuotes)
+      .get(gmgnQuoteKey(chain.id, normalizedAddress)) || null;
     const candidateSource = String(candidate?.source || '').toUpperCase();
     const candidateAddresses = [candidate?.address, candidate?.tokenAddress]
       .filter((value) => value != null);
@@ -1151,7 +1213,7 @@
       && Date.now() - candidateObservedAt <= Number(Tango.QUOTE_STALE_MS || 15_000);
     const candidateIsTrusted = candidateIdentityMatches && candidateFresh
       && Boolean(factualObservationSource(candidateSource));
-    const normalizedCandidate = candidateIsTrusted
+    const normalizedCandidate = candidateIsTrusted && !persistenceOnly
       ? normalizeObservationDimensions(candidate, Number(Tango.QUOTE_STALE_MS || 15_000)) : null;
     const candidateHasFactualPrice = Number(normalizedCandidate?.priceUsd || 0) > 0;
     const candidateSyntheticTokenPrice = Boolean(normalizedCandidate)
@@ -1319,7 +1381,7 @@
     const executionSupply = supply?.totalSupply || fallback.totalSupply;
     const fallbackPrice = executionMarketCap / executionSupply;
     const priceUsd = safeObservedPrice || derivedPrice || historicalPrice || fallbackPrice;
-    const native = lastKnownNativeObservation(chain.id, local, boundPosition);
+    const native = lastKnownNativeObservation(chain.id, local, boundPosition, persistenceOnly);
     const nativePriceUsd = Number(native.price || 1);
     const now = Date.now();
     const syntheticTokenPrice = !(safeObservedPrice > 0 || derivedPrice > 0 || historicalPrice > 0);
@@ -1416,7 +1478,9 @@
     const context = runtime.current;
     const position = currentPosition();
     if (!chain || !context?.token || context.token.chain !== chain.id || !position) return null;
-    const quote = resolvePaperTradeQuote(context.token, context.quote, { position });
+    const quote = resolvePaperTradeQuote(context.token, context.quote, {
+      position, persistenceOnly: true
+    });
     if (!positionCalibrationUpgrade(position, quote)) return null;
     const key = Tango.Engine.positionKey(context.token.chain, context.token.address);
     if (runtime.positionCalibrationPromises.has(key)) {
@@ -1456,17 +1520,19 @@
     return request;
   }
 
-  function requireExecutableQuote(token, candidate) {
+  function requireExecutableQuote(token, candidate, options = {}) {
     const chain = activeChain();
     if (!chain || token?.chain !== chain.id) throw new Error('unsupportedChain');
     const source = String(candidate?.source || '').toUpperCase();
     if (!(source === 'DEXSCREENER' || source.startsWith('GMGN'))) throw new Error('invalidQuote');
-    const nativePriceUsd = freshNativePrice(chain.id);
+    const nativePriceUsd = options?.persistenceOnly === true
+      ? freshPersistentNativePrice(chain.id) : freshNativePrice(chain.id);
     if (!(nativePriceUsd > 0)) throw new Error('nativePriceUnavailable');
     const quote = {
       ...candidate,
       nativePriceUsd,
-      nativePriceObservedAt: runtime.nativePriceObservedAt.get(chain.id)
+      nativePriceObservedAt: (options?.persistenceOnly === true
+        ? runtime.persistentNativePriceObservedAt : runtime.nativePriceObservedAt).get(chain.id)
     };
     const baseContext = executionValidationBaseContext(token);
     const validation = Tango.Engine.validateQuote(
@@ -1477,8 +1543,8 @@
     return quote;
   }
 
-  function executableQuote(token, candidate) {
-    try { return requireExecutableQuote(token, candidate); }
+  function executableQuote(token, candidate, options = {}) {
+    try { return requireExecutableQuote(token, candidate, options); }
     catch { return null; }
   }
 

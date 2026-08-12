@@ -35,6 +35,16 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   min-width: 0 !important;
   width: 100% !important;
 }
+.BuyButton-continer.tango-native-buy-overridden .tango-quick-buy-structural-host {
+  align-items: center !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  justify-content: center !important;
+  min-height: 36px !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+  width: 100% !important;
+}
 .tango-list-quick-buy {
   --tango-quick-buy-accent: #7dd3fc;
   --tango-quick-buy-display-text: 14px;
