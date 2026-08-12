@@ -56,6 +56,96 @@ test('Store reconstructs typed storage failure details from the service worker',
   });
 });
 
+test('Store rejects malformed or spoofed typed details and preserves the legacy error string', async () => {
+  const cases = [
+    {
+      name: 'negative measured bytes',
+      response: {
+        ok: false, error: 'storageFull',
+        errorDetails: { code: 'storageFull', measuredBytes: -1, budgetBytes: 1 }
+      }
+    },
+    {
+      name: 'zero budget',
+      response: {
+        ok: false, error: 'storageFull',
+        errorDetails: { code: 'storageFull', measuredBytes: 1, budgetBytes: 0 }
+      }
+    },
+    {
+      name: 'import not over budget',
+      response: {
+        ok: false, error: 'importTooLarge',
+        errorDetails: { code: 'importTooLarge', measuredBytes: 1, budgetBytes: 1 }
+      }
+    },
+    {
+      name: 'legacy error mismatch spoof',
+      response: {
+        ok: false, error: 'importFailed',
+        errorDetails: { code: 'importTooLarge', measuredBytes: 2, budgetBytes: 1 }
+      }
+    },
+    {
+      name: 'unsupported code',
+      response: {
+        ok: false, error: 'storageFailed',
+        errorDetails: { code: 'storageFailed', measuredBytes: 2, budgetBytes: 1 }
+      }
+    },
+    {
+      name: 'malformed details',
+      response: { ok: false, error: 'importFailed', errorDetails: null }
+    }
+  ];
+
+  for (const item of cases) {
+    const chrome = {
+      runtime: { sendMessage: async () => item.response },
+      storage: {
+        local: { get: async () => ({}), set: async () => undefined },
+        onChanged: { addListener() {} }
+      }
+    };
+    const { store } = loadStore({ chrome });
+
+    await assert.rejects(store.importData({}), (error) => {
+      assert.equal(error.message, item.response.error, item.name);
+      assert.equal(Object.hasOwn(error, 'code'), false, item.name);
+      assert.equal(Object.hasOwn(error, 'measuredBytes'), false, item.name);
+      assert.equal(Object.hasOwn(error, 'budgetBytes'), false, item.name);
+      return true;
+    });
+  }
+});
+
+test('Store reconstructs valid storageFull details at the zero measured-byte boundary', async () => {
+  const chrome = {
+    runtime: {
+      async sendMessage() {
+        return {
+          ok: false,
+          error: 'storageFull',
+          errorDetails: { code: 'storageFull', measuredBytes: 0, budgetBytes: 1 }
+        };
+      }
+    },
+    storage: {
+      local: { get: async () => ({}), set: async () => undefined },
+      onChanged: { addListener() {} }
+    }
+  };
+  const { store } = loadStore({ chrome });
+
+  await assert.rejects(store.getAll(), (error) => {
+    assert.equal(error.message, 'storageFull');
+    assert.equal(error.code, 'storageFull');
+    assert.equal(error.measuredBytes, 0);
+    assert.equal(error.budgetBytes, 1);
+    return true;
+  });
+});
+
 test('localStorage fallback notifies subscribers once per scoped settings write', async () => {
   const values = new Map();
   const { store } = loadStore({

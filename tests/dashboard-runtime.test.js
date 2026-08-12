@@ -936,3 +936,36 @@ test('Dashboard reports oversized import bytes and keeps authoritative data unch
   assert.equal(JSON.stringify(dashboard.api.runtime.settings), JSON.stringify(initialSettings));
   assert.equal(dashboard.fileInput.value, '');
 });
+
+test('Dashboard falls back to the generic import toast for malformed typed byte details', async () => {
+  const cases = [
+    Object.assign(new Error('importTooLarge'), {
+      code: 'importTooLarge', measuredBytes: -1, budgetBytes: 1
+    }),
+    Object.assign(new Error('importTooLarge'), {
+      code: 'importTooLarge', measuredBytes: 1, budgetBytes: 0
+    }),
+    Object.assign(new Error('importTooLarge'), {
+      code: 'importTooLarge', measuredBytes: 1, budgetBytes: 1
+    }),
+    Object.assign(new Error('importTooLarge'), {
+      code: 'importTooLarge', measuredBytes: 1, budgetBytes: 2
+    }),
+    Object.assign(new Error('importFailed'), {
+      code: 'importTooLarge', measuredBytes: 2, budgetBytes: 1
+    }),
+    new Error('importFailed')
+  ];
+
+  for (const importFailure of cases) {
+    const dashboard = await loadDashboard({ importFailure });
+    dashboard.fileInput.files = [{
+      text: async () => JSON.stringify({ product: 'Tango Paper Trader' })
+    }];
+
+    await dashboard.fileInput.emit('change');
+
+    assert.equal(dashboard.api.runtime.toast, 'importFailed', importFailure.message);
+    assert.equal(dashboard.fileInput.value, '');
+  }
+});

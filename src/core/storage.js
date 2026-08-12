@@ -26,8 +26,12 @@
       const error = new Error(response?.error || 'storageFailed');
       const details = response?.errorDetails;
       if (details && ['storageFull', 'importTooLarge'].includes(details.code)
+        && response?.error === details.code
         && Number.isSafeInteger(details.measuredBytes)
-        && Number.isSafeInteger(details.budgetBytes)) {
+        && details.measuredBytes >= 0
+        && Number.isSafeInteger(details.budgetBytes)
+        && details.budgetBytes > 0
+        && (details.code !== 'importTooLarge' || details.measuredBytes > details.budgetBytes)) {
         error.code = details.code;
         error.measuredBytes = details.measuredBytes;
         error.budgetBytes = details.budgetBytes;

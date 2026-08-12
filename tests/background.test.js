@@ -152,6 +152,62 @@ test('service worker returns typed storageFull byte details from its coordinator
   assert.equal(attempts, 1);
 });
 
+test('service worker emits typed storage details only for valid matching coordinator failures', () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const cases = [
+    {
+      name: 'valid storageFull lower bound',
+      error: Object.assign(new Error('storageFull'), {
+        code: 'storageFull', measuredBytes: 0, budgetBytes: 1
+      }),
+      typed: true
+    },
+    {
+      name: 'valid importTooLarge relation',
+      error: Object.assign(new Error('importTooLarge'), {
+        code: 'importTooLarge', measuredBytes: 2, budgetBytes: 1
+      }),
+      typed: true
+    },
+    {
+      name: 'negative measured bytes',
+      error: Object.assign(new Error('storageFull'), {
+        code: 'storageFull', measuredBytes: -1, budgetBytes: 1
+      })
+    },
+    {
+      name: 'zero budget',
+      error: Object.assign(new Error('storageFull'), {
+        code: 'storageFull', measuredBytes: 1, budgetBytes: 0
+      })
+    },
+    {
+      name: 'import not over budget',
+      error: Object.assign(new Error('importTooLarge'), {
+        code: 'importTooLarge', measuredBytes: 1, budgetBytes: 1
+      })
+    },
+    {
+      name: 'legacy error mismatch',
+      error: Object.assign(new Error('importFailed'), {
+        code: 'importTooLarge', measuredBytes: 2, budgetBytes: 1
+      })
+    },
+    {
+      name: 'unsupported code',
+      error: Object.assign(new Error('storageFailed'), {
+        code: 'storageFailed', measuredBytes: 2, budgetBytes: 1
+      })
+    }
+  ];
+
+  for (const item of cases) {
+    const response = loaded.context.coordinatorFailureResponse(item.error);
+    assert.equal(response.error, item.error.message, item.name);
+    assert.equal(Object.hasOwn(response, 'errorDetails'), item.typed === true, item.name);
+  }
+});
+
 test('first install opens onboarding exactly once while updates never open it', async () => {
   const loaded = loadBackground(async () => jsonResponse({}));
   assert.equal(loaded.installListeners.length, 1);
