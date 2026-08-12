@@ -34,6 +34,199 @@ function memoryPersistence(initialState, initialSettings) {
   };
 }
 
+const stateBytes = (state) => Buffer.byteLength(JSON.stringify(state), 'utf8');
+const EVM_HISTORY_ADDRESS = '0xa111111111111111111111111111111111111111';
+const EVM_OPEN_ADDRESS = '0xb222222222222222222222222222222222222222';
+
+function storageStateFixture() {
+  const state = State.createInitialState({ now: 1 });
+  state.initialized = true;
+  return state;
+}
+
+function storageTradeFixture({
+  id,
+  executedAt,
+  tokenAddress = EVM_HISTORY_ADDRESS,
+  side = 'BUY',
+  sourceUrl = ''
+}) {
+  return {
+    id,
+    chain: 'eth',
+    tokenAddress,
+    symbol: 'SAFE',
+    name: 'Safe',
+    logoUrl: '',
+    side,
+    quantity: 1,
+    amountNative: side === 'BUY' ? 1 : 0,
+    observedPriceUsd: 2,
+    executionPriceUsd: 2,
+    marketCapUsd: 0,
+    liquidityUsd: 0,
+    nativePriceUsd: 2_000,
+    nativeSymbol: 'ETH',
+    slippageBps: 0,
+    platformFeeNative: 0,
+    networkFeeNative: 0,
+    realizedPnlNative: 0,
+    realizedPnlUsd: 0,
+    valuationMode: 'PRICE',
+    priceProvenance: 'OBSERVED_PRICE',
+    quoteSource: 'GMGN_NETWORK',
+    sourceUrl,
+    executedAt
+  };
+}
+
+function storageCalibrationFixture({ id, createdAt, tokenAddress = EVM_HISTORY_ADDRESS }) {
+  return {
+    id,
+    chain: 'eth',
+    tokenAddress,
+    reason: 'PRICE',
+    fromPriceUsd: 1,
+    toPriceUsd: 2,
+    fromNativePriceUsd: 2_000,
+    toNativePriceUsd: 2_000,
+    fromSupply: 0,
+    toSupply: 0,
+    quantityBefore: 1,
+    quantityAfter: 1,
+    costBasisNative: 1,
+    createdAt
+  };
+}
+
+function fallbackTradeFixture({ id, tokenAddress, side, executedAt }) {
+  return {
+    ...storageTradeFixture({ id, tokenAddress, side, executedAt }),
+    observedPriceUsd: 0.0000032,
+    executionPriceUsd: 0.0000032,
+    marketCapUsd: 3_200,
+    valuationMode: 'MARKET_CAP',
+    priceProvenance: 'SYNTHETIC_PRICE',
+    quoteSource: 'TANGO_FALLBACK',
+    paperFallback: true,
+    provisional: true,
+    syntheticTokenPrice: true,
+    syntheticNativePrice: false,
+    totalSupply: 1_000_000_000,
+    marketCapDivisor: 1_000_000_000,
+    provisionalSupply: 1_000_000_000,
+    provisionalSupplyProvenance: 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1',
+    supplySource: 'UNKNOWN_FALLBACK',
+    launchpad: '',
+    launchMode: '',
+    quoteObservedAtOriginal: executedAt,
+    nativePriceObservedAtOriginal: executedAt
+  };
+}
+
+function openFallbackPosition(tokenAddress, openedAt, updatedAt) {
+  return {
+    chain: 'eth',
+    tokenAddress,
+    symbol: 'OPEN',
+    name: 'Open',
+    logoUrl: '',
+    quantity: 1,
+    costBasisNative: 1,
+    averageEntryPriceUsd: 0.0000032,
+    averageEntryMarketCap: 3_200,
+    realizedPnlNative: 0,
+    lastPriceUsd: 0.0000032,
+    lastMarketCapUsd: 3_200,
+    lastNativePriceUsd: 2_000,
+    openedAt,
+    quoteObservedAt: updatedAt,
+    updatedAt,
+    valuationMode: 'MARKET_CAP',
+    marketCapDivisor: 1_000_000_000,
+    lastPriceProvenance: 'SYNTHETIC_PRICE',
+    averageEntryPriceProvenance: 'SYNTHETIC_PRICE',
+    paperFallback: true,
+    provisional: true,
+    syntheticTokenPrice: true,
+    syntheticNativePrice: false,
+    totalSupply: 1_000_000_000,
+    provisionalSupply: 1_000_000_000,
+    provisionalSupplyProvenance: 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1',
+    supplySource: 'UNKNOWN_FALLBACK',
+    launchpad: '',
+    launchMode: '',
+    needsCalibration: true,
+    provisionalTokenPrice: true,
+    provisionalNativePrice: false,
+    quoteSource: 'TANGO_FALLBACK'
+  };
+}
+
+test('storage compaction measures UTF-8 and uses the stable calibration-first removal key', () => {
+  const settings = State.normalizeSettings({});
+  const state = storageStateFixture();
+  state.accounts.eth.memo = '璐︽埛馃敟';
+  state.trades = [
+    storageTradeFixture({ id: 'a-trade', executedAt: 1_000 }),
+    storageTradeFixture({ id: 'trade-new', executedAt: 2_000 })
+  ];
+  state.calibrations = [
+    storageCalibrationFixture({ id: 'z-cal', createdAt: 1_000 }),
+    storageCalibrationFixture({ id: 'b-cal', createdAt: 1_000 }),
+    storageCalibrationFixture({
+      id: 'z-cal',
+      createdAt: 1_000,
+      tokenAddress: EVM_OPEN_ADDRESS
+    })
+  ];
+  const normalized = State.normalizeState(state, settings);
+  const expected = {
+    ...normalized,
+    calibrations: [normalized.calibrations[2]]
+  };
+  const before = structuredClone(state);
+
+  const result = StateCoordinator.compactStateForStorage(state, settings, {
+    budgetBytes: stateBytes(expected)
+  });
+
+  assert.equal(StateCoordinator.serializedStateBytes(state), stateBytes(state));
+  assert.equal(result.measuredBytes, stateBytes(expected));
+  assert.deepEqual(result.state, expected);
+  assert.deepEqual(result.removedCalibrationIds, ['b-cal', 'z-cal']);
+  assert.equal(result.state.calibrations[0].tokenAddress, EVM_OPEN_ADDRESS);
+  assert.deepEqual(result.removedTradeIds, []);
+  assert.deepEqual(state, before);
+});
+
+test('storage compaction removes a closed fallback unit atomically and retains an open unit closure', () => {
+  const settings = State.normalizeSettings({});
+  const state = storageStateFixture();
+  state.trades = [
+    fallbackTradeFixture({ id: 'open-dependent', tokenAddress: EVM_OPEN_ADDRESS, side: 'SELL', executedAt: 250 }),
+    fallbackTradeFixture({ id: 'open-origin', tokenAddress: EVM_OPEN_ADDRESS, side: 'BUY', executedAt: 200 }),
+    fallbackTradeFixture({ id: 'closed-dependent', tokenAddress: EVM_HISTORY_ADDRESS, side: 'SELL', executedAt: 150 }),
+    fallbackTradeFixture({ id: 'closed-origin', tokenAddress: EVM_HISTORY_ADDRESS, side: 'BUY', executedAt: 100 })
+  ];
+  state.positions[`eth:${EVM_OPEN_ADDRESS}`] = openFallbackPosition(EVM_OPEN_ADDRESS, 200, 250);
+  assert.doesNotThrow(() => State.normalizeState(state, settings, { strict: true }));
+  const expected = State.normalizeState({
+    ...state,
+    trades: state.trades.filter(({ tokenAddress }) => tokenAddress === EVM_OPEN_ADDRESS)
+  }, settings, { strict: true });
+
+  const result = StateCoordinator.compactStateForStorage(state, settings, {
+    budgetBytes: stateBytes(expected)
+  });
+
+  assert.deepEqual(result.removedTradeIds, ['closed-origin', 'closed-dependent']);
+  assert.deepEqual(result.state.trades.map(({ id }) => id), ['open-dependent', 'open-origin']);
+  assert.doesNotThrow(() => State.normalizeState(
+    structuredClone(result.state), settings, { strict: true }
+  ));
+});
+
 test('coordinator preserves a coherent observed market cap on a structured-cloned unknown fallback', async () => {
   const address = '0xa111111111111111111111111111111111111111';
   const initial = State.createInitialState({ now: 1 });

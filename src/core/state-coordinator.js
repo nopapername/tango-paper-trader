@@ -2,6 +2,188 @@
   const Tango = global.Tango = global.Tango || {};
   const TRUSTED_METADATA_SOURCES = new Set(['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK']);
 
+  const UNKNOWN_FALLBACK_SOURCE = 'UNKNOWN_FALLBACK';
+  const UNKNOWN_FALLBACK_PROVENANCE = 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1';
+
+  function utf8TextBytes(value) {
+    const text = String(value);
+    let bytes = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      if (code <= 0x7f) {
+        bytes += 1;
+      } else if (code <= 0x7ff) {
+        bytes += 2;
+      } else if (code >= 0xd800 && code <= 0xdbff
+        && index + 1 < text.length
+        && text.charCodeAt(index + 1) >= 0xdc00
+        && text.charCodeAt(index + 1) <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    }
+    return bytes;
+  }
+
+  function serializedStateBytes(state) {
+    return utf8TextBytes(JSON.stringify(state));
+  }
+
+  function storageBudgetError(code, measuredBytes, budgetBytes, cause) {
+    const error = new Error(code);
+    error.name = 'TangoStorageBudgetError';
+    error.code = code;
+    error.measuredBytes = Number(measuredBytes);
+    error.budgetBytes = Number(budgetBytes);
+    if (cause !== undefined) error.cause = cause;
+    return error;
+  }
+
+  function historyRecordKey(collection, record, originalIndex) {
+    const timestamp = Number(collection === 'calibration' ? record.createdAt : record.executedAt);
+    return {
+      timestamp: Number.isSafeInteger(timestamp) && timestamp >= 0
+        ? timestamp
+        : Number.MAX_SAFE_INTEGER,
+      priority: collection === 'calibration' ? 0 : 1,
+      id: String(record.id || ''),
+      originalIndex
+    };
+  }
+
+  function compareHistoryKeys(left, right) {
+    if (left.timestamp !== right.timestamp) return left.timestamp - right.timestamp;
+    if (left.priority !== right.priority) return left.priority - right.priority;
+    if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+    return left.originalIndex - right.originalIndex;
+  }
+
+  function durableFallbackKey(trade) {
+    return trade?.supplySource === UNKNOWN_FALLBACK_SOURCE
+      && trade?.provisionalSupplyProvenance === UNKNOWN_FALLBACK_PROVENANCE
+      ? `${trade.chain}:${trade.tokenAddress}`
+      : '';
+  }
+
+  function arrayContentsBytes(entries) {
+    if (!entries.length) return 0;
+    return entries.reduce((sum, entry) => sum + entry.bytes, 0) + entries.length - 1;
+  }
+
+  function compactStateForStorage(state, settings, options = {}) {
+    const budgetBytes = Number(options.budgetBytes ?? Tango.STATE_STORAGE_BUDGET_BYTES);
+    if (!Number.isSafeInteger(budgetBytes) || budgetBytes <= 0) {
+      throw new Error('invalidStorageBudget');
+    }
+    const normalized = Tango.State.normalizeState(state, settings);
+    const protectedTradeIndexes = new Set(options.protectedTradeIndexes || []);
+    const protectedCalibrationIndexes = new Set(options.protectedCalibrationIndexes || []);
+    const openFallbackKeys = new Set(Object.values(normalized.positions || {})
+      .filter((position) => position?.supplySource === UNKNOWN_FALLBACK_SOURCE)
+      .map((position) => `${position.chain}:${position.tokenAddress}`));
+    const removedTradeIndexes = new Set();
+    const removedCalibrationIndexes = new Set();
+    const removedTradeIds = [];
+    const removedCalibrationIds = [];
+    const fallbackUnits = new Map();
+    const units = [];
+
+    const tradeEntries = normalized.trades.map((record, originalIndex) => ({
+      collection: 'trade',
+      record,
+      originalIndex,
+      key: historyRecordKey('trade', record, originalIndex),
+      bytes: utf8TextBytes(JSON.stringify(record))
+    }));
+    const calibrationEntries = normalized.calibrations.map((record, originalIndex) => ({
+      collection: 'calibration',
+      record,
+      originalIndex,
+      key: historyRecordKey('calibration', record, originalIndex),
+      bytes: utf8TextBytes(JSON.stringify(record))
+    }));
+
+    for (const entry of tradeEntries) {
+      const dependencyKey = durableFallbackKey(entry.record);
+      if (!dependencyKey) {
+        units.push({ entries: [entry], protected: protectedTradeIndexes.has(entry.originalIndex) });
+        continue;
+      }
+      const unit = fallbackUnits.get(dependencyKey) || {
+        entries: [],
+        protected: openFallbackKeys.has(dependencyKey)
+      };
+      unit.entries.push(entry);
+      unit.protected = unit.protected || protectedTradeIndexes.has(entry.originalIndex);
+      fallbackUnits.set(dependencyKey, unit);
+    }
+    units.push(...fallbackUnits.values());
+    units.push(...calibrationEntries.map((entry) => ({
+      entries: [entry],
+      protected: protectedCalibrationIndexes.has(entry.originalIndex)
+    })));
+    for (const unit of units) {
+      unit.entries.sort((left, right) => compareHistoryKeys(left.key, right.key));
+      unit.key = unit.entries[0].key;
+    }
+    const candidates = units
+      .filter((unit) => !unit.protected)
+      .sort((left, right) => compareHistoryKeys(left.key, right.key));
+
+    const baseState = { ...normalized, trades: [], calibrations: [] };
+    let measuredBytes = serializedStateBytes(baseState)
+      + arrayContentsBytes(tradeEntries)
+      + arrayContentsBytes(calibrationEntries);
+    let remainingTrades = tradeEntries.length;
+    let remainingCalibrations = calibrationEntries.length;
+
+    for (const unit of candidates) {
+      if (measuredBytes <= budgetBytes) break;
+      const trades = unit.entries.filter(({ collection }) => collection === 'trade');
+      const calibrations = unit.entries.filter(({ collection }) => collection === 'calibration');
+      if (trades.length) {
+        const after = remainingTrades - trades.length;
+        measuredBytes -= trades.reduce((sum, entry) => sum + entry.bytes, 0)
+          + Math.max(remainingTrades - 1, 0) - Math.max(after - 1, 0);
+        remainingTrades = after;
+        for (const entry of trades) {
+          removedTradeIndexes.add(entry.originalIndex);
+          removedTradeIds.push(String(entry.record.id));
+        }
+      }
+      if (calibrations.length) {
+        const after = remainingCalibrations - calibrations.length;
+        measuredBytes -= calibrations.reduce((sum, entry) => sum + entry.bytes, 0)
+          + Math.max(remainingCalibrations - 1, 0) - Math.max(after - 1, 0);
+        remainingCalibrations = after;
+        for (const entry of calibrations) {
+          removedCalibrationIndexes.add(entry.originalIndex);
+          removedCalibrationIds.push(String(entry.record.id));
+        }
+      }
+    }
+
+    const compacted = {
+      ...normalized,
+      trades: normalized.trades.filter((_, index) => !removedTradeIndexes.has(index)),
+      calibrations: normalized.calibrations.filter((_, index) => !removedCalibrationIndexes.has(index))
+    };
+    measuredBytes = serializedStateBytes(compacted);
+    if (measuredBytes > budgetBytes) {
+      throw storageBudgetError('storageFull', measuredBytes, budgetBytes);
+    }
+    Tango.State.normalizeState(compacted, settings, { strict: true });
+    return {
+      state: compacted,
+      measuredBytes,
+      budgetBytes,
+      removedTradeIds,
+      removedCalibrationIds
+    };
+  }
+
   function canonicalizeFallbackOrder(order, executionNow) {
     const quote = order?.quote;
     const token = order?.token;
@@ -367,6 +549,6 @@
     return { getAll, mutate };
   }
 
-  Tango.StateCoordinator = { create };
+  Tango.StateCoordinator = { create, serializedStateBytes, compactStateForStorage };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.StateCoordinator;
 })(globalThis);
