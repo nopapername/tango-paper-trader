@@ -23,11 +23,15 @@ function loadChartBridge({
   referrer = '',
   topHref = '',
   topAccessible = true,
-  frameInTradingView = false
+  frameInTradingView = false,
+  canvasRect: initialCanvasRect = { left: 0, top: 0, width: 1_200, height: 700 },
+  viewport: initialViewport = { width: 1_200, height: 800 }
 } = {}) {
   const listeners = new Map();
   const parentMessages = [];
   const clock = { now: 1_000 };
+  const canvasRect = { ...initialCanvasRect };
+  const viewport = { ...initialViewport };
   const defaultFrameContext = {
     axisHint: 'UNKNOWN',
     frameGeneration: 1,
@@ -80,7 +84,8 @@ function loadChartBridge({
           frameContext: typeof activeFrameContext === 'undefined' ? null : activeFrameContext,
           markerPositions: [...markerPositions], markerEconomicCoordinateCount: markerEconomicCoordinates.size,
           overlayChildren: overlay?.childElementCount || 0,
-          overlayTops: overlay?.children?.map((node) => node.style.top) || []
+          overlayTops: overlay?.children?.map((node) => node.style.top) || [],
+          overlayStyles: overlay?.children?.map((node) => ({ ...node.style })) || []
         };
       },
       trackedCanvasCount() { return labelsByCanvas.size; },
@@ -89,9 +94,14 @@ function loadChartBridge({
       seedAxisRecords(context, samples) {
         const id = canvasId(context.canvas);
         const records = new Map();
+        const observedRect = context.canvas.getBoundingClientRect();
+        const observedSourceSignature = typeof sourceObservationSignature === 'function'
+          ? sourceObservationSignature(observedRect)
+          : '';
         samples.forEach((sample) => records.set(sample.text, {
           text: sample.text, value: parseNumber(sample.text), y: sample.y, x: 950, id,
-          generation: sample.generation, sequence: ++axisLabelSequence, updatedAt: sample.updatedAt
+          generation: sample.generation, sequence: ++axisLabelSequence, updatedAt: sample.updatedAt,
+          sourceObservationSignature: observedSourceSignature
         }));
         labelsByCanvas.set(id, { canvas: context.canvas, records });
       },
@@ -103,7 +113,7 @@ function loadChartBridge({
   const context = {
     console, Date: FakeDate, Map, WeakMap, Set, Math, Number,
     location, URL,
-    innerWidth: 1200, innerHeight: 800,
+    innerWidth: viewport.width, innerHeight: viewport.height,
     CanvasRenderingContext2D: FakeCanvasRenderingContext2D,
     document: {
       body: makeElement(), documentElement: makeElement(), createElement: makeElement, referrer
@@ -133,7 +143,7 @@ function loadChartBridge({
   require('node:vm').runInNewContext(instrumented, context.window, { filename: 'src/content/chart-main.js' });
   const canvas = {
     isConnected: true, width: 1_000, height: 700,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_200, height: 700 })
+    getBoundingClientRect: () => ({ ...canvasRect })
   };
   const canvasContext = new FakeCanvasRenderingContext2D(canvas);
   return {
@@ -162,6 +172,12 @@ function loadChartBridge({
       });
     },
     setHref: (nextHref) => { location.href = nextHref; },
+    setCanvasRect(next) { Object.assign(canvasRect, next); },
+    setViewport(next) {
+      Object.assign(viewport, next);
+      context.window.innerWidth = viewport.width;
+      context.window.innerHeight = viewport.height;
+    },
     resize: () => listeners.get('resize')(),
     clear: () => canvasContext.clearRect(0, 0, canvas.width, canvas.height),
     createCanvasContext: () => {
@@ -845,7 +861,8 @@ test('an empty marker payload clears overlay and every cached chart placement', 
     markerPositions: [],
     markerEconomicCoordinateCount: 0,
     overlayChildren: 0,
-    overlayTops: []
+    overlayTops: [],
+    overlayStyles: []
   });
 });
 
@@ -1089,26 +1106,31 @@ test('same marker id follows a changed economic value below the jitter deadband'
   assert.equal(chart.api.snapshot().overlayTops[0], '298px');
 });
 
-test('same marker id reuses its prior Y when an unchanged linear axis shifts exactly 2px', () => {
+test('unchanged economics and plot bounds retain the visual deadband for a two pixel fit jitter', () => {
   const chart = loadChartBridge();
   for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
     chart.api.record(chart.canvasContext, text, 950, y);
   }
-  chart.message({
-    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
-    payload: {
-      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
-      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
-    }
+  const payload = {
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 1.5,
+    currentMarketCap: 0,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 1.5, label: 'Paper Buy' }]
+  };
+  chart.markers(payload, {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
   });
-  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+  const firstTop = chart.api.snapshot().overlayTops[0];
 
-  for (const [text, y] of [['$1', 402], ['$2', 302], ['$3', 202]]) {
+  for (const [text, y] of [['$1', 400], ['$2', 302], ['$3', 200]]) {
     chart.api.record(chart.canvasContext, text, 950, y);
   }
   chart.api.render();
 
-  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+  assert.equal(chart.api.snapshot().overlayTops[0], firstTop);
 });
 
 test('economic cache prunes a removed marker before that id reappears', () => {
@@ -1328,6 +1350,110 @@ test('current right-axis labels place a $6.028K marker near the $6.02K scale', (
   });
   const top = Number.parseInt(chart.api.snapshot().overlayTops[0], 10);
   assert.ok(top >= 270 && top <= 300, `expected current-scale y near 286, got ${top}`);
+});
+
+test('a factual marker appears only while its projection is inside current plot bounds', () => {
+  const chart = loadChartBridge({
+    canvasRect: { left: 20, top: 180, width: 1_000, height: 420 },
+    viewport: { width: 1_200, height: 800 }
+  });
+  chart.api.seedAxisRecords(chart.canvasContext, [
+    { text: '$1', y: 400, generation: 0, updatedAt: chart.clock.now },
+    { text: '$2', y: 300, generation: 0, updatedAt: chart.clock.now },
+    { text: '$3', y: 200, generation: 0, updatedAt: chart.clock.now }
+  ]);
+  const payload = {
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 3.5,
+    currentMarketCap: 0,
+    markers: [{
+      id: 'buy',
+      side: 'BUY',
+      marketCap: 0,
+      price: 3.5,
+      label: 'Paper Buy'
+    }]
+  };
+
+  chart.markers(payload, {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  chart.api.seedAxisRecords(chart.canvasContext, [
+    { text: '$3', y: 400, generation: 1, updatedAt: chart.clock.now + 1 },
+    { text: '$4', y: 300, generation: 1, updatedAt: chart.clock.now + 1 },
+    { text: '$5', y: 200, generation: 1, updatedAt: chart.clock.now + 1 }
+  ]);
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '350px');
+
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  chart.api.seedAxisRecords(chart.canvasContext, [
+    { text: '$1', y: 400, generation: 2, updatedAt: chart.clock.now + 2 },
+    { text: '$2', y: 300, generation: 2, updatedAt: chart.clock.now + 2 },
+    { text: '$3', y: 200, generation: 2, updatedAt: chart.clock.now + 2 }
+  ]);
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('line top left and right come from one transformed current source rectangle', () => {
+  const chart = loadChartBridge({
+    canvasRect: { left: 20, top: 40, width: 1_000, height: 350 },
+    viewport: { width: 1_000, height: 800 }
+  });
+  chart.canvasContext.setTransform(1, 0, 0, 2, 0, 0);
+  for (const [text, y] of [['$1', 300], ['$2', 200], ['$3', 100]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+
+  chart.markers({
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 2,
+    currentMarketCap: 0,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+  }, {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+
+  const snapshot = chart.api.snapshot();
+  assert.equal(snapshot.overlayTops[0], '240px');
+  assert.equal(snapshot.overlayStyles[0].left, '20px');
+  assert.equal(snapshot.overlayStyles[0].right, '30px');
+});
+
+test('a moved source rectangle hides the old scale until fresh anchors arrive', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.markers({
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 2,
+    currentMarketCap: 0,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+  }, {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.setCanvasRect({ top: 24 });
+  chart.api.render();
+
+  assert.equal(chart.api.snapshot().stableScale, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
 });
 
 test('token switch rejects still-fresh axis labels captured for the previous token', () => {

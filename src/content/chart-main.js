@@ -53,6 +53,19 @@
     return canvasIds.get(canvas);
   }
 
+  function sourceObservationSignature(rect) {
+    const values = [
+      Number(innerWidth),
+      Number(innerHeight),
+      Number(rect?.left),
+      Number(rect?.top),
+      Number(rect?.width),
+      Number(rect?.height)
+    ];
+    if (!values.every(Number.isFinite)) return '';
+    return values.map((number) => number.toFixed(2)).join(':');
+  }
+
   function recordLabel(context, text, x, y) {
     const value = parseNumber(text);
     if (!(value > 0) || !context?.canvas?.isConnected) return;
@@ -69,6 +82,8 @@
     const clientX = rect.left + point.x * rect.width / Math.max(1, canvas.width);
     const clientY = rect.top + point.y * rect.height / Math.max(1, canvas.height);
     if (!(clientX > innerWidth - 180) || clientY < 35 || clientY > innerHeight - 55) return;
+    const observedSourceSignature = sourceObservationSignature(rect);
+    if (!observedSourceSignature) return;
     const id = canvasId(canvas);
     const clearedAt = canvasClearedAt.get(canvas) || 0;
     const entry = labelsByCanvas.get(id);
@@ -79,7 +94,8 @@
     }
     records.set(String(text), {
       text: String(text), value, y: clientY, x: clientX, id,
-      generation: Number(clearedAt || 0), sequence: ++axisLabelSequence, updatedAt: Date.now()
+      generation: Number(clearedAt || 0), sequence: ++axisLabelSequence, updatedAt: Date.now(),
+      sourceObservationSignature: observedSourceSignature
     });
     if (records.size > 100) {
       const oldest = [...records.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt).slice(0, records.size - 100);
@@ -213,11 +229,76 @@
     });
   }
 
+  function finiteRect(canvas) {
+    if (!canvas?.isConnected) return null;
+    let rect;
+    try { rect = canvas.getBoundingClientRect(); } catch { return null; }
+    const left = Number(rect?.left);
+    const top = Number(rect?.top);
+    const width = Number(rect?.width);
+    const height = Number(rect?.height);
+    if (![left, top, width, height].every(Number.isFinite) || width < 20 || height < 20) return null;
+    return { left, top, right: left + width, bottom: top + height, width, height };
+  }
+
+  function currentSourceGeometry(canvas, points, tickSpacing) {
+    const sourceRect = finiteRect(canvas);
+    const viewport = { width: Number(innerWidth), height: Number(innerHeight) };
+    if (!sourceRect
+      || !Number.isFinite(viewport.width)
+      || !Number.isFinite(viewport.height)
+      || viewport.width <= 0
+      || viewport.height <= 0
+      || !Array.isArray(points)
+      || points.length < 3
+      || !(tickSpacing > 0)) return null;
+    const xs = points.map((point) => Number(point.x)).filter(Number.isFinite);
+    const ys = points.map((point) => Number(point.y)).filter(Number.isFinite);
+    if (xs.length < 3 || ys.length < 3) return null;
+    const plotBounds = {
+      left: Math.max(0, sourceRect.left),
+      right: Math.min(viewport.width, sourceRect.right, Math.min(...xs)),
+      top: Math.max(0, sourceRect.top, Math.min(...ys) - tickSpacing),
+      bottom: Math.min(viewport.height, sourceRect.bottom, Math.max(...ys) + tickSpacing)
+    };
+    if (!(plotBounds.right > plotBounds.left) || !(plotBounds.bottom > plotBounds.top)) return null;
+    return { viewport, sourceRect, plotBounds };
+  }
+
+  function geometrySignature(value) {
+    if (!value) return '';
+    const numbers = [
+      value.viewport.width,
+      value.viewport.height,
+      value.sourceRect.left,
+      value.sourceRect.top,
+      value.sourceRect.width,
+      value.sourceRect.height,
+      value.plotBounds.left,
+      value.plotBounds.right,
+      value.plotBounds.top,
+      value.plotBounds.bottom
+    ];
+    return numbers.map((number) => Number(number).toFixed(2)).join(':');
+  }
+
+  function scaleGeometryIsCurrent(scale) {
+    const entry = labelsByCanvas.get(scale?.sourceId);
+    if (!entry?.canvas?.isConnected) return false;
+    const current = currentSourceGeometry(entry.canvas, scale.points, scale.tickSpacing);
+    return geometrySignature(current) === scale.geometrySignature;
+  }
+
   function selectScale(visibleMarkers = markerState?.markers || []) {
     if (!markerState) return null;
     const now = Date.now();
-    const groups = [...labelsByCanvas.values()].map(({ records }) => [...records.values()])
-      .flatMap((points) => {
+    const groups = [...labelsByCanvas.entries()].flatMap(([sourceId, entry]) => {
+      const currentRect = finiteRect(entry.canvas);
+      const currentObservationSignature = sourceObservationSignature(currentRect);
+      const points = [...entry.records.values()].filter((point) => (
+        point.sourceObservationSignature === currentObservationSignature
+      ));
+      if (!currentObservationSignature || !points.length) return [];
         const latestGeneration = Math.max(0, ...points.map((point) => Number(point.generation || 0)));
         const afterBoundary = points.filter((point) => Number(point.sequence || 0) > markerAxisSequenceFloor);
         const eligibleGroups = [
@@ -228,17 +309,24 @@
         return eligibleGroups.map((eligible) => {
           const deduped = new Map();
           eligible.forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
-          return [...deduped.values()].sort((a, b) => a.y - b.y);
+          return {
+            sourceId,
+            canvas: entry.canvas,
+            points: [...deduped.values()].sort((left, right) => left.y - right.y)
+          };
         });
-      }).filter((points) => points.length >= 3 && new Set(points.map((point) => point.value)).size >= 3)
-      .map((points) => {
-        const linear = robustFit(points, false);
-        const logarithmic = robustFit(points, true);
+      }).filter((group) => group.points.length >= 3
+        && new Set(group.points.map((point) => point.value)).size >= 3)
+      .map((group) => {
+        const linear = robustFit(group.points, false);
+        const logarithmic = robustFit(group.points, true);
         const fit = !linear ? logarithmic : !logarithmic ? linear : linear.error <= logarithmic.error ? linear : logarithmic;
-        const tickSpacing = median(points.slice(1).map((point, index) => Math.abs(point.y - points[index].y)));
-        if (!fit || fit.error > Math.max(4, tickSpacing * 0.18)) return { points, fit: null };
-        return { points, fit, tickSpacing };
-      }).filter((group) => group.fit);
+        const tickSpacing = median(group.points.slice(1)
+          .map((point, index) => Math.abs(point.y - group.points[index].y)));
+        if (!fit || fit.error > Math.max(4, tickSpacing * 0.18)) return { ...group, fit: null };
+        const geometry = currentSourceGeometry(group.canvas, group.points, tickSpacing);
+        return { ...group, fit, tickSpacing, geometry };
+      }).filter((group) => group.fit && group.geometry);
     const modes = [];
     const addPriceMode = (value) => {
       if (Number(value) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(value) });
@@ -260,11 +348,25 @@
       if (permitMarketCap) addMarketCapModes(marker.marketCap);
     });
     const candidates = [];
-    groups.forEach(({ points, fit }) => modes.forEach((mode) => {
+    groups.forEach(({ sourceId, points, fit, tickSpacing, geometry }) => modes.forEach((mode) => {
       const nearest = Math.min(...points.map((point) => Math.abs(Math.log(point.value / mode.current))));
       const span = Math.max(1, points.at(-1).y - points[0].y);
       const score = nearest + Math.min(2, fit.error / span * 8);
-      candidates.push({ ...mode, points, fit, score });
+      candidates.push({
+        ...mode,
+        sourceId,
+        points,
+        fit,
+        tickSpacing,
+        viewport: geometry.viewport,
+        sourceRect: geometry.sourceRect,
+        plotBounds: geometry.plotBounds,
+        geometrySignature: geometrySignature(geometry),
+        axisGeneration: Math.max(...points.map((point) => Number(point.generation || 0))),
+        observedAt: Math.max(...points.map((point) => Number(point.updatedAt || 0))),
+        fitError: fit.error,
+        score
+      });
     }));
     const best = candidates.sort((a, b) => a.score - b.score)[0];
     if (!best) return stableScale;
@@ -284,7 +386,7 @@
       frameGeneration: activeFrameContext.frameGeneration,
       probeId: activeFrameContext.probeId
     };
-    const signature = `${selectedWithContext.frameGeneration}:${selectedWithContext.probeId}:${axisHint}:${selected.type}:${selected.factor}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
+    const signature = `${selectedWithContext.frameGeneration}:${selectedWithContext.probeId}:${axisHint}:${selected.type}:${selected.factor}:${selected.sourceId}:${selected.axisGeneration}:${selected.geometrySignature}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
     const sameMode = stableScale?.type === selected.type
       && stableScale?.factor === selected.factor
       && stableScale?.frameGeneration === selectedWithContext.frameGeneration
@@ -333,10 +435,20 @@
       renderedSignature = '';
       return;
     }
+    if (stableScale && !scaleGeometryIsCurrent(stableScale)) {
+      markerAxisSequenceFloor = axisLabelSequence;
+      clearScaleAndPlacementCaches();
+      return;
+    }
     const scale = selectScale(visibleMarkers);
     if (!scale) {
       if (root.childElementCount) root.replaceChildren();
       renderedSignature = '';
+      return;
+    }
+    if (!scaleGeometryIsCurrent(scale)) {
+      markerAxisSequenceFloor = axisLabelSequence;
+      clearScaleAndPlacementCaches();
       return;
     }
     const nextSignature = `${stableSignature}:${innerWidth}:${innerHeight}:${visibleMarkers.map((marker) =>
@@ -349,21 +461,39 @@
         : Number(marker.price || (markerState.currentPrice * Number(marker.marketCap || 0) / markerState.currentMarketCap) || 0);
       if (!(rawValue > 0)) return;
       const fitX = scale.fit.logarithmic ? Math.log(rawValue) : rawValue;
-      const axisValues = scale.points.map((point) => scale.fit.logarithmic ? Math.log(point.value) : point.value).sort((a, b) => a - b);
-      const axisTick = median(axisValues.slice(1).map((value, index) => Math.abs(value - axisValues[index])));
-      if (axisTick > 0 && (fitX < axisValues[0] - axisTick || fitX > axisValues.at(-1) + axisTick)) return;
       const targetY = scale.fit.slope * fitX + scale.fit.intercept;
-      if (!Number.isFinite(targetY) || targetY < 35 || targetY > innerHeight - 55) return;
+      if (!Number.isFinite(targetY)
+        || targetY < scale.plotBounds.top
+        || targetY > scale.plotBounds.bottom) return;
       const previousY = markerPositions.get(marker.id);
-      const economicCoordinate = `${scale.type}:${scale.factor}:${rawValue}`;
-      const sameEconomicCoordinate = markerEconomicCoordinates.get(marker.id) === economicCoordinate;
-      const y = sameEconomicCoordinate && Number.isFinite(previousY) && Math.abs(previousY - targetY) < 3 ? previousY : targetY;
+      const placementContext = [
+        scale.type,
+        scale.factor,
+        scale.frameGeneration,
+        scale.probeId,
+        scale.sourceId,
+        scale.axisGeneration,
+        scale.geometrySignature,
+        rawValue
+      ].join(':');
+      const sameEconomicCoordinate = markerEconomicCoordinates.get(marker.id) === placementContext;
+      const y = sameEconomicCoordinate
+        && Number.isFinite(previousY)
+        && Math.abs(previousY - targetY) < 3
+        ? previousY
+        : targetY;
       markerPositions.set(marker.id, y);
-      markerEconomicCoordinates.set(marker.id, economicCoordinate);
+      markerEconomicCoordinates.set(marker.id, placementContext);
       const line = document.createElement('div');
       const color = marker.side === 'SELL' ? '#ff6673' : '#42e797';
       Object.assign(line.style, {
-        borderTop: `1px dashed ${color}`, color, left: '0', position: 'fixed', right: '58px', top: `${Math.round(y)}px`, opacity: '.94'
+        borderTop: `1px dashed ${color}`,
+        color,
+        left: `${Math.round(scale.plotBounds.left)}px`,
+        position: 'fixed',
+        right: `${Math.max(0, Math.round(innerWidth - scale.plotBounds.right))}px`,
+        top: `${Math.round(y)}px`,
+        opacity: '.94'
       });
       const label = document.createElement('span');
       Object.assign(label.style, {
