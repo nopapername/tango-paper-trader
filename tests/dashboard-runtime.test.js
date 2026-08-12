@@ -854,6 +854,51 @@ test('CSV exports selected-chain rows while JSON export keeps the full state', a
   assert.deepEqual(backup.state.trades.map((trade) => trade.chain), ['eth', 'bsc']);
 });
 
+test('CSV download neutralizes spreadsheet formulas without changing numbers, escaping, JSON, or state', async () => {
+  const state = stateFixture();
+  const dangerous = [
+    '=HYPERLINK("https://evil.example","x")',
+    '+SUM(1,1)',
+    '-1+1',
+    '@SUM(1,1)',
+    ' \t\u0000=CMD()'
+  ];
+  state.trades = dangerous.map((symbol, index) => ({
+    ...state.trades[0],
+    id: `danger-${index}`,
+    symbol,
+    sourceUrl: index === 0
+      ? '\r\n@SUM(2,2)'
+      : `https://gmgn.ai/eth/token/safe-${index}?a=1,b=2`,
+    realizedPnlNative: -42
+  }));
+  const before = structuredClone(state);
+  const dashboard = await loadDashboard({ initialState: state });
+
+  await dashboard.api.action('export-csv');
+
+  const csvAnchor = dashboard.anchors.at(-1);
+  const csvBlob = dashboard.urls.get(csvAnchor.href);
+  const csv = await csvBlob.text();
+  assert.equal(csvBlob.type, 'text/csv;charset=utf-8');
+  assert.deepEqual([...new Uint8Array(await csvBlob.arrayBuffer()).slice(0, 3)], [0xef, 0xbb, 0xbf]);
+  assert.ok(csv.startsWith('executedAt,'));
+  for (const value of dangerous) {
+    const escaped = `'${value}`.replaceAll('"', '""');
+    assert.ok(csv.includes(`"${escaped}"`), value);
+  }
+  assert.ok(csv.includes(`"'\r\n@SUM(2,2)"`));
+  assert.ok(csv.includes('"https://gmgn.ai/eth/token/safe-1?a=1,b=2"'));
+  assert.ok(csv.includes('"-42"'));
+  assert.equal(csv.includes(`"'-42"`), false);
+  assert.equal(JSON.stringify(dashboard.api.runtime.state), JSON.stringify(before));
+
+  await dashboard.api.action('export-json');
+  const jsonAnchor = dashboard.anchors.at(-1);
+  const backup = JSON.parse(await dashboard.urls.get(jsonAnchor.href).text());
+  assert.deepEqual(backup.state, before);
+});
+
 test('Dashboard preserves native price observation timestamps from the background', async () => {
   const dashboard = await loadDashboard();
   await dashboard.api.refreshNativePrices();
