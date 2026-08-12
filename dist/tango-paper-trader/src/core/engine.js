@@ -905,7 +905,13 @@
     if (!legacyExecutionSupply) delete nextState.positions[key].marketCapProvenance;
     if (!unknownFallbackSupply) delete nextState.positions[key].provisionalSupplyProvenance;
     nextState.trades = [trade, ...(workingState.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
-    return { state: nextState, trade, position: nextState.positions[key] };
+    return {
+      state: nextState,
+      trade,
+      position: nextState.positions[key],
+      calibration: prepared.calibrationStatus === 'CALIBRATED'
+        ? workingState.calibrations[0] : null
+    };
   }
 
   function executeSell(state, order, settings, now = Date.now()) {
@@ -1098,13 +1104,20 @@
     nextState.dailyRealizedByChain[chain][dayKey] = {
       native: roundedNextDayNative, usdAtExecution: roundedNextDayUsdAtExecution
     };
-    return { state: nextState, trade, position: nextState.positions[key] || null };
+    return {
+      state: nextState,
+      trade,
+      position: nextState.positions[key] || null,
+      calibration: prepared.calibrationStatus === 'CALIBRATED'
+        ? workingState.calibrations[0] : null
+    };
   }
 
   function executeCloseAll(state, chain, orders, settings, now = Date.now()) {
     chainAccount(state, chain);
     let nextState = state;
     const trades = [];
+    const calibrations = [];
     const failures = [];
     for (const order of orders || []) {
       if (order?.token?.chain !== chain) {
@@ -1115,11 +1128,12 @@
         const result = executeSell(nextState, { ...order, percent: 100 }, settings, now);
         nextState = result.state;
         trades.push(result.trade);
+        if (result.calibration) calibrations.push(result.calibration);
       } catch (error) {
         failures.push({ order, reason: error?.message || 'invalidQuote' });
       }
     }
-    return { state: nextState, trades, failures };
+    return { state: nextState, trades, calibrations, failures };
   }
 
   function markPosition(position, quote, currentNativePriceUsd) {
@@ -1194,16 +1208,16 @@
     return { assetsUsd, pnlUsd, complete: missingChains.length === 0, missingChains };
   }
 
-  function updatePositionQuote(state, token, quote, now = Date.now()) {
+  function updatePositionQuoteResult(state, token, quote, now = Date.now()) {
     const key = positionKey(token.chain, token.address);
     const validationContext = verifiedLaunchContext(state.positions[key], token);
     if (!state.positions[key]
       || !Number.isSafeInteger(Number(now)) || Number(now) < 0
       || !validateQuote(
         quote, Number(now), Tango.QUOTE_STALE_MS, state.positions[key], validationContext
-      ).ok) return state;
+      ).ok) return { state, calibration: null };
     const calibration = calibratePositionResult(state, token, quote, now);
-    if (calibration.status === 'FAILED') return state;
+    if (calibration.status === 'FAILED') return { state, calibration: null };
     const nextState = structuredCloneSafe(calibration.state);
     const existing = nextState.positions[key];
     const trustedMarketCap = trustedMarketCapQuote(quote, existing);
@@ -1236,7 +1250,15 @@
     if (executionSupply.supplySource !== UNKNOWN_FALLBACK_SOURCE) {
       delete nextState.positions[key].provisionalSupplyProvenance;
     }
-    return nextState;
+    return {
+      state: nextState,
+      calibration: calibration.status === 'CALIBRATED'
+        ? calibration.state.calibrations[0] : null
+    };
+  }
+
+  function updatePositionQuote(state, token, quote, now = Date.now()) {
+    return updatePositionQuoteResult(state, token, quote, now).state;
   }
 
   function updatePositionMetadata(state, token) {
@@ -1281,7 +1303,8 @@
 
   Tango.Engine = {
     round, positionKey, validateQuote, executeBuy, executeSell, executeCloseAll, markPosition,
-    portfolioSummary, chainUsdSummary, globalUsdSummary, updatePositionQuote, updatePositionMetadata, breakevenSellPercent,
+    portfolioSummary, chainUsdSummary, globalUsdSummary, updatePositionQuote, updatePositionQuoteResult,
+    updatePositionMetadata, breakevenSellPercent,
     usesMarketCapValuation, calibratePosition, ruleSupply
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Engine;
