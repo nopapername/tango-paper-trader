@@ -65,7 +65,11 @@ function jsonResponse(body, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => body };
 }
 
-function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
+function loadBackground(
+  fetchImpl,
+  clock = { now: 1_000_000 },
+  { storageSet } = {}
+) {
   const listeners = [];
   const installListeners = [];
   const commandListeners = [];
@@ -95,7 +99,10 @@ function loadBackground(fetchImpl, clock = { now: 1_000_000 }) {
       storage: {
         local: {
           get: async (keys) => Object.fromEntries(keys.filter((key) => key in storageValues).map((key) => [key, structuredClone(storageValues[key])])),
-          set: async (next) => { Object.assign(storageValues, structuredClone(next)); }
+          set: async (next) => {
+            if (storageSet) return storageSet(next, storageValues);
+            Object.assign(storageValues, structuredClone(next));
+          }
         },
         session: { get: async () => ({}), set: async () => undefined }
       }
@@ -116,6 +123,34 @@ function send(loaded, message) {
     if (!handled) resolve({ ok: false, error: 'unhandled' });
   });
 }
+
+test('service worker returns typed storageFull byte details from its coordinator', async () => {
+  let attempts = 0;
+  const loaded = loadBackground(
+    async () => { throw new Error('must not fetch'); },
+    { now: 2_000 },
+    {
+      storageSet: async () => {
+        attempts += 1;
+        const error = new Error('QUOTA_BYTES quota exceeded');
+        error.name = 'QuotaExceededError';
+        throw error;
+      }
+    }
+  );
+
+  const response = await send(loaded, {
+    type: 'TANGO_STORE_MUTATE',
+    command: { type: 'RESET_ALL' }
+  });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error, 'storageFull');
+  assert.equal(response.errorDetails.code, 'storageFull');
+  assert.ok(response.errorDetails.measuredBytes > 0);
+  assert.equal(response.errorDetails.budgetBytes, 8 * 1024 * 1024);
+  assert.equal(attempts, 1);
+});
 
 test('first install opens onboarding exactly once while updates never open it', async () => {
   const loaded = loadBackground(async () => jsonResponse({}));

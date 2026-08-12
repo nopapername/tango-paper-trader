@@ -25,6 +25,23 @@ const nonnegativeFiniteOrZero = (value) => Number.isFinite(Number(value)) && Num
 let onboardingOpened = false;
 let commandTail = Promise.resolve();
 
+function coordinatorFailureResponse(error) {
+  const response = {
+    ok: false,
+    error: error?.message || 'storageFailed'
+  };
+  if (['storageFull', 'importTooLarge'].includes(error?.code)
+    && Number.isSafeInteger(error?.measuredBytes)
+    && Number.isSafeInteger(error?.budgetBytes)) {
+    response.errorDetails = {
+      code: error.code,
+      measuredBytes: error.measuredBytes,
+      budgetBytes: error.budgetBytes
+    };
+  }
+  return response;
+}
+
 chrome.runtime.onInstalled.addListener(async ({ reason } = {}) => {
   if (reason !== 'install' || onboardingOpened) return;
   onboardingOpened = true;
@@ -50,13 +67,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'TANGO_STORE_GET_ALL') {
     stateCoordinator.getAll()
       .then((result) => sendResponse({ ok: true, result }))
-      .catch((error) => sendResponse({ ok: false, error: error?.message || 'storageFailed' }));
+      .catch((error) => sendResponse(coordinatorFailureResponse(error)));
     return true;
   }
   if (message?.type === 'TANGO_STORE_MUTATE') {
     stateCoordinator.mutate(message.command)
       .then((result) => sendResponse({ ok: true, result }))
-      .catch((error) => sendResponse({ ok: false, error: error?.message || 'storageFailed' }));
+      .catch((error) => sendResponse(coordinatorFailureResponse(error)));
     return true;
   }
   if (message?.type === 'TANGO_OPEN_DASHBOARD') {

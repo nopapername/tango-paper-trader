@@ -22,7 +22,18 @@
 
   async function sendCoordinatorMessage(message) {
     const response = await global.chrome.runtime.sendMessage(message);
-    if (!response?.ok) throw new Error(response?.error || 'storageFailed');
+    if (!response?.ok) {
+      const error = new Error(response?.error || 'storageFailed');
+      const details = response?.errorDetails;
+      if (details && ['storageFull', 'importTooLarge'].includes(details.code)
+        && Number.isSafeInteger(details.measuredBytes)
+        && Number.isSafeInteger(details.budgetBytes)) {
+        error.code = details.code;
+        error.measuredBytes = details.measuredBytes;
+        error.budgetBytes = details.budgetBytes;
+      }
+      throw error;
+    }
     return response.result;
   }
 

@@ -38,6 +38,40 @@ const stateBytes = (state) => Buffer.byteLength(JSON.stringify(state), 'utf8');
 const EVM_HISTORY_ADDRESS = '0xa111111111111111111111111111111111111111';
 const EVM_OPEN_ADDRESS = '0xb222222222222222222222222222222222222222';
 
+test('native quota failure becomes one storageFull failure without retry or state change', async () => {
+  const state = storageStateFixture();
+  state.stateRevision = 3;
+  const settings = State.normalizeSettings({});
+  const persistence = memoryPersistence(state, settings);
+  let attempts = 0;
+  const writeRaw = async () => {
+    attempts += 1;
+    const error = new Error('QUOTA_BYTES quota exceeded');
+    error.name = 'QuotaExceededError';
+    throw error;
+  };
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw,
+    now: () => 2_000
+  });
+  const expected = State.resetAll(settings, 2_000);
+  expected.stateRevision = 4;
+
+  await assert.rejects(
+    coordinator.mutate({ type: 'RESET_ALL' }),
+    (error) => {
+      assert.equal(error.code, 'storageFull');
+      assert.equal(error.measuredBytes, stateBytes(expected));
+      assert.equal(error.budgetBytes, 8 * 1024 * 1024);
+      return true;
+    }
+  );
+  assert.equal(attempts, 1);
+  assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], state);
+  assert.deepEqual(persistence.values[global.Tango.SETTINGS_KEY], settings);
+});
+
 function storageStateFixture() {
   const state = State.createInitialState({ now: 1 });
   state.initialized = true;

@@ -25,6 +25,37 @@ function loadStore(overrides = {}) {
   return { store: context.Tango.Store, tango: context.Tango };
 }
 
+test('Store reconstructs typed storage failure details from the service worker', async () => {
+  const chrome = {
+    runtime: {
+      async sendMessage() {
+        return {
+          ok: false,
+          error: 'importTooLarge',
+          errorDetails: {
+            code: 'importTooLarge',
+            measuredBytes: 9_437_184,
+            budgetBytes: 8_388_608
+          }
+        };
+      }
+    },
+    storage: {
+      local: { get: async () => ({}), set: async () => undefined },
+      onChanged: { addListener() {} }
+    }
+  };
+  const { store } = loadStore({ chrome });
+
+  await assert.rejects(store.importData({}), (error) => {
+    assert.equal(error.message, 'importTooLarge');
+    assert.equal(error.code, 'importTooLarge');
+    assert.equal(error.measuredBytes, 9_437_184);
+    assert.equal(error.budgetBytes, 8_388_608);
+    return true;
+  });
+});
+
 test('localStorage fallback notifies subscribers once per scoped settings write', async () => {
   const values = new Map();
   const { store } = loadStore({
