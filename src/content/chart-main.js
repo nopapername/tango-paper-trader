@@ -53,7 +53,15 @@
     return canvasIds.get(canvas);
   }
 
-  function sourceObservationSignature(rect) {
+  function sourceBackingSignature(canvas) {
+    const values = [Number(canvas?.width), Number(canvas?.height)];
+    if (!values.every((number) => Number.isFinite(number) && number > 0)) return '';
+    return values.map((number) => number.toFixed(2)).join(':');
+  }
+
+  function sourceObservationSignature(rect, canvas) {
+    const backingStoreSignature = sourceBackingSignature(canvas);
+    if (!backingStoreSignature) return '';
     const values = [
       Number(innerWidth),
       Number(innerHeight),
@@ -63,7 +71,7 @@
       Number(rect?.height)
     ];
     if (!values.every(Number.isFinite)) return '';
-    return values.map((number) => number.toFixed(2)).join(':');
+    return `${values.map((number) => number.toFixed(2)).join(':')}:${backingStoreSignature}`;
   }
 
   function recordLabel(context, text, x, y) {
@@ -74,15 +82,20 @@
     const rect = cachedRect && Date.now() - cachedRect.updatedAt < 100 ? cachedRect.rect : canvas.getBoundingClientRect();
     if (!cachedRect || cachedRect.rect !== rect) canvasRects.set(canvas, { rect, updatedAt: Date.now() });
     if (rect.width < 20 || rect.height < 20) return;
-    let point = { x: Number(x), y: Number(y) };
+    const rawX = Number(x);
+    const rawY = Number(y);
+    if (![rawX, rawY].every(Number.isFinite)) return;
+    let point;
     try {
       const transform = context.getTransform();
-      point = transform.transformPoint({ x: Number(x), y: Number(y) });
-    } catch {}
+      if (typeof transform?.transformPoint !== 'function') return;
+      point = transform.transformPoint({ x: rawX, y: rawY });
+    } catch { return; }
+    if (![Number(point?.x), Number(point?.y)].every(Number.isFinite)) return;
     const clientX = rect.left + point.x * rect.width / Math.max(1, canvas.width);
     const clientY = rect.top + point.y * rect.height / Math.max(1, canvas.height);
     if (!(clientX > innerWidth - 180) || clientY < 35 || clientY > innerHeight - 55) return;
-    const observedSourceSignature = sourceObservationSignature(rect);
+    const observedSourceSignature = sourceObservationSignature(rect, canvas);
     if (!observedSourceSignature) return;
     const id = canvasId(canvas);
     const clearedAt = canvasClearedAt.get(canvas) || 0;
@@ -165,10 +178,7 @@
         canvasConsumedClearAt.set(this.canvas, clearedAt);
         const id = canvasIds.get(this.canvas);
         if (id) labelsByCanvas.delete(id);
-        if (id && stableScale?.points?.some((point) => point.id === id)) {
-          stableScale = null;
-          stableSignature = '';
-        }
+        if (id && stableScale?.sourceId === id) clearScaleAndPlacementCaches();
       }
       return originalClearRect.call(this, x, y, width, height);
     };
@@ -285,6 +295,7 @@
   function scaleGeometryIsCurrent(scale) {
     const entry = labelsByCanvas.get(scale?.sourceId);
     if (!entry?.canvas?.isConnected) return false;
+    if (sourceBackingSignature(entry.canvas) !== scale.backingStoreSignature) return false;
     const current = currentSourceGeometry(entry.canvas, scale.points, scale.tickSpacing);
     return geometrySignature(current) === scale.geometrySignature;
   }
@@ -294,7 +305,7 @@
     const now = Date.now();
     const groups = [...labelsByCanvas.entries()].flatMap(([sourceId, entry]) => {
       const currentRect = finiteRect(entry.canvas);
-      const currentObservationSignature = sourceObservationSignature(currentRect);
+      const currentObservationSignature = sourceObservationSignature(currentRect, entry.canvas);
       const points = [...entry.records.values()].filter((point) => (
         point.sourceObservationSignature === currentObservationSignature
       ));
@@ -348,7 +359,7 @@
       if (permitMarketCap) addMarketCapModes(marker.marketCap);
     });
     const candidates = [];
-    groups.forEach(({ sourceId, points, fit, tickSpacing, geometry }) => modes.forEach((mode) => {
+    groups.forEach(({ sourceId, canvas, points, fit, tickSpacing, geometry }) => modes.forEach((mode) => {
       const nearest = Math.min(...points.map((point) => Math.abs(Math.log(point.value / mode.current))));
       const span = Math.max(1, points.at(-1).y - points[0].y);
       const score = nearest + Math.min(2, fit.error / span * 8);
@@ -361,6 +372,7 @@
         viewport: geometry.viewport,
         sourceRect: geometry.sourceRect,
         plotBounds: geometry.plotBounds,
+        backingStoreSignature: sourceBackingSignature(canvas),
         geometrySignature: geometrySignature(geometry),
         axisGeneration: Math.max(...points.map((point) => Number(point.generation || 0))),
         observedAt: Math.max(...points.map((point) => Number(point.updatedAt || 0))),
@@ -386,7 +398,7 @@
       frameGeneration: activeFrameContext.frameGeneration,
       probeId: activeFrameContext.probeId
     };
-    const signature = `${selectedWithContext.frameGeneration}:${selectedWithContext.probeId}:${axisHint}:${selected.type}:${selected.factor}:${selected.sourceId}:${selected.axisGeneration}:${selected.geometrySignature}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
+    const signature = `${selectedWithContext.frameGeneration}:${selectedWithContext.probeId}:${axisHint}:${selected.type}:${selected.factor}:${selected.sourceId}:${selected.axisGeneration}:${selected.backingStoreSignature}:${selected.geometrySignature}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
     const sameMode = stableScale?.type === selected.type
       && stableScale?.factor === selected.factor
       && stableScale?.frameGeneration === selectedWithContext.frameGeneration
@@ -457,8 +469,8 @@
     const nodes = [];
     visibleMarkers.forEach((marker) => {
       const rawValue = scale.type === 'MARKET_CAP'
-        ? Number(marker.marketCap || 0) / scale.factor
-        : Number(marker.price || (markerState.currentPrice * Number(marker.marketCap || 0) / markerState.currentMarketCap) || 0);
+        ? Number(marker.marketCap) / scale.factor
+        : Number(marker.price);
       if (!(rawValue > 0)) return;
       const fitX = scale.fit.logarithmic ? Math.log(rawValue) : rawValue;
       const targetY = scale.fit.slope * fitX + scale.fit.intercept;
@@ -473,6 +485,7 @@
         scale.probeId,
         scale.sourceId,
         scale.axisGeneration,
+        scale.backingStoreSignature,
         scale.geometrySignature,
         rawValue
       ].join(':');

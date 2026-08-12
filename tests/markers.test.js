@@ -96,7 +96,7 @@ function loadChartBridge({
         const records = new Map();
         const observedRect = context.canvas.getBoundingClientRect();
         const observedSourceSignature = typeof sourceObservationSignature === 'function'
-          ? sourceObservationSignature(observedRect)
+          ? sourceObservationSignature(observedRect, context.canvas)
           : '';
         samples.forEach((sample) => records.set(sample.text, {
           text: sample.text, value: parseNumber(sample.text), y: sample.y, x: 950, id,
@@ -1403,6 +1403,37 @@ test('a factual marker appears only while its projection is inside current plot 
   assert.equal(chart.api.snapshot().overlayChildren, 0);
 });
 
+test('a PRICE marker missing its factual coordinate cannot be synthesized from the current ratio', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  const frameContext = {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  };
+
+  chart.markers({
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 2,
+    currentMarketCap: 2_000,
+    markers: [{ id: 'missing', side: 'BUY', marketCap: 2_000, price: 0, label: 'Paper Buy' }]
+  }, frameContext);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+
+  chart.markers({
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 2,
+    currentMarketCap: 2_000,
+    markers: [{ id: 'canonical', side: 'BUY', marketCap: 2_000, price: 2, label: 'Paper Buy' }]
+  }, frameContext);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+});
+
 test('line top left and right come from one transformed current source rectangle', () => {
   const chart = loadChartBridge({
     canvasRect: { left: 20, top: 40, width: 1_000, height: 350 },
@@ -1454,6 +1485,37 @@ test('a moved source rectangle hides the old scale until fresh anchors arrive', 
 
   assert.equal(chart.api.snapshot().stableScale, null);
   assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('a backing-store resize with an unchanged CSS rectangle requires fresh anchors', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.markers({
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 2,
+    currentMarketCap: 0,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+  }, {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.canvasContext.canvas.width = 2_000;
+  chart.api.render();
+  assert.equal(chart.api.snapshot().stableScale, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 1_900, y);
+  }
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
 });
 
 test('token switch rejects still-fresh axis labels captured for the previous token', () => {
@@ -1552,6 +1614,32 @@ test('full-canvas clear with no new labels cannot rebuild the old overlay', () =
 
   assert.equal(chart.api.snapshot().stableScale, null);
   assert.equal(chart.api.snapshot().overlayChildren, 0);
+});
+
+test('an active qualifying clear removes the overlay before the next repair tick', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5.8K', 400], ['$6K', 300], ['$6.2K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.message({
+    source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS',
+    payload: {
+      chain: 'bsc', tokenAddress: BSC_ADDRESS, currentMarketCap: 6_028, currentPrice: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 6_028, price: 0, label: 'Paper Buy' }]
+    }
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.canvasContext.clearRect(900, 0, 100, 700);
+  assert.equal(chart.api.snapshot().stableScale, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+
+  for (const [text, y] of [['$5.9K', 420], ['$6.1K', 320], ['$6.3K', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '356px');
 });
 
 test('newest complete axis snapshot after a narrow right-axis clear', () => {
@@ -1826,6 +1914,39 @@ test('a malformed transform cannot trigger the narrow right-axis branch', () => 
   assert.ok(chart.api.snapshot().stableScale);
   assert.equal(chart.api.snapshot().overlayChildren, 1);
   assert.equal(chart.api.snapshot().overlayTops[0], '286px');
+});
+
+test('failed or malformed transform conversion cannot contribute axis anchors', () => {
+  const cases = [
+    ['throwing transform read', () => { throw new Error('transform unavailable'); }],
+    ['missing transformPoint', () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 })],
+    ['non-finite transformed point', () => ({
+      a: 1, b: 0, c: 0, d: 1, e: 0, f: 0,
+      transformPoint: () => ({ x: Number.NaN, y: 300 })
+    })]
+  ];
+
+  for (const [name, getTransform] of cases) {
+    const chart = loadChartBridge();
+    chart.canvasContext.getTransform = getTransform;
+    for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+      chart.api.record(chart.canvasContext, text, 950, y);
+    }
+    chart.markers({
+      chain: 'bsc',
+      tokenAddress: BSC_ADDRESS,
+      currentPrice: 2,
+      currentMarketCap: 0,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }]
+    }, {
+      axisHint: 'PRICE',
+      frameGeneration: 1,
+      probeId: 'test:1'
+    });
+
+    assert.equal(chart.api.snapshot().stableScale, null, name);
+    assert.equal(chart.api.snapshot().overlayChildren, 0, name);
+  }
 });
 
 test('the legacy full-canvas clear remains effective when reading the transform fails', () => {
