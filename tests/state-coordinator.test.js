@@ -1814,6 +1814,141 @@ test('a near-budget quote update protects the newly prepended calibration when i
   assert.deepEqual(persistence.values[global.Tango.STORAGE_KEY], result.state);
 });
 
+test('a full trade history protects the prepended trade when tail truncation consumes its duplicate ID', async () => {
+  const executionNow = 3_000;
+  const duplicateId = `${executionNow}-duplicate`;
+  const state = storageStateFixture();
+  state.trades = Array.from({ length: global.Tango.MAX_TRADES }, (_, index) => storageTradeFixture({
+    id: index === global.Tango.MAX_TRADES - 1
+      ? duplicateId
+      : `z-old-trade-${String(index).padStart(5, '0')}`,
+    executedAt: executionNow
+  }));
+  const settings = State.normalizeSettings({
+    slippageBps: 0,
+    platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 } }
+  });
+  const order = {
+    token: {
+      chain: 'eth',
+      address: '0xc333333333333333333333333333333333333333',
+      symbol: 'CURRENT'
+    },
+    quote: {
+      priceUsd: 2,
+      nativePriceUsd: 2_000,
+      observedAt: executionNow,
+      nativePriceObservedAt: executionNow,
+      source: 'GMGN_NETWORK',
+      valuationMode: 'PRICE',
+      priceProvenance: 'OBSERVED_PRICE'
+    },
+    amountNative: 1
+  };
+  const normalizedState = State.normalizeState(state, settings);
+  const uncommitted = await withRandomUUID('duplicate', () => Promise.resolve(
+    Engine.executeBuy(normalizedState, order, settings, executionNow).state
+  ));
+  uncommitted.stateRevision = state.stateRevision + 1;
+  const normalized = State.normalizeState(uncommitted, settings);
+  const budgetBytes = stateBytes(normalized) - 1_024;
+  const persistence = memoryPersistence(state, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => executionNow,
+    stateBudgetBytes: budgetBytes
+  });
+
+  const result = await withRandomUUID('duplicate', () => coordinator.mutate({
+    type: 'EXECUTE_BUY', order
+  }));
+
+  assert.equal(result.trade.id, duplicateId);
+  assert.equal(result.state.trades.some((trade) => (
+    trade.id === duplicateId && trade.symbol === 'TOKEN'
+  )), true);
+  assert.equal(result.state.trades.some(({ id }) => id === 'z-old-trade-00000'), false);
+  assert.ok(stateBytes(result.state) <= budgetBytes);
+});
+
+test('a full calibration history protects the prepended calibration when tail truncation consumes its duplicate ID', async () => {
+  const executionNow = 3_000;
+  const duplicateId = `${executionNow}-duplicate`;
+  const token = {
+    chain: 'eth',
+    address: '0xc333333333333333333333333333333333333333',
+    symbol: 'CURRENT',
+    metadataVerified: true,
+    metadataSource: 'GMGN_NETWORK'
+  };
+  const settings = State.normalizeSettings({
+    slippageBps: 0,
+    platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 } }
+  });
+  const initial = storageStateFixture();
+  const state = await withRandomUUID('initial-buy', () => Promise.resolve(Engine.executeBuy(initial, {
+    token,
+    quote: {
+      priceUsd: 1,
+      nativePriceUsd: 1,
+      observedAt: 1_000,
+      nativePriceObservedAt: 1_000,
+      source: 'TANGO_SYNTHETIC',
+      provisional: true,
+      syntheticTokenPrice: true,
+      syntheticNativePrice: true,
+      valuationMode: 'PRICE',
+      priceProvenance: 'SYNTHETIC_PRICE'
+    },
+    amountNative: 1
+  }, settings, 1_000).state));
+  state.calibrations = Array.from({ length: global.Tango.MAX_TRADES }, (_, index) => (
+    storageCalibrationFixture({
+      id: index === global.Tango.MAX_TRADES - 1
+        ? duplicateId
+        : `z-old-calibration-${String(index).padStart(5, '0')}`,
+      createdAt: executionNow,
+      tokenAddress: token.address
+    })
+  ));
+  const quote = {
+    priceUsd: 2,
+    nativePriceUsd: 3_000,
+    observedAt: executionNow,
+    nativePriceObservedAt: executionNow,
+    source: 'GMGN_NETWORK',
+    valuationMode: 'PRICE',
+    priceProvenance: 'OBSERVED_PRICE'
+  };
+  const normalizedState = State.normalizeState(state, settings);
+  const uncommitted = await withRandomUUID('duplicate', () => Promise.resolve(
+    Engine.updatePositionQuote(normalizedState, token, quote, executionNow)
+  ));
+  uncommitted.stateRevision = state.stateRevision + 1;
+  const normalized = State.normalizeState(uncommitted, settings);
+  const budgetBytes = stateBytes(normalized) - 1_024;
+  const persistence = memoryPersistence(state, settings);
+  const coordinator = StateCoordinator.create({
+    readRaw: persistence.readRaw,
+    writeRaw: persistence.writeRaw,
+    now: () => executionNow,
+    stateBudgetBytes: budgetBytes
+  });
+
+  const result = await withRandomUUID('duplicate', () => coordinator.mutate({
+    type: 'UPDATE_POSITION_QUOTE', token, quote
+  }));
+
+  assert.equal(result.state.calibrations.some((calibration) => (
+    calibration.id === duplicateId && calibration.toPriceUsd === 2
+  )), true);
+  assert.equal(result.state.calibrations.some(({ id }) => id === 'z-old-calibration-00000'), false);
+  assert.ok(stateBytes(result.state) <= budgetBytes);
+});
+
 test('oversized IMPORT reports exact bytes and leaves current state and settings unchanged', async () => {
   const current = storageStateFixture();
   const settings = State.normalizeSettings({ selectedChain: 'eth' });

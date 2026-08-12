@@ -429,12 +429,26 @@
       return { state, settings, migrationPending: migrationPending && migrateInMemory };
     }
 
-    async function commitState(previous, next, settings, { persistSettings = false } = {}) {
+    async function commitState(previous, next, settings, {
+      persistSettings = false,
+      protectedTradeIndexes = [],
+      protectedCalibrationIndexes = []
+    } = {}) {
       const revised = {
         ...next,
         stateRevision: Number(previous.stateRevision || 0) + 1
       };
-      const prepared = prepareState(revised, settings, historyProtection(previous, revised));
+      const detected = historyProtection(previous, revised);
+      const prepared = prepareState(revised, settings, {
+        protectedTradeIndexes: [...new Set([
+          ...detected.protectedTradeIndexes,
+          ...protectedTradeIndexes
+        ])],
+        protectedCalibrationIndexes: [...new Set([
+          ...detected.protectedCalibrationIndexes,
+          ...protectedCalibrationIndexes
+        ])]
+      });
       await writeStored({
         [Tango.STORAGE_KEY]: prepared.state,
         ...(persistSettings ? { [Tango.SETTINGS_KEY]: settings } : {})
@@ -577,16 +591,22 @@
           return { state: prepared.state, settings: nextSettings };
         }
         let result;
+        let protectedTradeIndexes = [];
+        let protectedCalibrationIndexes = [];
         if (command?.type === 'EXECUTE_BUY') {
           const executionNow = now();
           result = Tango.Engine.executeBuy(
             state, canonicalizeFallbackOrder(command.order, executionNow), settings, executionNow
           );
+          protectedTradeIndexes = [0];
+          if (result.calibration) protectedCalibrationIndexes = [0];
         } else if (command?.type === 'EXECUTE_SELL') {
           const executionNow = now();
           result = Tango.Engine.executeSell(
             state, canonicalizeFallbackOrder(command.order, executionNow), settings, executionNow
           );
+          protectedTradeIndexes = [0];
+          if (result.calibration) protectedCalibrationIndexes = [0];
         } else if (command?.type === 'EXECUTE_CLOSE_ALL') {
           const executionNow = now();
           result = Tango.Engine.executeCloseAll(
@@ -596,8 +616,14 @@
             settings,
             executionNow
           );
+          protectedTradeIndexes = result.trades.map((_, index) => index);
+          protectedCalibrationIndexes = result.calibrations.map((_, index) => index);
         } else if (command?.type === 'UPDATE_POSITION_QUOTE') {
-          result = { state: Tango.Engine.updatePositionQuote(state, command.token, command.quote, now()) };
+          const updated = Tango.Engine.updatePositionQuoteResult(
+            state, command.token, command.quote, now()
+          );
+          result = { state: updated.state };
+          if (updated.calibration) protectedCalibrationIndexes = [0];
         } else if (command?.type === 'UPDATE_POSITION_METADATA') {
           result = { state: Tango.Engine.updatePositionMetadata(state, command.token) };
         } else if (command?.type === 'UPDATE_POSITION_METADATA_BATCH') {
@@ -645,7 +671,9 @@
           return { ...result, state: prepared.state };
         }
         const committed = await commitState(state, result.state, settings, {
-          persistSettings: migrationPending
+          persistSettings: migrationPending,
+          protectedTradeIndexes,
+          protectedCalibrationIndexes
         });
         return { ...result, state: committed };
       });
