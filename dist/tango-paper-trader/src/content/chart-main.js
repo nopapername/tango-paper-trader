@@ -14,10 +14,14 @@
   const canvasRects = new WeakMap();
   const canvasClearedAt = new WeakMap();
   const canvasConsumedClearAt = new WeakMap();
+  const workerOwnedCanvases = new WeakSet();
   let nextCanvasId = 1;
   let clearSequence = 0;
   let axisLabelSequence = 0;
   let markerAxisSequenceFloor = 0;
+  let textCallSequence = 0;
+  let frameContextTextFloor = 0;
+  let lastScaleInvalidationReason = '';
   let markerState = null;
   let overlay = null;
   let lastScaleMode = null;
@@ -28,6 +32,37 @@
   const hiddenMarkerIds = new Set();
   const markerPositions = new Map();
   const markerEconomicCoordinates = new Map();
+  const CHART_AXIS_HINTS = new Set(['MARKET_CAP', 'PRICE', 'UNKNOWN']);
+  const CHART_PROBE_ID_MAX_CHARS = 128;
+  const CHART_DIAGNOSTIC_REASONS = new Set([
+    'IDLE',
+    'NO_TEXT_CALLS',
+    'NO_NUMERIC_LABELS',
+    'TOO_FEW_ANCHORS',
+    'STALE_GENERATION',
+    'REJECTED_FIT',
+    'REJECTED_MODE',
+    'SOURCE_DISCONNECTED',
+    'VIEWPORT_CHANGED',
+    'OUT_OF_PLOT',
+    'WORKER_ONLY',
+    'RENDERED'
+  ]);
+  let activeFrameContext = null;
+  let chartDiagnostic = {
+    reason: 'IDLE',
+    axisHint: 'UNKNOWN',
+    frameGeneration: 0
+  };
+
+  function setChartDiagnostic(reason) {
+    const safeReason = CHART_DIAGNOSTIC_REASONS.has(reason) ? reason : 'IDLE';
+    chartDiagnostic = {
+      reason: safeReason,
+      axisHint: activeFrameContext?.axisHint || 'UNKNOWN',
+      frameGeneration: activeFrameContext?.frameGeneration || 0
+    };
+  }
 
   function parseNumber(text) {
     const source = String(text || '').trim();
@@ -50,7 +85,30 @@
     return canvasIds.get(canvas);
   }
 
+  function sourceBackingSignature(canvas) {
+    const values = [Number(canvas?.width), Number(canvas?.height)];
+    if (!values.every((number) => Number.isFinite(number) && number > 0)) return '';
+    return values.map((number) => number.toFixed(2)).join(':');
+  }
+
+  function sourceObservationSignature(rect, canvas) {
+    const backingStoreSignature = sourceBackingSignature(canvas);
+    if (!backingStoreSignature) return '';
+    const values = [
+      Number(innerWidth),
+      Number(innerHeight),
+      Number(rect?.left),
+      Number(rect?.top),
+      Number(rect?.width),
+      Number(rect?.height)
+    ];
+    if (!values.every(Number.isFinite)) return '';
+    return `${values.map((number) => number.toFixed(2)).join(':')}:${backingStoreSignature}`;
+  }
+
   function recordLabel(context, text, x, y) {
+    textCallSequence += 1;
+    if (workerOwnedCanvases.has(context?.canvas)) return;
     const value = parseNumber(text);
     if (!(value > 0) || !context?.canvas?.isConnected) return;
     const canvas = context.canvas;
@@ -58,14 +116,21 @@
     const rect = cachedRect && Date.now() - cachedRect.updatedAt < 100 ? cachedRect.rect : canvas.getBoundingClientRect();
     if (!cachedRect || cachedRect.rect !== rect) canvasRects.set(canvas, { rect, updatedAt: Date.now() });
     if (rect.width < 20 || rect.height < 20) return;
-    let point = { x: Number(x), y: Number(y) };
+    const rawX = Number(x);
+    const rawY = Number(y);
+    if (![rawX, rawY].every(Number.isFinite)) return;
+    let point;
     try {
       const transform = context.getTransform();
-      point = transform.transformPoint({ x: Number(x), y: Number(y) });
-    } catch {}
+      if (typeof transform?.transformPoint !== 'function') return;
+      point = transform.transformPoint({ x: rawX, y: rawY });
+    } catch { return; }
+    if (![Number(point?.x), Number(point?.y)].every(Number.isFinite)) return;
     const clientX = rect.left + point.x * rect.width / Math.max(1, canvas.width);
     const clientY = rect.top + point.y * rect.height / Math.max(1, canvas.height);
     if (!(clientX > innerWidth - 180) || clientY < 35 || clientY > innerHeight - 55) return;
+    const observedSourceSignature = sourceObservationSignature(rect, canvas);
+    if (!observedSourceSignature) return;
     const id = canvasId(canvas);
     const clearedAt = canvasClearedAt.get(canvas) || 0;
     const entry = labelsByCanvas.get(id);
@@ -76,7 +141,8 @@
     }
     records.set(String(text), {
       text: String(text), value, y: clientY, x: clientX, id,
-      generation: Number(clearedAt || 0), sequence: ++axisLabelSequence, updatedAt: Date.now()
+      generation: Number(clearedAt || 0), sequence: ++axisLabelSequence, updatedAt: Date.now(),
+      sourceObservationSignature: observedSourceSignature
     });
     if (records.size > 100) {
       const oldest = [...records.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt).slice(0, records.size - 100);
@@ -126,6 +192,20 @@
     return clearsRightAxis;
   }
 
+  function invalidateCanvasSource(canvas, reason) {
+    const id = canvasIds.get(canvas);
+    const ownedRecords = id ? labelsByCanvas.get(id) : null;
+    const ownedScale = Boolean(id && stableScale?.sourceId === id);
+    const relevantUnselectedSource = !stableScale && Boolean(ownedRecords?.records?.size);
+    const workerReplacedActiveRenderer = reason === 'WORKER_ONLY' && Boolean(stableScale);
+    if (id) labelsByCanvas.delete(id);
+    if (ownedScale || workerReplacedActiveRenderer) clearScaleAndPlacementCaches();
+    if (ownedScale || relevantUnselectedSource || workerReplacedActiveRenderer) {
+      lastScaleInvalidationReason = reason;
+      setChartDiagnostic(reason);
+    }
+  }
+
   const proto = window.CanvasRenderingContext2D?.prototype;
   if (proto) {
     const originalFillText = proto.fillText;
@@ -144,14 +224,22 @@
         const clearedAt = ++clearSequence;
         canvasClearedAt.set(this.canvas, clearedAt);
         canvasConsumedClearAt.set(this.canvas, clearedAt);
-        const id = canvasIds.get(this.canvas);
-        if (id) labelsByCanvas.delete(id);
-        if (id && stableScale?.points?.some((point) => point.id === id)) {
-          stableScale = null;
-          stableSignature = '';
-        }
+        invalidateCanvasSource(this.canvas, 'STALE_GENERATION');
       }
       return originalClearRect.call(this, x, y, width, height);
+    };
+  }
+
+  const canvasProto = window.HTMLCanvasElement?.prototype;
+  if (canvasProto?.transferControlToOffscreen) {
+    const originalTransferControlToOffscreen = canvasProto.transferControlToOffscreen;
+    canvasProto.transferControlToOffscreen = function tangoTransferControlToOffscreen(...args) {
+      const result = originalTransferControlToOffscreen.apply(this, args);
+      workerOwnedCanvases.add(this);
+      markerAxisSequenceFloor = axisLabelSequence;
+      frameContextTextFloor = textCallSequence;
+      invalidateCanvasSource(this, 'WORKER_ONLY');
+      return result;
     };
   }
 
@@ -202,19 +290,116 @@
   function discardDisconnectedCanvasRecords() {
     labelsByCanvas.forEach((entry, id) => {
       if (entry.canvas?.isConnected) return;
+      const ownedScale = stableScale?.sourceId === id;
       labelsByCanvas.delete(id);
-      if (stableScale?.points?.some((point) => point.id === id)) {
-        stableScale = null;
-        stableSignature = '';
-      }
+      if (!ownedScale) return;
+      clearScaleAndPlacementCaches();
+      lastScaleInvalidationReason = 'SOURCE_DISCONNECTED';
+      setChartDiagnostic('SOURCE_DISCONNECTED');
     });
+  }
+
+  function finiteRect(canvas) {
+    if (!canvas?.isConnected) return null;
+    let rect;
+    try { rect = canvas.getBoundingClientRect(); } catch { return null; }
+    const left = Number(rect?.left);
+    const top = Number(rect?.top);
+    const width = Number(rect?.width);
+    const height = Number(rect?.height);
+    if (![left, top, width, height].every(Number.isFinite) || width < 20 || height < 20) return null;
+    return { left, top, right: left + width, bottom: top + height, width, height };
+  }
+
+  function currentSourceGeometry(canvas, points, tickSpacing) {
+    const sourceRect = finiteRect(canvas);
+    const viewport = { width: Number(innerWidth), height: Number(innerHeight) };
+    if (!sourceRect
+      || !Number.isFinite(viewport.width)
+      || !Number.isFinite(viewport.height)
+      || viewport.width <= 0
+      || viewport.height <= 0
+      || !Array.isArray(points)
+      || points.length < 3
+      || !(tickSpacing > 0)) return null;
+    const xs = points.map((point) => Number(point.x)).filter(Number.isFinite);
+    const ys = points.map((point) => Number(point.y)).filter(Number.isFinite);
+    if (xs.length < 3 || ys.length < 3) return null;
+    const plotBounds = {
+      left: Math.max(0, sourceRect.left),
+      right: Math.min(viewport.width, sourceRect.right, Math.min(...xs)),
+      top: Math.max(0, sourceRect.top, Math.min(...ys) - tickSpacing),
+      bottom: Math.min(viewport.height, sourceRect.bottom, Math.max(...ys) + tickSpacing)
+    };
+    if (!(plotBounds.right > plotBounds.left) || !(plotBounds.bottom > plotBounds.top)) return null;
+    return { viewport, sourceRect, plotBounds };
+  }
+
+  function geometrySignature(value) {
+    if (!value) return '';
+    const numbers = [
+      value.viewport.width,
+      value.viewport.height,
+      value.sourceRect.left,
+      value.sourceRect.top,
+      value.sourceRect.width,
+      value.sourceRect.height,
+      value.plotBounds.left,
+      value.plotBounds.right,
+      value.plotBounds.top,
+      value.plotBounds.bottom
+    ];
+    return numbers.map((number) => Number(number).toFixed(2)).join(':');
+  }
+
+  function scaleGeometryIsCurrent(scale) {
+    const entry = labelsByCanvas.get(scale?.sourceId);
+    if (!entry?.canvas?.isConnected) return false;
+    if (sourceBackingSignature(entry.canvas) !== scale.backingStoreSignature) return false;
+    const current = currentSourceGeometry(entry.canvas, scale.points, scale.tickSpacing);
+    return geometrySignature(current) === scale.geometrySignature;
   }
 
   function selectScale(visibleMarkers = markerState?.markers || []) {
     if (!markerState) return null;
+    const postContextTextCalls = textCallSequence - frameContextTextFloor;
+    const postContextNumericLabels = axisLabelSequence - markerAxisSequenceFloor;
+    if (!labelsByCanvas.size && [
+      'WORKER_ONLY', 'SOURCE_DISCONNECTED', 'STALE_GENERATION'
+    ].includes(lastScaleInvalidationReason)) {
+      setChartDiagnostic(lastScaleInvalidationReason);
+      return null;
+    }
+    if (!labelsByCanvas.size && postContextTextCalls <= 0) {
+      setChartDiagnostic('NO_TEXT_CALLS');
+      return null;
+    }
+    if (!labelsByCanvas.size && postContextNumericLabels <= 0) {
+      setChartDiagnostic('NO_NUMERIC_LABELS');
+      return null;
+    }
+    const postBoundaryPoints = [...labelsByCanvas.values()]
+      .flatMap((entry) => [...entry.records.values()])
+      .filter((point) => Number(point.sequence || 0) > markerAxisSequenceFloor);
+    if (lastScaleInvalidationReason === 'WORKER_ONLY' && !postBoundaryPoints.length) {
+      setChartDiagnostic('WORKER_ONLY');
+      return null;
+    }
+    if (postBoundaryPoints.length < 3
+      || new Set(postBoundaryPoints.map((point) => point.value)).size < 3) {
+      setChartDiagnostic(markerAxisSequenceFloor > 0 && postBoundaryPoints.length === 0
+        ? 'STALE_GENERATION'
+        : 'TOO_FEW_ANCHORS');
+      return null;
+    }
     const now = Date.now();
-    const groups = [...labelsByCanvas.values()].map(({ records }) => [...records.values()])
-      .flatMap((points) => {
+    const groups = [...labelsByCanvas.entries()].flatMap(([sourceId, entry]) => {
+      const currentRect = finiteRect(entry.canvas);
+      const currentObservationSignature = sourceObservationSignature(currentRect, entry.canvas);
+      const points = [...entry.records.values()].filter((point) => (
+        point.sourceObservationSignature === currentObservationSignature
+      ));
+      if (!currentObservationSignature || !points.length) return [];
         const latestGeneration = Math.max(0, ...points.map((point) => Number(point.generation || 0)));
         const afterBoundary = points.filter((point) => Number(point.sequence || 0) > markerAxisSequenceFloor);
         const eligibleGroups = [
@@ -225,17 +410,28 @@
         return eligibleGroups.map((eligible) => {
           const deduped = new Map();
           eligible.forEach((point) => deduped.set(Math.round(point.y / 2) * 2, point));
-          return [...deduped.values()].sort((a, b) => a.y - b.y);
+          return {
+            sourceId,
+            canvas: entry.canvas,
+            points: [...deduped.values()].sort((left, right) => left.y - right.y)
+          };
         });
-      }).filter((points) => points.length >= 3 && new Set(points.map((point) => point.value)).size >= 3)
-      .map((points) => {
-        const linear = robustFit(points, false);
-        const logarithmic = robustFit(points, true);
+      }).filter((group) => group.points.length >= 3
+        && new Set(group.points.map((point) => point.value)).size >= 3)
+      .map((group) => {
+        const linear = robustFit(group.points, false);
+        const logarithmic = robustFit(group.points, true);
         const fit = !linear ? logarithmic : !logarithmic ? linear : linear.error <= logarithmic.error ? linear : logarithmic;
-        const tickSpacing = median(points.slice(1).map((point, index) => Math.abs(point.y - points[index].y)));
-        if (!fit || fit.error > Math.max(4, tickSpacing * 0.18)) return { points, fit: null };
-        return { points, fit, tickSpacing };
-      }).filter((group) => group.fit);
+        const tickSpacing = median(group.points.slice(1)
+          .map((point, index) => Math.abs(point.y - group.points[index].y)));
+        if (!fit || fit.error > Math.max(4, tickSpacing * 0.18)) return { ...group, fit: null };
+        const geometry = currentSourceGeometry(group.canvas, group.points, tickSpacing);
+        return { ...group, fit, tickSpacing, geometry };
+      }).filter((group) => group.fit && group.geometry);
+    if (!groups.length) {
+      setChartDiagnostic('REJECTED_FIT');
+      return null;
+    }
     const modes = [];
     const addPriceMode = (value) => {
       if (Number(value) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(value) });
@@ -247,22 +443,46 @@
         }));
       }
     };
-    addPriceMode(markerState.currentPrice);
-    addMarketCapModes(markerState.currentMarketCap);
+    const axisHint = activeFrameContext?.axisHint || 'UNKNOWN';
+    const permitPrice = axisHint !== 'MARKET_CAP';
+    const permitMarketCap = axisHint !== 'PRICE';
+    if (permitPrice) addPriceMode(markerState.currentPrice);
+    if (permitMarketCap) addMarketCapModes(markerState.currentMarketCap);
     visibleMarkers.forEach((marker) => {
-      addPriceMode(marker.price);
-      addMarketCapModes(marker.marketCap);
+      if (permitPrice) addPriceMode(marker.price);
+      if (permitMarketCap) addMarketCapModes(marker.marketCap);
     });
+    if (!modes.length) {
+      setChartDiagnostic('REJECTED_MODE');
+      stableScale = null;
+      stableSignature = '';
+      return null;
+    }
     const candidates = [];
-    groups.forEach(({ points, fit }) => modes.forEach((mode) => {
+    groups.forEach(({ sourceId, canvas, points, fit, tickSpacing, geometry }) => modes.forEach((mode) => {
       const nearest = Math.min(...points.map((point) => Math.abs(Math.log(point.value / mode.current))));
       const span = Math.max(1, points.at(-1).y - points[0].y);
       const score = nearest + Math.min(2, fit.error / span * 8);
-      candidates.push({ ...mode, points, fit, score });
+      candidates.push({
+        ...mode,
+        sourceId,
+        points,
+        fit,
+        tickSpacing,
+        viewport: geometry.viewport,
+        sourceRect: geometry.sourceRect,
+        plotBounds: geometry.plotBounds,
+        backingStoreSignature: sourceBackingSignature(canvas),
+        geometrySignature: geometrySignature(geometry),
+        axisGeneration: Math.max(...points.map((point) => Number(point.generation || 0))),
+        observedAt: Math.max(...points.map((point) => Number(point.updatedAt || 0))),
+        fitError: fit.error,
+        score
+      });
     }));
     const best = candidates.sort((a, b) => a.score - b.score)[0];
-    if (!best) return stableScale;
-    if (best.score >= 1.6) {
+    if (!best || best.score >= 1.6) {
+      setChartDiagnostic('REJECTED_MODE');
       stableScale = null;
       stableSignature = '';
       return null;
@@ -272,10 +492,20 @@
     );
     const selected = previous && previous.score <= best.score + 0.28 ? previous : best;
     lastScaleMode = { type: selected.type, factor: selected.factor };
-    const signature = `${selected.type}:${selected.factor}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
-    const sameMode = stableScale?.type === selected.type && stableScale?.factor === selected.factor;
+    const selectedWithContext = {
+      ...selected,
+      axisHint,
+      frameGeneration: activeFrameContext.frameGeneration,
+      probeId: activeFrameContext.probeId
+    };
+    const signature = `${selectedWithContext.frameGeneration}:${selectedWithContext.probeId}:${axisHint}:${selected.type}:${selected.factor}:${selected.sourceId}:${selected.axisGeneration}:${selected.backingStoreSignature}:${selected.geometrySignature}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
+    const sameMode = stableScale?.type === selected.type
+      && stableScale?.factor === selected.factor
+      && stableScale?.frameGeneration === selectedWithContext.frameGeneration
+      && stableScale?.probeId === selectedWithContext.probeId
+      && stableScale?.axisHint === axisHint;
     if (sameMode && stableSignature === signature) return stableScale;
-    stableScale = selected;
+    stableScale = selectedWithContext;
     stableSignature = signature;
     scaleUpdatedAt = Date.now();
     return stableScale;
@@ -317,10 +547,24 @@
       renderedSignature = '';
       return;
     }
+    if (stableScale && !scaleGeometryIsCurrent(stableScale)) {
+      markerAxisSequenceFloor = axisLabelSequence;
+      lastScaleInvalidationReason = 'VIEWPORT_CHANGED';
+      setChartDiagnostic('VIEWPORT_CHANGED');
+      clearScaleAndPlacementCaches();
+      return;
+    }
     const scale = selectScale(visibleMarkers);
     if (!scale) {
       if (root.childElementCount) root.replaceChildren();
       renderedSignature = '';
+      return;
+    }
+    if (!scaleGeometryIsCurrent(scale)) {
+      markerAxisSequenceFloor = axisLabelSequence;
+      lastScaleInvalidationReason = 'VIEWPORT_CHANGED';
+      setChartDiagnostic('VIEWPORT_CHANGED');
+      clearScaleAndPlacementCaches();
       return;
     }
     const nextSignature = `${stableSignature}:${innerWidth}:${innerHeight}:${visibleMarkers.map((marker) =>
@@ -329,25 +573,47 @@
     const nodes = [];
     visibleMarkers.forEach((marker) => {
       const rawValue = scale.type === 'MARKET_CAP'
-        ? Number(marker.marketCap || 0) / scale.factor
-        : Number(marker.price || (markerState.currentPrice * Number(marker.marketCap || 0) / markerState.currentMarketCap) || 0);
+        ? Number(marker.marketCap) / scale.factor
+        : Number(marker.price);
       if (!(rawValue > 0)) return;
       const fitX = scale.fit.logarithmic ? Math.log(rawValue) : rawValue;
-      const axisValues = scale.points.map((point) => scale.fit.logarithmic ? Math.log(point.value) : point.value).sort((a, b) => a - b);
-      const axisTick = median(axisValues.slice(1).map((value, index) => Math.abs(value - axisValues[index])));
-      if (axisTick > 0 && (fitX < axisValues[0] - axisTick || fitX > axisValues.at(-1) + axisTick)) return;
       const targetY = scale.fit.slope * fitX + scale.fit.intercept;
-      if (!Number.isFinite(targetY) || targetY < 35 || targetY > innerHeight - 55) return;
+      if (!Number.isFinite(targetY)
+        || targetY < scale.plotBounds.top
+        || targetY > scale.plotBounds.bottom) {
+        setChartDiagnostic('OUT_OF_PLOT');
+        return;
+      }
       const previousY = markerPositions.get(marker.id);
-      const economicCoordinate = `${scale.type}:${scale.factor}:${rawValue}`;
-      const sameEconomicCoordinate = markerEconomicCoordinates.get(marker.id) === economicCoordinate;
-      const y = sameEconomicCoordinate && Number.isFinite(previousY) && Math.abs(previousY - targetY) < 3 ? previousY : targetY;
+      const placementContext = [
+        scale.type,
+        scale.factor,
+        scale.frameGeneration,
+        scale.probeId,
+        scale.sourceId,
+        scale.axisGeneration,
+        scale.backingStoreSignature,
+        scale.geometrySignature,
+        rawValue
+      ].join(':');
+      const sameEconomicCoordinate = markerEconomicCoordinates.get(marker.id) === placementContext;
+      const y = sameEconomicCoordinate
+        && Number.isFinite(previousY)
+        && Math.abs(previousY - targetY) < 3
+        ? previousY
+        : targetY;
       markerPositions.set(marker.id, y);
-      markerEconomicCoordinates.set(marker.id, economicCoordinate);
+      markerEconomicCoordinates.set(marker.id, placementContext);
       const line = document.createElement('div');
       const color = marker.side === 'SELL' ? '#ff6673' : '#42e797';
       Object.assign(line.style, {
-        borderTop: `1px dashed ${color}`, color, left: '0', position: 'fixed', right: '58px', top: `${Math.round(y)}px`, opacity: '.94'
+        borderTop: `1px dashed ${color}`,
+        color,
+        left: `${Math.round(scale.plotBounds.left)}px`,
+        position: 'fixed',
+        right: `${Math.max(0, Math.round(innerWidth - scale.plotBounds.right))}px`,
+        top: `${Math.round(y)}px`,
+        opacity: '.94'
       });
       const label = document.createElement('span');
       Object.assign(label.style, {
@@ -379,6 +645,10 @@
     });
     root.replaceChildren(...nodes);
     renderedSignature = nextSignature;
+    if (nodes.length) {
+      lastScaleInvalidationReason = '';
+      setChartDiagnostic('RENDERED');
+    }
   }
 
   const supportedTokenChains = new Set(['sol', 'eth', 'bsc', 'base', 'robinhood', 'xlayer']);
@@ -474,9 +744,53 @@
     return tokenIdentityFromUrl(referrer.href);
   }
 
-  function announceReady(probeId = '') {
+  function normalizedFrameContext(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    if (!CHART_AXIS_HINTS.has(value.axisHint)) return null;
+    if (!Number.isSafeInteger(value.frameGeneration) || value.frameGeneration <= 0) return null;
+    if (typeof value.probeId !== 'string'
+      || !value.probeId
+      || value.probeId.length > CHART_PROBE_ID_MAX_CHARS) return null;
+    return {
+      axisHint: value.axisHint,
+      frameGeneration: value.frameGeneration,
+      probeId: value.probeId
+    };
+  }
+
+  function clearScaleAndPlacementCaches() {
+    lastScaleMode = null;
+    stableScale = null;
+    stableSignature = '';
+    renderedSignature = '';
+    markerPositions.clear();
+    markerEconomicCoordinates.clear();
+    if (overlay?.childElementCount) overlay.replaceChildren();
+  }
+
+  function applyFrameContext(next) {
+    if (!next) return false;
+    if (activeFrameContext && next.frameGeneration < activeFrameContext.frameGeneration) return false;
+    const changed = Boolean(activeFrameContext) && (
+      next.frameGeneration !== activeFrameContext.frameGeneration
+      || next.probeId !== activeFrameContext.probeId
+      || next.axisHint !== activeFrameContext.axisHint
+    );
+    if (changed) {
+      markerAxisSequenceFloor = axisLabelSequence;
+      frameContextTextFloor = textCallSequence;
+      clearScaleAndPlacementCaches();
+    }
+    activeFrameContext = next;
+    return true;
+  }
+
+  function announceReady(probeId = '', frameGeneration = 0) {
     const message = { source: 'TANGO_PAPER_CHART', type: 'READY' };
-    if (probeId) message.probeId = probeId;
+    if (probeId && Number.isSafeInteger(frameGeneration) && frameGeneration > 0) {
+      message.probeId = probeId;
+      message.frameGeneration = frameGeneration;
+    }
     const identity = childTokenIdentity();
     if (identity) message.identity = identity;
     window.parent.postMessage(message, '*');
@@ -488,7 +802,13 @@
       || event.data.source !== 'TANGO_PAPER_PARENT') return;
     if (event.data.type === 'CHART_READY_PROBE') {
       const probeId = typeof event.data.probeId === 'string' ? event.data.probeId : '';
-      if (probeId) announceReady(probeId);
+      const frameGeneration = event.data.frameGeneration;
+      if (probeId
+        && probeId.length <= CHART_PROBE_ID_MAX_CHARS
+        && Number.isSafeInteger(frameGeneration)
+        && frameGeneration > 0) {
+        announceReady(probeId, frameGeneration);
+      }
       return;
     }
     if (event.data.type !== 'CHART_MARKERS') return;
@@ -509,6 +829,9 @@
         || payloadIdentity.address !== childIdentity.address) return;
       nextState = { ...payload, chain: payloadIdentity.chain, tokenAddress: payloadIdentity.address };
     } else if (payload.markers.length || Object.keys(payload).length !== 1) return;
+    const nextFrameContext = normalizedFrameContext(event.data.context);
+    if (!nextFrameContext) return;
+    if (!applyFrameContext(nextFrameContext)) return;
     const hasTokenIdentity = (state) => Boolean(state?.chain && state?.tokenAddress);
     const identityChanged = hasTokenIdentity(markerState)
       && hasTokenIdentity(nextState)
@@ -517,13 +840,8 @@
     if (identityChanged || clearsIdentifiedToken) markerAxisSequenceFloor = axisLabelSequence;
     if (!nextState?.markers?.length
       || identityChanged) {
-      lastScaleMode = null;
-      stableScale = null;
-      stableSignature = '';
-      renderedSignature = '';
+      clearScaleAndPlacementCaches();
       hiddenMarkerIds.clear();
-      markerPositions.clear();
-      markerEconomicCoordinates.clear();
     }
     markerState = nextState;
     renderMarkers();

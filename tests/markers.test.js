@@ -55,6 +55,20 @@ function loadChartBridge({
     }
     setTransform(a, b, c, d, e, f) { this.transform = { a, b, c, d, e, f }; }
   }
+  class FakeHTMLCanvasElement {
+    constructor(rect) {
+      this.isConnected = true;
+      this.width = 1_000;
+      this.height = 700;
+      this.rect = rect;
+      this.transferred = false;
+    }
+    getBoundingClientRect() { return { ...this.rect }; }
+    transferControlToOffscreen() {
+      this.transferred = true;
+      return { width: this.width, height: this.height };
+    }
+  }
   const makeElement = () => {
     const children = [];
     return {
@@ -85,7 +99,10 @@ function loadChartBridge({
           markerPositions: [...markerPositions], markerEconomicCoordinateCount: markerEconomicCoordinates.size,
           overlayChildren: overlay?.childElementCount || 0,
           overlayTops: overlay?.children?.map((node) => node.style.top) || [],
-          overlayStyles: overlay?.children?.map((node) => ({ ...node.style })) || []
+          overlayStyles: overlay?.children?.map((node) => ({ ...node.style })) || [],
+          diagnostic: typeof chartDiagnostic === 'undefined'
+            ? null
+            : JSON.parse(JSON.stringify(chartDiagnostic))
         };
       },
       trackedCanvasCount() { return labelsByCanvas.size; },
@@ -111,9 +128,10 @@ function loadChartBridge({
   );
   const location = { href };
   const context = {
-    console, Date: FakeDate, Map, WeakMap, Set, Math, Number,
+    console, Date: FakeDate, JSON, Map, WeakMap, Set, Math, Number,
     location, URL,
     innerWidth: viewport.width, innerHeight: viewport.height,
+    HTMLCanvasElement: FakeHTMLCanvasElement,
     CanvasRenderingContext2D: FakeCanvasRenderingContext2D,
     document: {
       body: makeElement(), documentElement: makeElement(), createElement: makeElement, referrer
@@ -141,10 +159,7 @@ function loadChartBridge({
   context.window.window = context.window;
   Object.assign(context.window, context);
   require('node:vm').runInNewContext(instrumented, context.window, { filename: 'src/content/chart-main.js' });
-  const canvas = {
-    isConnected: true, width: 1_000, height: 700,
-    getBoundingClientRect: () => ({ ...canvasRect })
-  };
+  const canvas = new FakeHTMLCanvasElement(canvasRect);
   const canvasContext = new FakeCanvasRenderingContext2D(canvas);
   return {
     api: context.window.__chartTest, bridgeInitialized: Boolean(context.window.__tangoPaperChartBridge),
@@ -180,13 +195,9 @@ function loadChartBridge({
     },
     resize: () => listeners.get('resize')(),
     clear: () => canvasContext.clearRect(0, 0, canvas.width, canvas.height),
-    createCanvasContext: () => {
-      const unrelatedCanvas = {
-        isConnected: true, width: 1_000, height: 700,
-        getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_200, height: 700 })
-      };
-      return new FakeCanvasRenderingContext2D(unrelatedCanvas);
-    }
+    createCanvasContext: () => new FakeCanvasRenderingContext2D(
+      new FakeHTMLCanvasElement({ ...canvasRect })
+    )
   };
 }
 
@@ -862,7 +873,8 @@ test('an empty marker payload clears overlay and every cached chart placement', 
     markerEconomicCoordinateCount: 0,
     overlayChildren: 0,
     overlayTops: [],
-    overlayStyles: []
+    overlayStyles: [],
+    diagnostic: { reason: 'IDLE', axisHint: 'UNKNOWN', frameGeneration: 0 }
   });
 });
 
@@ -1994,6 +2006,173 @@ test('replacing the active canvas without a full clear discards its old axis rec
 
   assert.equal(chart.api.snapshot().overlayChildren, 0, 'disconnected canvas records cannot select an axis');
   assert.equal(chart.api.trackedCanvasCount(), 0, 'disconnected canvas history is discarded');
+});
+
+test('MCAP hint with zero text anchors stays hidden with bounded diagnostics', () => {
+  const chart = loadChartBridge();
+  chart.markers({
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 0,
+    currentMarketCap: 6_000,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+  }, {
+    axisHint: 'MARKET_CAP',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+
+  const snapshot = chart.api.snapshot();
+  assert.equal(snapshot.overlayChildren, 0);
+  assert.deepEqual(Object.keys(snapshot.diagnostic).sort(), [
+    'axisHint', 'frameGeneration', 'reason'
+  ]);
+  assert.deepEqual(snapshot.diagnostic, {
+    reason: 'NO_TEXT_CALLS',
+    axisHint: 'MARKET_CAP',
+    frameGeneration: 1
+  });
+  assert.equal(JSON.stringify(snapshot.diagnostic).includes(BSC_ADDRESS), false);
+});
+
+test('a dynamically observed worker handoff clears the current scale and never invents a coordinate', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$5K', 400], ['$6K', 300], ['$7K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.markers({
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 0,
+    currentMarketCap: 6_000,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+  }, {
+    axisHint: 'MARKET_CAP',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().diagnostic.reason, 'RENDERED');
+
+  const workerContext = chart.createCanvasContext();
+  workerContext.canvas.transferControlToOffscreen();
+  chart.api.render();
+
+  const snapshot = chart.api.snapshot();
+  assert.equal(snapshot.stableScale, null);
+  assert.equal(snapshot.overlayChildren, 0);
+  assert.equal(snapshot.diagnostic.reason, 'WORKER_ONLY');
+});
+
+test('out-of-plot source disconnect and viewport changes have distinct diagnostics', async (t) => {
+  const payload = {
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 3.5,
+    currentMarketCap: 0,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 3.5, label: 'Paper Buy' }]
+  };
+  const frameContext = {
+    axisHint: 'PRICE', frameGeneration: 1, probeId: 'test:1'
+  };
+
+  await t.test('out of plot', () => {
+    const chart = loadChartBridge({
+      canvasRect: { left: 20, top: 180, width: 1_000, height: 420 }
+    });
+    chart.api.seedAxisRecords(chart.canvasContext, [
+      { text: '$1', y: 400, generation: 0, updatedAt: chart.clock.now },
+      { text: '$2', y: 300, generation: 0, updatedAt: chart.clock.now },
+      { text: '$3', y: 200, generation: 0, updatedAt: chart.clock.now }
+    ]);
+    chart.markers(payload, frameContext);
+    assert.equal(chart.api.snapshot().diagnostic.reason, 'OUT_OF_PLOT');
+  });
+
+  await t.test('source disconnected', () => {
+    const chart = loadChartBridge();
+    for (const [text, y] of [['$2', 400], ['$3', 300], ['$4', 200]]) {
+      chart.api.record(chart.canvasContext, text, 950, y);
+    }
+    chart.markers(payload, frameContext);
+    chart.canvasContext.canvas.isConnected = false;
+    chart.api.render();
+    assert.equal(chart.api.snapshot().diagnostic.reason, 'SOURCE_DISCONNECTED');
+  });
+
+  await t.test('viewport changed', () => {
+    const chart = loadChartBridge();
+    for (const [text, y] of [['$2', 400], ['$3', 300], ['$4', 200]]) {
+      chart.api.record(chart.canvasContext, text, 950, y);
+    }
+    chart.markers(payload, frameContext);
+    chart.setCanvasRect({ top: 24 });
+    chart.api.render();
+    assert.equal(chart.api.snapshot().diagnostic.reason, 'VIEWPORT_CHANGED');
+  });
+});
+
+test('scale diagnostics distinguish nonnumeric sparse stale fit and mode failures', async (t) => {
+  await t.test('nonnumeric text', () => {
+    const chart = loadChartBridge();
+    chart.canvasContext.fillText('Volume', 950, 300);
+    chart.markers(tiedAxisPayload(), {
+      axisHint: 'PRICE', frameGeneration: 1, probeId: 'test:1'
+    });
+    assert.equal(chart.api.snapshot().diagnostic.reason, 'NO_NUMERIC_LABELS');
+  });
+
+  await t.test('two unique anchors', () => {
+    const chart = loadChartBridge();
+    chart.api.record(chart.canvasContext, '$1', 950, 400);
+    chart.api.record(chart.canvasContext, '$2', 950, 300);
+    chart.markers(tiedAxisPayload(), {
+      axisHint: 'PRICE', frameGeneration: 1, probeId: 'test:1'
+    });
+    assert.equal(chart.api.snapshot().diagnostic.reason, 'TOO_FEW_ANCHORS');
+  });
+
+  await t.test('stale generation', () => {
+    const chart = loadChartBridge();
+    for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+      chart.api.record(chart.canvasContext, text, 950, y);
+    }
+    chart.markers(tiedAxisPayload(), {
+      axisHint: 'PRICE', frameGeneration: 1, probeId: 'test:1'
+    });
+    chart.markers(tiedAxisPayload(), {
+      axisHint: 'PRICE', frameGeneration: 2, probeId: 'test:2'
+    });
+    assert.equal(chart.api.snapshot().diagnostic.reason, 'STALE_GENERATION');
+  });
+
+  await t.test('positive-slope fit', () => {
+    const chart = loadChartBridge();
+    for (const [text, y] of [['$1', 200], ['$2', 300], ['$3', 400]]) {
+      chart.api.record(chart.canvasContext, text, 950, y);
+    }
+    chart.markers(tiedAxisPayload(), {
+      axisHint: 'PRICE', frameGeneration: 1, probeId: 'test:1'
+    });
+    assert.equal(chart.api.snapshot().diagnostic.reason, 'REJECTED_FIT');
+  });
+
+  await t.test('explicit dimension without factual value', () => {
+    const chart = loadChartBridge();
+    for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+      chart.api.record(chart.canvasContext, text, 950, y);
+    }
+    chart.markers({
+      chain: 'bsc',
+      tokenAddress: BSC_ADDRESS,
+      currentPrice: 0,
+      currentMarketCap: 2_000,
+      markers: [{ id: 'buy', side: 'BUY', marketCap: 2_000, price: 0, label: 'Paper Buy' }]
+    }, {
+      axisHint: 'PRICE', frameGeneration: 1, probeId: 'test:1'
+    });
+    assert.equal(chart.api.snapshot().diagnostic.reason, 'REJECTED_MODE');
+  });
 });
 
 test('markerless renders discard repeatedly disconnected canvas histories but retain connected records', () => {

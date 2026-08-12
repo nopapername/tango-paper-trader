@@ -14,10 +14,14 @@
   const canvasRects = new WeakMap();
   const canvasClearedAt = new WeakMap();
   const canvasConsumedClearAt = new WeakMap();
+  const workerOwnedCanvases = new WeakSet();
   let nextCanvasId = 1;
   let clearSequence = 0;
   let axisLabelSequence = 0;
   let markerAxisSequenceFloor = 0;
+  let textCallSequence = 0;
+  let frameContextTextFloor = 0;
+  let lastScaleInvalidationReason = '';
   let markerState = null;
   let overlay = null;
   let lastScaleMode = null;
@@ -30,7 +34,35 @@
   const markerEconomicCoordinates = new Map();
   const CHART_AXIS_HINTS = new Set(['MARKET_CAP', 'PRICE', 'UNKNOWN']);
   const CHART_PROBE_ID_MAX_CHARS = 128;
+  const CHART_DIAGNOSTIC_REASONS = new Set([
+    'IDLE',
+    'NO_TEXT_CALLS',
+    'NO_NUMERIC_LABELS',
+    'TOO_FEW_ANCHORS',
+    'STALE_GENERATION',
+    'REJECTED_FIT',
+    'REJECTED_MODE',
+    'SOURCE_DISCONNECTED',
+    'VIEWPORT_CHANGED',
+    'OUT_OF_PLOT',
+    'WORKER_ONLY',
+    'RENDERED'
+  ]);
   let activeFrameContext = null;
+  let chartDiagnostic = {
+    reason: 'IDLE',
+    axisHint: 'UNKNOWN',
+    frameGeneration: 0
+  };
+
+  function setChartDiagnostic(reason) {
+    const safeReason = CHART_DIAGNOSTIC_REASONS.has(reason) ? reason : 'IDLE';
+    chartDiagnostic = {
+      reason: safeReason,
+      axisHint: activeFrameContext?.axisHint || 'UNKNOWN',
+      frameGeneration: activeFrameContext?.frameGeneration || 0
+    };
+  }
 
   function parseNumber(text) {
     const source = String(text || '').trim();
@@ -75,6 +107,8 @@
   }
 
   function recordLabel(context, text, x, y) {
+    textCallSequence += 1;
+    if (workerOwnedCanvases.has(context?.canvas)) return;
     const value = parseNumber(text);
     if (!(value > 0) || !context?.canvas?.isConnected) return;
     const canvas = context.canvas;
@@ -158,6 +192,20 @@
     return clearsRightAxis;
   }
 
+  function invalidateCanvasSource(canvas, reason) {
+    const id = canvasIds.get(canvas);
+    const ownedRecords = id ? labelsByCanvas.get(id) : null;
+    const ownedScale = Boolean(id && stableScale?.sourceId === id);
+    const relevantUnselectedSource = !stableScale && Boolean(ownedRecords?.records?.size);
+    const workerReplacedActiveRenderer = reason === 'WORKER_ONLY' && Boolean(stableScale);
+    if (id) labelsByCanvas.delete(id);
+    if (ownedScale || workerReplacedActiveRenderer) clearScaleAndPlacementCaches();
+    if (ownedScale || relevantUnselectedSource || workerReplacedActiveRenderer) {
+      lastScaleInvalidationReason = reason;
+      setChartDiagnostic(reason);
+    }
+  }
+
   const proto = window.CanvasRenderingContext2D?.prototype;
   if (proto) {
     const originalFillText = proto.fillText;
@@ -176,11 +224,22 @@
         const clearedAt = ++clearSequence;
         canvasClearedAt.set(this.canvas, clearedAt);
         canvasConsumedClearAt.set(this.canvas, clearedAt);
-        const id = canvasIds.get(this.canvas);
-        if (id) labelsByCanvas.delete(id);
-        if (id && stableScale?.sourceId === id) clearScaleAndPlacementCaches();
+        invalidateCanvasSource(this.canvas, 'STALE_GENERATION');
       }
       return originalClearRect.call(this, x, y, width, height);
+    };
+  }
+
+  const canvasProto = window.HTMLCanvasElement?.prototype;
+  if (canvasProto?.transferControlToOffscreen) {
+    const originalTransferControlToOffscreen = canvasProto.transferControlToOffscreen;
+    canvasProto.transferControlToOffscreen = function tangoTransferControlToOffscreen(...args) {
+      const result = originalTransferControlToOffscreen.apply(this, args);
+      workerOwnedCanvases.add(this);
+      markerAxisSequenceFloor = axisLabelSequence;
+      frameContextTextFloor = textCallSequence;
+      invalidateCanvasSource(this, 'WORKER_ONLY');
+      return result;
     };
   }
 
@@ -231,11 +290,12 @@
   function discardDisconnectedCanvasRecords() {
     labelsByCanvas.forEach((entry, id) => {
       if (entry.canvas?.isConnected) return;
+      const ownedScale = stableScale?.sourceId === id;
       labelsByCanvas.delete(id);
-      if (stableScale?.points?.some((point) => point.id === id)) {
-        stableScale = null;
-        stableSignature = '';
-      }
+      if (!ownedScale) return;
+      clearScaleAndPlacementCaches();
+      lastScaleInvalidationReason = 'SOURCE_DISCONNECTED';
+      setChartDiagnostic('SOURCE_DISCONNECTED');
     });
   }
 
@@ -302,6 +362,36 @@
 
   function selectScale(visibleMarkers = markerState?.markers || []) {
     if (!markerState) return null;
+    const postContextTextCalls = textCallSequence - frameContextTextFloor;
+    const postContextNumericLabels = axisLabelSequence - markerAxisSequenceFloor;
+    if (!labelsByCanvas.size && [
+      'WORKER_ONLY', 'SOURCE_DISCONNECTED', 'STALE_GENERATION'
+    ].includes(lastScaleInvalidationReason)) {
+      setChartDiagnostic(lastScaleInvalidationReason);
+      return null;
+    }
+    if (!labelsByCanvas.size && postContextTextCalls <= 0) {
+      setChartDiagnostic('NO_TEXT_CALLS');
+      return null;
+    }
+    if (!labelsByCanvas.size && postContextNumericLabels <= 0) {
+      setChartDiagnostic('NO_NUMERIC_LABELS');
+      return null;
+    }
+    const postBoundaryPoints = [...labelsByCanvas.values()]
+      .flatMap((entry) => [...entry.records.values()])
+      .filter((point) => Number(point.sequence || 0) > markerAxisSequenceFloor);
+    if (lastScaleInvalidationReason === 'WORKER_ONLY' && !postBoundaryPoints.length) {
+      setChartDiagnostic('WORKER_ONLY');
+      return null;
+    }
+    if (postBoundaryPoints.length < 3
+      || new Set(postBoundaryPoints.map((point) => point.value)).size < 3) {
+      setChartDiagnostic(markerAxisSequenceFloor > 0 && postBoundaryPoints.length === 0
+        ? 'STALE_GENERATION'
+        : 'TOO_FEW_ANCHORS');
+      return null;
+    }
     const now = Date.now();
     const groups = [...labelsByCanvas.entries()].flatMap(([sourceId, entry]) => {
       const currentRect = finiteRect(entry.canvas);
@@ -338,6 +428,10 @@
         const geometry = currentSourceGeometry(group.canvas, group.points, tickSpacing);
         return { ...group, fit, tickSpacing, geometry };
       }).filter((group) => group.fit && group.geometry);
+    if (!groups.length) {
+      setChartDiagnostic('REJECTED_FIT');
+      return null;
+    }
     const modes = [];
     const addPriceMode = (value) => {
       if (Number(value) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(value) });
@@ -358,6 +452,12 @@
       if (permitPrice) addPriceMode(marker.price);
       if (permitMarketCap) addMarketCapModes(marker.marketCap);
     });
+    if (!modes.length) {
+      setChartDiagnostic('REJECTED_MODE');
+      stableScale = null;
+      stableSignature = '';
+      return null;
+    }
     const candidates = [];
     groups.forEach(({ sourceId, canvas, points, fit, tickSpacing, geometry }) => modes.forEach((mode) => {
       const nearest = Math.min(...points.map((point) => Math.abs(Math.log(point.value / mode.current))));
@@ -381,8 +481,8 @@
       });
     }));
     const best = candidates.sort((a, b) => a.score - b.score)[0];
-    if (!best) return stableScale;
-    if (best.score >= 1.6) {
+    if (!best || best.score >= 1.6) {
+      setChartDiagnostic('REJECTED_MODE');
       stableScale = null;
       stableSignature = '';
       return null;
@@ -449,6 +549,8 @@
     }
     if (stableScale && !scaleGeometryIsCurrent(stableScale)) {
       markerAxisSequenceFloor = axisLabelSequence;
+      lastScaleInvalidationReason = 'VIEWPORT_CHANGED';
+      setChartDiagnostic('VIEWPORT_CHANGED');
       clearScaleAndPlacementCaches();
       return;
     }
@@ -460,6 +562,8 @@
     }
     if (!scaleGeometryIsCurrent(scale)) {
       markerAxisSequenceFloor = axisLabelSequence;
+      lastScaleInvalidationReason = 'VIEWPORT_CHANGED';
+      setChartDiagnostic('VIEWPORT_CHANGED');
       clearScaleAndPlacementCaches();
       return;
     }
@@ -476,7 +580,10 @@
       const targetY = scale.fit.slope * fitX + scale.fit.intercept;
       if (!Number.isFinite(targetY)
         || targetY < scale.plotBounds.top
-        || targetY > scale.plotBounds.bottom) return;
+        || targetY > scale.plotBounds.bottom) {
+        setChartDiagnostic('OUT_OF_PLOT');
+        return;
+      }
       const previousY = markerPositions.get(marker.id);
       const placementContext = [
         scale.type,
@@ -538,6 +645,10 @@
     });
     root.replaceChildren(...nodes);
     renderedSignature = nextSignature;
+    if (nodes.length) {
+      lastScaleInvalidationReason = '';
+      setChartDiagnostic('RENDERED');
+    }
   }
 
   const supportedTokenChains = new Set(['sol', 'eth', 'bsc', 'base', 'robinhood', 'xlayer']);
@@ -667,6 +778,7 @@
     );
     if (changed) {
       markerAxisSequenceFloor = axisLabelSequence;
+      frameContextTextFloor = textCallSequence;
       clearScaleAndPlacementCaches();
     }
     activeFrameContext = next;
