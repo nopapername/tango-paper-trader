@@ -396,6 +396,7 @@ function loadContent({
     console: logger,
     Date: FakeDate,
     URL,
+    URLSearchParams,
     Map,
     WeakMap,
     Set,
@@ -564,21 +565,37 @@ function loadContent({
   };
 }
 
-function chartFrame() {
+function chartFrame({
+  widgetOptions = '',
+  isConnected = true,
+  contentDocumentThrows = false
+} = {}) {
   const messages = [];
   const listeners = new Map();
-  return {
+  const attributes = new Map();
+  if (widgetOptions) attributes.set('data-widget-options', widgetOptions);
+  const frame = {
     messages,
+    isConnected,
     contentWindow: { postMessage(message) { messages.push(message); } },
+    getAttribute(name) { return attributes.has(name) ? attributes.get(name) : null; },
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    removeAttribute(name) { attributes.delete(name); },
     addEventListener(type, listener) {
       const current = listeners.get(type) || [];
       current.push(listener);
       listeners.set(type, current);
     },
     dispatch(type) {
-      (listeners.get(type) || []).forEach((listener) => listener({ type, target: this }));
+      (listeners.get(type) || []).forEach((listener) => listener({ type, target: frame }));
     }
   };
+  if (contentDocumentThrows) {
+    Object.defineProperty(frame, 'contentDocument', {
+      get() { throw new Error('contentDocument unavailable'); }
+    });
+  }
+  return frame;
 }
 
 function markerPayloads(frame) {
@@ -593,9 +610,248 @@ function chartReadyProbes(frame) {
   ));
 }
 
+function chartMarkerMessages(frame) {
+  return frame.messages.filter((message) => (
+    message?.source === 'TANGO_PAPER_PARENT' && message?.type === 'CHART_MARKERS'
+  ));
+}
+
+function chartReadyResponse(probe, identity) {
+  const data = {
+    source: 'TANGO_PAPER_CHART',
+    type: 'READY',
+    probeId: probe.probeId,
+    frameGeneration: probe.frameGeneration
+  };
+  if (identity) data.identity = identity;
+  return data;
+}
+
 function chartReadyIdentity(chain, address) {
   return { chain, address };
 }
+
+test('throwing contentDocument still receives its own sanitized MCAP frame context', () => {
+  const widgetOptions = new URLSearchParams({
+    symbol: `eth/${ADDRESS_A}/USD/MCAP`,
+    interval: '1',
+    workers: JSON.stringify({ enabled: true })
+  }).toString();
+  const frame = chartFrame({ widgetOptions, contentDocumentThrows: true });
+  const loaded = loadContent({ chartFrames: [frame] });
+
+  loaded.api.syncChartMarkers(true);
+
+  const message = chartMarkerMessages(frame).at(-1);
+  assert.equal(message.context.axisHint, 'MARKET_CAP');
+  assert.equal(Number.isSafeInteger(message.context.frameGeneration), true);
+  assert.ok(message.context.frameGeneration > 0);
+  assert.equal(typeof message.context.probeId, 'string');
+  assert.ok(message.context.probeId.length > 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(message.payload)), { markers: [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.api.runtime.latestMarkerPayload)), { markers: [] });
+  assert.equal(Object.hasOwn(loaded.api.runtime.latestMarkerPayload, 'axisHint'), false);
+  assert.equal(Object.hasOwn(loaded.api.runtime.latestMarkerPayload, 'frameGeneration'), false);
+});
+
+test('an exact USD symbol produces a PRICE frame hint', () => {
+  const frame = chartFrame({
+    widgetOptions: new URLSearchParams({
+      symbol: `eth/${ADDRESS_A}/USD`
+    }).toString()
+  });
+  const loaded = loadContent({ chartFrames: [frame] });
+
+  loaded.api.syncChartMarkers(true);
+
+  assert.equal(chartMarkerMessages(frame).at(-1).context.axisHint, 'PRICE');
+});
+
+test('invalid frame metadata yields UNKNOWN without changing canonical markers', async (t) => {
+  const cases = [
+    {
+      name: 'duplicate symbol',
+      options: `symbol=eth%2F${ADDRESS_A}%2FUSD&symbol=eth%2F${ADDRESS_A}%2FUSD%2FMCAP`,
+      connected: true
+    },
+    {
+      name: 'wrong token',
+      options: new URLSearchParams({ symbol: `eth/${ADDRESS_B}/USD/MCAP` }).toString(),
+      connected: true
+    },
+    {
+      name: 'ambiguous suffix',
+      options: new URLSearchParams({ symbol: `eth/${ADDRESS_A}/USD/MCAP/PRICE` }).toString(),
+      connected: true
+    },
+    {
+      name: 'malformed percent encoding',
+      options: 'symbol=%E0%A4%A',
+      connected: true
+    },
+    {
+      name: 'oversized metadata',
+      options: `symbol=${'x'.repeat(8_193)}`,
+      connected: true
+    },
+    {
+      name: 'detached frame',
+      options: new URLSearchParams({ symbol: `eth/${ADDRESS_A}/USD/MCAP` }).toString(),
+      connected: false
+    }
+  ];
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, () => {
+      const frame = chartFrame({
+        widgetOptions: fixture.options,
+        isConnected: fixture.connected
+      });
+      const loaded = loadContent({ chartFrames: [frame] });
+      const before = JSON.parse(JSON.stringify(loaded.api.runtime.latestMarkerPayload));
+
+      loaded.api.syncChartMarkers(true);
+
+      const message = chartMarkerMessages(frame).at(-1);
+      assert.equal(message.context.axisHint, 'UNKNOWN');
+      assert.deepEqual(JSON.parse(JSON.stringify(loaded.api.runtime.latestMarkerPayload)), before);
+      assert.deepEqual(JSON.parse(JSON.stringify(message.payload)), before);
+    });
+  }
+});
+
+test('same frame re-reads an axis change without mutating or rebuilding canonical markers', () => {
+  const frame = chartFrame({
+    widgetOptions: new URLSearchParams({
+      symbol: `eth/${ADDRESS_A}/USD/MCAP`
+    }).toString()
+  });
+  const loaded = loadContent({ chartFrames: [frame] });
+  loaded.api.syncChartMarkers(true);
+  const first = chartMarkerMessages(frame).at(-1);
+  const canonical = JSON.parse(JSON.stringify(loaded.api.runtime.latestMarkerPayload));
+
+  frame.setAttribute('data-widget-options', new URLSearchParams({
+    symbol: `eth/${ADDRESS_A}/USD`
+  }).toString());
+  loaded.api.syncChartMarkers();
+
+  const messages = chartMarkerMessages(frame);
+  const second = messages.at(-1);
+  assert.equal(messages.length, 2);
+  assert.equal(first.context.axisHint, 'MARKET_CAP');
+  assert.equal(second.context.axisHint, 'PRICE');
+  assert.equal(second.context.frameGeneration, first.context.frameGeneration);
+  assert.deepEqual(JSON.parse(JSON.stringify(second.payload)), canonical);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.api.runtime.latestMarkerPayload)), canonical);
+});
+
+test('reused frame metadata for the previous route is UNKNOWN in the new route generation', () => {
+  const frame = chartFrame({
+    widgetOptions: new URLSearchParams({
+      symbol: `base/${ADDRESS_A}/USD/MCAP`
+    }).toString()
+  });
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    chartFrames: [frame]
+  });
+  loaded.api.syncChartMarkers(true);
+  const firstGeneration = chartMarkerMessages(frame).at(-1).context.frameGeneration;
+
+  loaded.context.location.href = `https://gmgn.ai/base/token/${ADDRESS_B}`;
+  loaded.api.handleRouteChange();
+
+  const message = chartMarkerMessages(frame).at(-1);
+  assert.ok(message.context.frameGeneration > firstGeneration);
+  assert.equal(message.context.axisHint, 'UNKNOWN');
+  assert.deepEqual(JSON.parse(JSON.stringify(message.payload)), { markers: [] });
+});
+
+test('reload advances frame generation and correlated READY replays only the latest token payload', () => {
+  const frame = chartFrame({
+    widgetOptions: new URLSearchParams({
+      symbol: `base/${ADDRESS_A}/USD/MCAP`
+    }).toString()
+  });
+  const loaded = loadContent({
+    href: `https://gmgn.ai/base/token/${ADDRESS_A}`,
+    chartFrames: [frame]
+  });
+  loaded.api.runtime.current = {
+    token: { chain: 'base', address: ADDRESS_A, symbol: 'A' },
+    quote: {
+      priceUsd: 1,
+      marketCapUsd: 1_000,
+      source: 'GMGN',
+      observedAt: loaded.clock.now
+    }
+  };
+  loaded.api.runtime.state.positions[`base:${ADDRESS_A}`] = {
+    chain: 'base',
+    tokenAddress: ADDRESS_A,
+    symbol: 'A',
+    quantity: 1,
+    averageEntryMarketCap: 1_000,
+    averageEntryPriceUsd: 1
+  };
+  loaded.api.syncChartMarkers(true);
+  const firstMessage = chartMarkerMessages(frame).at(-1);
+  const firstGeneration = firstMessage.context.frameGeneration;
+
+  loaded.context.location.href = `https://gmgn.ai/base/token/${ADDRESS_B}`;
+  loaded.api.runtime.state.positions[`base:${ADDRESS_B}`] = {
+    chain: 'base',
+    tokenAddress: ADDRESS_B,
+    symbol: 'B',
+    quantity: 1,
+    averageEntryMarketCap: 2_000,
+    averageEntryPriceUsd: 2
+  };
+  loaded.api.handleRouteChange();
+  frame.setAttribute('data-widget-options', new URLSearchParams({
+    symbol: `base/${ADDRESS_B}/USD/MCAP`
+  }).toString());
+  frame.dispatch('load');
+
+  const clearMessage = chartMarkerMessages(frame).at(-1);
+  const currentProbe = chartReadyProbes(frame).at(-1);
+  assert.ok(clearMessage.context.frameGeneration > firstGeneration);
+  assert.equal(clearMessage.context.frameGeneration, currentProbe.frameGeneration);
+  assert.deepEqual(JSON.parse(JSON.stringify(clearMessage.payload)), { markers: [] });
+
+  loaded.api.dispatchWindowMessage({
+    source: frame.contentWindow,
+    data: {
+      source: 'TANGO_PAPER_CHART',
+      type: 'READY',
+      probeId: currentProbe.probeId,
+      frameGeneration: firstGeneration,
+      identity: chartReadyIdentity('base', ADDRESS_B)
+    }
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(chartMarkerMessages(frame).at(-1).payload)), { markers: [] });
+
+  loaded.api.runtime.current = {
+    token: { chain: 'base', address: ADDRESS_B, symbol: 'B' },
+    quote: {
+      priceUsd: 2,
+      marketCapUsd: 2_000,
+      source: 'GMGN',
+      observedAt: loaded.clock.now
+    }
+  };
+  loaded.api.dispatchWindowMessage({
+    source: frame.contentWindow,
+    data: chartReadyResponse(currentProbe, chartReadyIdentity('base', ADDRESS_B))
+  });
+
+  const latest = chartMarkerMessages(frame).at(-1);
+  assert.equal(latest.context.frameGeneration, currentProbe.frameGeneration);
+  assert.equal(latest.context.probeId, currentProbe.probeId);
+  assert.equal(latest.payload.tokenAddress, ADDRESS_B);
+  assert.equal(latest.payload.markers[0].id, `entry:base:${ADDRESS_B}`);
+});
 
 function assertOnlyUnscopedCleanup(frame, message) {
   const payloads = markerPayloads(frame);
@@ -629,19 +885,23 @@ test('current-route frame registration and loads probe for READY without marker-
 
   loaded.api.syncChartMarkers(true);
   assert.equal(chartReadyProbes(frame).length, 1, 'first current-route registration probes once');
-  const initialProbeId = chartReadyProbes(frame)[0].probeId;
+  const initialProbe = chartReadyProbes(frame)[0];
+  const initialProbeId = initialProbe.probeId;
   assert.equal(typeof initialProbeId, 'string');
   assert.ok(initialProbeId.length > 0);
 
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: { source: 'TANGO_PAPER_CHART', type: 'READY', probeId: `${initialProbeId}:stale` }
+    data: {
+      ...chartReadyResponse(initialProbe),
+      probeId: `${initialProbeId}:stale`
+    }
   });
   assert.equal(loaded.calls.chartReady.length, 0, 'a mismatched response cannot establish trust');
 
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: { source: 'TANGO_PAPER_CHART', type: 'READY', probeId: initialProbeId }
+    data: chartReadyResponse(initialProbe)
   });
   assert.equal(loaded.calls.chartReady.length, 1, 'the outstanding matching response establishes trust once');
 
@@ -695,10 +955,7 @@ test('retained A stays cleaned while independently verified B receives B markers
   const probe = chartReadyProbes(newFrame).at(-1);
   loaded.api.dispatchWindowMessage({
     source: newFrame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: probe.probeId,
-      identity: chartReadyIdentity('eth', ADDRESS_B)
-    }
+    data: chartReadyResponse(probe, chartReadyIdentity('eth', ADDRESS_B))
   });
   const currentPayload = markerPayloads(newFrame).at(-1);
   assert.equal(currentPayload.tokenAddress, ADDRESS_B);
@@ -770,10 +1027,7 @@ test('an A-era chart frame cannot bind a later route after loading', () => {
   });
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: rebindProbe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_A)
-    }
+    data: chartReadyResponse(rebindProbe, chartReadyIdentity('base', ADDRESS_A))
   });
   assert.equal(loaded.calls.chartReady.length, 0,
     'an untagged or independently A-identified response cannot bind the reused frame to B');
@@ -800,10 +1054,7 @@ test('a chart iframe reused for a new route rebinds only after correlated curren
 
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: probe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_B)
-    }
+    data: chartReadyResponse(probe, chartReadyIdentity('base', ADDRESS_B))
   });
 
   assert.deepEqual(loaded.calls.chartReady.at(-1)?.token, {
@@ -839,21 +1090,21 @@ test('a reused chart iframe rebinds across an SPA route without a load event', (
   });
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: { source: 'TANGO_PAPER_CHART', type: 'READY', probeId: `${routeProbe.probeId}:stale`,
-      identity: chartReadyIdentity('base', ADDRESS_B) }
+    data: {
+      ...chartReadyResponse(routeProbe, chartReadyIdentity('base', ADDRESS_B)),
+      probeId: `${routeProbe.probeId}:stale`
+    }
   });
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: { source: 'TANGO_PAPER_CHART', type: 'READY', probeId: routeProbe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_A) }
+    data: chartReadyResponse(routeProbe, chartReadyIdentity('base', ADDRESS_A))
   });
   assert.equal(loaded.calls.chartReady.length, 0,
     'untagged, mismatched-probe, and A-identified READY remain rejected');
 
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: { source: 'TANGO_PAPER_CHART', type: 'READY', probeId: routeProbe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_B) }
+    data: chartReadyResponse(routeProbe, chartReadyIdentity('base', ADDRESS_B))
   });
 
   assert.deepEqual(loaded.calls.chartReady.at(-1)?.token, { chain: 'base', address: ADDRESS_B });
@@ -893,20 +1144,14 @@ test('a registered chart frame safely rebinds after disappearing during route ad
   });
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: routeProbe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_A)
-    }
+    data: chartReadyResponse(routeProbe, chartReadyIdentity('base', ADDRESS_A))
   });
   assert.equal(loaded.calls.chartReady.length, 0,
     'identityless and A-identified READY cannot promote the rebound frame');
 
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: routeProbe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_B)
-    }
+    data: chartReadyResponse(routeProbe, chartReadyIdentity('base', ADDRESS_B))
   });
 
   assert.deepEqual(loaded.calls.chartReady.at(-1)?.token, { chain: 'base', address: ADDRESS_B });
@@ -939,10 +1184,7 @@ test('a first-seen transition B frame stays quarantined until correlated B ident
     'untagged READY timing alone cannot promote a transition frame');
   loaded.api.dispatchWindowMessage({
     source: newFrame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: firstProbe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_B)
-    }
+    data: chartReadyResponse(firstProbe, chartReadyIdentity('base', ADDRESS_B))
   });
 
   assert.deepEqual({
@@ -988,10 +1230,7 @@ test('mutation reconciliation quarantines a late A frame first observed after th
   const probe = chartReadyProbes(lateAFrame).at(-1);
   loaded.api.dispatchWindowMessage({
     source: lateAFrame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: probe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_A)
-    }
+    data: chartReadyResponse(probe, chartReadyIdentity('base', ADDRESS_A))
   });
 
   assert.equal(loaded.calls.chartReady.length, 0, 'late A identity cannot establish B trust');
@@ -1026,10 +1265,7 @@ test('marker tick registration cannot let a late A frame be sealed to B on route
   const probe = chartReadyProbes(lateAFrame).at(-1);
   loaded.api.dispatchWindowMessage({
     source: lateAFrame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: probe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_A)
-    }
+    data: chartReadyResponse(probe, chartReadyIdentity('base', ADDRESS_A))
   });
 
   assert.equal(loaded.calls.chartReady.length, 0, 'route sealing cannot turn A evidence into B trust');
@@ -1053,10 +1289,7 @@ test('adapter rejection keeps a child-identified transition frame quarantined', 
   const probe = chartReadyProbes(candidateB).at(-1);
   loaded.api.dispatchWindowMessage({
     source: candidateB.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: probe.probeId,
-      identity: chartReadyIdentity('base', ADDRESS_B)
-    }
+    data: chartReadyResponse(probe, chartReadyIdentity('base', ADDRESS_B))
   });
 
   assertOnlyUnscopedCleanup(candidateB,
@@ -1099,10 +1332,7 @@ test('startup READY probe recovers trust when the child document-start READY was
 
     loaded.api.dispatchWindowMessage({
       source: frame.contentWindow,
-      data: {
-        source: 'TANGO_PAPER_CHART', type: 'READY',
-        probeId: chartReadyProbes(frame)[0].probeId
-      }
+      data: chartReadyResponse(chartReadyProbes(frame)[0])
     });
     assert.equal(loaded.calls.chartReady.length, 1, 'the probe response recovers current-route trust');
     assert.deepEqual(loaded.calls.chartReady[0].token, { chain: 'base', address: ADDRESS_A });
@@ -1236,10 +1466,7 @@ test('trench quick buy publishes its entry marker when detail-frame READY arrive
   assert.equal(typeof routeProbe?.probeId, 'string');
   loaded.api.dispatchWindowMessage({
     source: detailFrame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: routeProbe.probeId,
-      identity: chartReadyIdentity('eth', ADDRESS_A)
-    }
+    data: chartReadyResponse(routeProbe, chartReadyIdentity('eth', ADDRESS_A))
   });
   assert.deepEqual(loaded.calls.chartReady.at(-1).token, { chain: 'eth', address: ADDRESS_A });
   assert.equal(markerPayloads(detailFrame).at(-1).markers[0].id, `entry:eth:${ADDRESS_A}`);
@@ -1270,10 +1497,7 @@ test('a quick buy resolving after detail navigation replaces the early empty cha
   const routeProbe = chartReadyProbes(detailFrame).at(-1);
   loaded.api.dispatchWindowMessage({
     source: detailFrame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: routeProbe.probeId,
-      identity: chartReadyIdentity('eth', ADDRESS_A)
-    }
+    data: chartReadyResponse(routeProbe, chartReadyIdentity('eth', ADDRESS_A))
   });
   assert.deepEqual(markerPayloads(detailFrame).at(-1).markers, []);
 
@@ -1438,10 +1662,7 @@ test('the same chart iframe receives the latest marker payload again after its d
   const probe = chartReadyProbes(frame).at(-1);
   loaded.api.dispatchWindowMessage({
     source: frame.contentWindow,
-    data: {
-      source: 'TANGO_PAPER_CHART', type: 'READY', probeId: probe.probeId,
-      identity: chartReadyIdentity('eth', ADDRESS_A)
-    }
+    data: chartReadyResponse(probe, chartReadyIdentity('eth', ADDRESS_A))
   });
   assert.equal(markerPayloads(frame).length, beforeLoad + 2);
   assert.equal(markerPayloads(frame).at(-1).markers[0].id, `entry:eth:${ADDRESS_A}`);

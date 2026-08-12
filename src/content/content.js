@@ -18,6 +18,8 @@
     renderedMarkup: null, markerPayloads: new WeakMap(), markerFrameListeners: new WeakSet(),
     chartFrameRoutes: new WeakMap(), chartFrameReadyBeforeLoad: new WeakSet(),
     chartFrameAwaitingReady: new WeakSet(), chartFrameProbeIds: new WeakMap(), chartProbeSequence: 0,
+    chartFrameGenerations: new WeakMap(), chartFrameReadyProbeIds: new WeakMap(),
+    chartFrameGenerationSequence: 0,
     chartFrameTentative: new WeakSet(),
     latestMarkerPayload: { markers: [] },
     quickBuySyncQueued: false, activeChainId: null,
@@ -174,13 +176,13 @@
       runtime.chartFrameTentative.add(frame);
       runtime.chartFrameReadyBeforeLoad.delete(frame);
       runtime.chartFrameAwaitingReady.delete(frame);
-      runtime.chartFrameProbeIds.delete(frame);
       runtime.markerPayloads.delete(frame);
     });
     runtime.routeEpoch += 1;
     runtime.routeIdentity = nextIdentity;
     framesAwaitingRouteSeal.forEach((frame) => {
       runtime.chartFrameRoutes.set(frame, { epoch: runtime.routeEpoch, identity: nextIdentity });
+      beginChartFrameGeneration(frame);
     });
     Tango.GMGN._clearChartTrust?.();
     framesAwaitingRouteSeal.forEach((frame) => probeChartFrameReady(frame));
@@ -260,10 +262,24 @@
       if (frame) {
         const registrationChanged = registerChartFrame(frame);
         const routeCurrent = routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame));
-        const probeTagged = Object.prototype.hasOwnProperty.call(event.data || {}, 'probeId');
+        const hasProbeId = Object.prototype.hasOwnProperty.call(event.data || {}, 'probeId');
+        const hasFrameGeneration = Object.prototype.hasOwnProperty.call(event.data || {}, 'frameGeneration');
+        const probeTagged = hasProbeId || hasFrameGeneration;
         const probeId = typeof event.data?.probeId === 'string' ? event.data.probeId : '';
-        if (probeTagged
-          && (!routeCurrent || !probeId || runtime.chartFrameProbeIds.get(frame) !== probeId)) return;
+        const frameGeneration = event.data?.frameGeneration;
+        const expectedProbeId = runtime.chartFrameProbeIds.get(frame);
+        const expectedGeneration = runtime.chartFrameGenerations.get(frame);
+        if (probeTagged && (
+          !hasProbeId
+          || !hasFrameGeneration
+          || !routeCurrent
+          || !probeId
+          || probeId.length > CHART_PROBE_ID_MAX_CHARS
+          || !Number.isSafeInteger(frameGeneration)
+          || frameGeneration <= 0
+          || expectedProbeId !== probeId
+          || expectedGeneration !== frameGeneration
+        )) return;
         const tentative = runtime.chartFrameTentative.has(frame);
         const readyIdentity = chartReadyIdentity(event.data?.identity);
         const routeToken = detailRouteToken();
@@ -273,10 +289,13 @@
           if (registrationChanged) replayChartMarkers(frame);
           return;
         }
-        if (routeCurrent) runtime.chartFrameProbeIds.delete(frame);
         if (routeToken && routeCurrent) {
           const markedReady = Tango.GMGN._markChartFrameReady?.(frame, routeToken) === true;
           if (markedReady) {
+            if (probeTagged) {
+              runtime.chartFrameReadyProbeIds.set(frame, probeId);
+              runtime.chartFrameProbeIds.delete(frame);
+            }
             if (tentative) runtime.chartFrameTentative.delete(frame);
             runtime.chartFrameReadyBeforeLoad.delete(frame);
             if (probeTagged) runtime.chartFrameAwaitingReady.delete(frame);
@@ -2266,13 +2285,76 @@
     return { chain: chain.id, address: Tango.Chains.normalizeAddress(chain.id, address) };
   }
 
+  const CHART_WIDGET_OPTIONS_MAX_CHARS = 8_192;
+  const CHART_SYMBOL_MAX_CHARS = 512;
+  const CHART_PROBE_ID_MAX_CHARS = 128;
+
+  function beginChartFrameGeneration(frame) {
+    runtime.chartFrameGenerationSequence += 1;
+    const generation = runtime.chartFrameGenerationSequence;
+    runtime.chartFrameGenerations.set(frame, generation);
+    runtime.chartFrameProbeIds.delete(frame);
+    runtime.chartFrameReadyProbeIds.delete(frame);
+    runtime.markerPayloads.delete(frame);
+    return generation;
+  }
+
+  function chartAxisHint(frame) {
+    try {
+      if (!frame || frame.isConnected === false || ![...chartFrames()].includes(frame)) return 'UNKNOWN';
+      if (!routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame))) return 'UNKNOWN';
+      const routeToken = detailRouteToken();
+      if (!routeToken) return 'UNKNOWN';
+      const raw = frame.getAttribute?.('data-widget-options');
+      if (typeof raw !== 'string' || !raw.length || raw.length > CHART_WIDGET_OPTIONS_MAX_CHARS) {
+        return 'UNKNOWN';
+      }
+      const params = new URLSearchParams(raw);
+      const symbols = params.getAll('symbol');
+      if (symbols.length !== 1) return 'UNKNOWN';
+      const symbol = symbols[0];
+      if (!symbol || symbol.length > CHART_SYMBOL_MAX_CHARS || symbol.includes('\uFFFD')) return 'UNKNOWN';
+      const parts = symbol.split('/');
+      if (parts.length !== 3 && parts.length !== 4) return 'UNKNOWN';
+      const identity = chartReadyIdentity({ chain: parts[0], address: parts[1] });
+      if (!identity || identity.chain !== routeToken.chain || identity.address !== routeToken.address) {
+        return 'UNKNOWN';
+      }
+      if (String(parts[2]).toUpperCase() !== 'USD') return 'UNKNOWN';
+      if (parts.length === 3) return 'PRICE';
+      return String(parts[3]).toUpperCase() === 'MCAP' ? 'MARKET_CAP' : 'UNKNOWN';
+    } catch {
+      return 'UNKNOWN';
+    }
+  }
+
+  function chartDeliveryContext(frame) {
+    const generation = runtime.chartFrameGenerations.get(frame);
+    const probeId = runtime.chartFrameReadyProbeIds.get(frame)
+      || runtime.chartFrameProbeIds.get(frame)
+      || '';
+    return {
+      axisHint: chartAxisHint(frame),
+      frameGeneration: Number.isSafeInteger(generation) && generation > 0 ? generation : 0,
+      probeId: typeof probeId === 'string' && probeId.length <= CHART_PROBE_ID_MAX_CHARS
+        ? probeId
+        : ''
+    };
+  }
+
   function probeChartFrameReady(frame) {
     const target = frame?.contentWindow;
     if (!target || !routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame))) return false;
+    let frameGeneration = runtime.chartFrameGenerations.get(frame);
+    if (!Number.isSafeInteger(frameGeneration) || frameGeneration <= 0) {
+      frameGeneration = beginChartFrameGeneration(frame);
+    }
     runtime.chartProbeSequence += 1;
     const probeId = `${runtime.routeEpoch}:${runtime.chartProbeSequence}`;
     runtime.chartFrameProbeIds.set(frame, probeId);
-    target.postMessage({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId }, '*');
+    target.postMessage({
+      source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId, frameGeneration
+    }, '*');
     return true;
   }
 
@@ -2281,16 +2363,18 @@
     if (!firstSeen) {
       if (!routeEligible || routeCaptureIsCurrent(runtime.chartFrameRoutes.get(frame))) return false;
       runtime.chartFrameRoutes.set(frame, captureRoute());
+      beginChartFrameGeneration(frame);
       runtime.chartFrameTentative.add(frame);
       runtime.chartFrameReadyBeforeLoad.delete(frame);
       runtime.chartFrameAwaitingReady.delete(frame);
-      runtime.chartFrameProbeIds.delete(frame);
-      runtime.markerPayloads.delete(frame);
       probeChartFrameReady(frame);
       return true;
     }
     runtime.markerFrameListeners.add(frame);
-    if (routeEligible) runtime.chartFrameRoutes.set(frame, captureRoute());
+    if (routeEligible) {
+      runtime.chartFrameRoutes.set(frame, captureRoute());
+      beginChartFrameGeneration(frame);
+    }
     const transitionPending = location.href !== runtime.lastUrl
       || currentRouteIdentity() !== runtime.routeIdentity;
     if (!routeEligible || transitionPending || runtime.routeEpoch > 0) {
@@ -2309,10 +2393,13 @@
         runtime.chartFrameTentative.add(frame);
         runtime.chartFrameAwaitingReady.delete(frame);
         if (routeCurrent) runtime.chartFrameAwaitingReady.add(frame);
-      } else runtime.chartFrameAwaitingReady.delete(frame);
+        beginChartFrameGeneration(frame);
+      } else {
+        runtime.chartFrameAwaitingReady.delete(frame);
+      }
       runtime.markerPayloads.delete(frame);
-      deliverChartMarkers([frame], runtime.latestMarkerPayload, true);
       probeChartFrameReady(frame);
+      deliverChartMarkers([frame], runtime.latestMarkerPayload, true);
     });
     probeChartFrameReady(frame);
     return true;
@@ -2336,12 +2423,13 @@
       const deliveredPayload = tentative ? { markers: [] }
         : chartMarkerDeliveryAllowed(frame, payload) ? payload : null;
       if (!deliveredPayload) return;
-      const signature = JSON.stringify(deliveredPayload);
+      const context = chartDeliveryContext(frame);
+      const signature = JSON.stringify({ context, payload: deliveredPayload });
       if ((!force || tentative) && !registrationChanged
         && runtime.markerPayloads.get(frame) === signature) return;
       runtime.markerPayloads.set(frame, signature);
       frame.contentWindow?.postMessage({
-        source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: deliveredPayload
+        source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', context, payload: deliveredPayload
       }, '*');
     });
   }
