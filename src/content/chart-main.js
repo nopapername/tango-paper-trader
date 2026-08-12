@@ -28,6 +28,9 @@
   const hiddenMarkerIds = new Set();
   const markerPositions = new Map();
   const markerEconomicCoordinates = new Map();
+  const CHART_AXIS_HINTS = new Set(['MARKET_CAP', 'PRICE', 'UNKNOWN']);
+  const CHART_PROBE_ID_MAX_CHARS = 128;
+  let activeFrameContext = null;
 
   function parseNumber(text) {
     const source = String(text || '').trim();
@@ -247,11 +250,14 @@
         }));
       }
     };
-    addPriceMode(markerState.currentPrice);
-    addMarketCapModes(markerState.currentMarketCap);
+    const axisHint = activeFrameContext?.axisHint || 'UNKNOWN';
+    const permitPrice = axisHint !== 'MARKET_CAP';
+    const permitMarketCap = axisHint !== 'PRICE';
+    if (permitPrice) addPriceMode(markerState.currentPrice);
+    if (permitMarketCap) addMarketCapModes(markerState.currentMarketCap);
     visibleMarkers.forEach((marker) => {
-      addPriceMode(marker.price);
-      addMarketCapModes(marker.marketCap);
+      if (permitPrice) addPriceMode(marker.price);
+      if (permitMarketCap) addMarketCapModes(marker.marketCap);
     });
     const candidates = [];
     groups.forEach(({ points, fit }) => modes.forEach((mode) => {
@@ -272,10 +278,20 @@
     );
     const selected = previous && previous.score <= best.score + 0.28 ? previous : best;
     lastScaleMode = { type: selected.type, factor: selected.factor };
-    const signature = `${selected.type}:${selected.factor}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
-    const sameMode = stableScale?.type === selected.type && stableScale?.factor === selected.factor;
+    const selectedWithContext = {
+      ...selected,
+      axisHint,
+      frameGeneration: activeFrameContext.frameGeneration,
+      probeId: activeFrameContext.probeId
+    };
+    const signature = `${selectedWithContext.frameGeneration}:${selectedWithContext.probeId}:${axisHint}:${selected.type}:${selected.factor}:${selected.points.map((point) => `${Math.round(point.y / 3)}:${Number(point.value).toPrecision(5)}`).join('|')}`;
+    const sameMode = stableScale?.type === selected.type
+      && stableScale?.factor === selected.factor
+      && stableScale?.frameGeneration === selectedWithContext.frameGeneration
+      && stableScale?.probeId === selectedWithContext.probeId
+      && stableScale?.axisHint === axisHint;
     if (sameMode && stableSignature === signature) return stableScale;
-    stableScale = selected;
+    stableScale = selectedWithContext;
     stableSignature = signature;
     scaleUpdatedAt = Date.now();
     return stableScale;
@@ -474,9 +490,52 @@
     return tokenIdentityFromUrl(referrer.href);
   }
 
-  function announceReady(probeId = '') {
+  function normalizedFrameContext(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    if (!CHART_AXIS_HINTS.has(value.axisHint)) return null;
+    if (!Number.isSafeInteger(value.frameGeneration) || value.frameGeneration <= 0) return null;
+    if (typeof value.probeId !== 'string'
+      || !value.probeId
+      || value.probeId.length > CHART_PROBE_ID_MAX_CHARS) return null;
+    return {
+      axisHint: value.axisHint,
+      frameGeneration: value.frameGeneration,
+      probeId: value.probeId
+    };
+  }
+
+  function clearScaleAndPlacementCaches() {
+    lastScaleMode = null;
+    stableScale = null;
+    stableSignature = '';
+    renderedSignature = '';
+    markerPositions.clear();
+    markerEconomicCoordinates.clear();
+    if (overlay?.childElementCount) overlay.replaceChildren();
+  }
+
+  function applyFrameContext(next) {
+    if (!next) return false;
+    if (activeFrameContext && next.frameGeneration < activeFrameContext.frameGeneration) return false;
+    const changed = Boolean(activeFrameContext) && (
+      next.frameGeneration !== activeFrameContext.frameGeneration
+      || next.probeId !== activeFrameContext.probeId
+      || next.axisHint !== activeFrameContext.axisHint
+    );
+    if (changed) {
+      markerAxisSequenceFloor = axisLabelSequence;
+      clearScaleAndPlacementCaches();
+    }
+    activeFrameContext = next;
+    return true;
+  }
+
+  function announceReady(probeId = '', frameGeneration = 0) {
     const message = { source: 'TANGO_PAPER_CHART', type: 'READY' };
-    if (probeId) message.probeId = probeId;
+    if (probeId && Number.isSafeInteger(frameGeneration) && frameGeneration > 0) {
+      message.probeId = probeId;
+      message.frameGeneration = frameGeneration;
+    }
     const identity = childTokenIdentity();
     if (identity) message.identity = identity;
     window.parent.postMessage(message, '*');
@@ -488,7 +547,13 @@
       || event.data.source !== 'TANGO_PAPER_PARENT') return;
     if (event.data.type === 'CHART_READY_PROBE') {
       const probeId = typeof event.data.probeId === 'string' ? event.data.probeId : '';
-      if (probeId) announceReady(probeId);
+      const frameGeneration = event.data.frameGeneration;
+      if (probeId
+        && probeId.length <= CHART_PROBE_ID_MAX_CHARS
+        && Number.isSafeInteger(frameGeneration)
+        && frameGeneration > 0) {
+        announceReady(probeId, frameGeneration);
+      }
       return;
     }
     if (event.data.type !== 'CHART_MARKERS') return;
@@ -509,6 +574,9 @@
         || payloadIdentity.address !== childIdentity.address) return;
       nextState = { ...payload, chain: payloadIdentity.chain, tokenAddress: payloadIdentity.address };
     } else if (payload.markers.length || Object.keys(payload).length !== 1) return;
+    const nextFrameContext = normalizedFrameContext(event.data.context);
+    if (!nextFrameContext) return;
+    if (!applyFrameContext(nextFrameContext)) return;
     const hasTokenIdentity = (state) => Boolean(state?.chain && state?.tokenAddress);
     const identityChanged = hasTokenIdentity(markerState)
       && hasTokenIdentity(nextState)
@@ -517,13 +585,8 @@
     if (identityChanged || clearsIdentifiedToken) markerAxisSequenceFloor = axisLabelSequence;
     if (!nextState?.markers?.length
       || identityChanged) {
-      lastScaleMode = null;
-      stableScale = null;
-      stableSignature = '';
-      renderedSignature = '';
+      clearScaleAndPlacementCaches();
       hiddenMarkerIds.clear();
-      markerPositions.clear();
-      markerEconomicCoordinates.clear();
     }
     markerState = nextState;
     renderMarkers();

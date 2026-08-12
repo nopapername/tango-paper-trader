@@ -28,6 +28,11 @@ function loadChartBridge({
   const listeners = new Map();
   const parentMessages = [];
   const clock = { now: 1_000 };
+  const defaultFrameContext = {
+    axisHint: 'UNKNOWN',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  };
   class FakeDate extends Date { static now() { return clock.now; } }
   class FakeCanvasRenderingContext2D {
     constructor(canvas) {
@@ -72,6 +77,7 @@ function loadChartBridge({
       snapshot() {
         return {
           markerState, lastScaleMode, stableScale, stableSignature, renderedSignature,
+          frameContext: typeof activeFrameContext === 'undefined' ? null : activeFrameContext,
           markerPositions: [...markerPositions], markerEconomicCoordinateCount: markerEconomicCoordinates.size,
           overlayChildren: overlay?.childElementCount || 0,
           overlayTops: overlay?.children?.map((node) => node.style.top) || []
@@ -133,7 +139,28 @@ function loadChartBridge({
   return {
     api: context.window.__chartTest, bridgeInitialized: Boolean(context.window.__tangoPaperChartBridge),
     clock, canvasContext, parentMessages,
-    message: (data, source = context.window.parent) => listeners.get('message')({ data, source }),
+    message: (data, source = context.window.parent) => {
+      const delivered = data?.source === 'TANGO_PAPER_PARENT'
+        && data?.type === 'CHART_MARKERS'
+        && !Object.prototype.hasOwnProperty.call(data, 'context')
+        ? { ...data, context: { ...defaultFrameContext } }
+        : data;
+      listeners.get('message')({ data: delivered, source });
+    },
+    rawMessage: (data, source = context.window.parent) => {
+      listeners.get('message')({ data, source });
+    },
+    markers: (payload, frameContext = defaultFrameContext) => {
+      listeners.get('message')({
+        source: context.window.parent,
+        data: {
+          source: 'TANGO_PAPER_PARENT',
+          type: 'CHART_MARKERS',
+          context: { ...frameContext },
+          payload
+        }
+      });
+    },
     setHref: (nextHref) => { location.href = nextHref; },
     resize: () => listeners.get('resize')(),
     clear: () => canvasContext.clearRect(0, 0, canvas.width, canvas.height),
@@ -156,9 +183,15 @@ test('chart child recovers a dropped startup READY from one exact probe without 
   assert.equal(readyMessages().length, 1, 'the child keeps its spontaneous document-start READY');
   chart.parentMessages.length = 0;
 
-  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'probe-1' });
+  chart.message({
+    source: 'TANGO_PAPER_PARENT',
+    type: 'CHART_READY_PROBE',
+    probeId: 'probe-1',
+    frameGeneration: 1
+  });
   assert.equal(readyMessages().length, 1, 'one parent probe recovers one child READY');
   assert.equal(readyMessages()[0].probeId, 'probe-1', 'the child correlates the READY to its exact probe');
+  assert.equal(readyMessages()[0].frameGeneration, 1, 'the child echoes the exact probe generation');
 
   for (let index = 0; index < 20; index += 1) {
     chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_MARKERS', payload: { markers: [] } });
@@ -179,7 +212,7 @@ test('chart READY reports child URL identity instead of adopting parent marker i
       markers: []
     }
   });
-  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'identity-probe' });
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'identity-probe', frameGeneration: 1 });
 
   const ready = chart.parentMessages.find((message) => message?.type === 'READY');
   assert.equal(ready?.identity?.chain, 'sol');
@@ -193,7 +226,7 @@ test('chart READY recovers blob-frame identity from a same-origin GMGN detail re
   });
   chart.parentMessages.length = 0;
 
-  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'blob-probe' });
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'blob-probe', frameGeneration: 1 });
 
   const ready = chart.parentMessages.find((message) => message?.type === 'READY');
   assert.equal(ready?.probeId, 'blob-probe');
@@ -209,7 +242,7 @@ test('chart READY prefers same-origin top detail identity for a reused blob fram
   });
   chart.parentMessages.length = 0;
 
-  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'top-probe' });
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'top-probe', frameGeneration: 1 });
 
   const ready = chart.parentMessages.find((message) => message?.type === 'READY');
   assert.equal(ready?.identity?.chain, 'bsc');
@@ -224,7 +257,7 @@ test('chart READY fails closed when top detail identity is inaccessible', () => 
   });
   chart.parentMessages.length = 0;
 
-  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'blocked-top' });
+  chart.message({ source: 'TANGO_PAPER_PARENT', type: 'CHART_READY_PROBE', probeId: 'blocked-top', frameGeneration: 1 });
 
   const ready = chart.parentMessages.find((message) => message?.type === 'READY');
   assert.equal(ready?.identity, undefined);
@@ -808,6 +841,7 @@ test('an empty marker payload clears overlay and every cached chart placement', 
     stableScale: null,
     stableSignature: '',
     renderedSignature: '',
+    frameContext: { axisHint: 'UNKNOWN', frameGeneration: 1, probeId: 'test:1' },
     markerPositions: [],
     markerEconomicCoordinateCount: 0,
     overlayChildren: 0,
@@ -890,6 +924,144 @@ test('same-token marker keeps its verified scale while the chart axis is idle', 
   assert.ok(chart.api.snapshot().stableScale);
   assert.equal(chart.api.snapshot().overlayChildren, 1);
   assert.equal(chart.api.snapshot().overlayTops[0], initialTop);
+});
+
+function tiedAxisPayload() {
+  return {
+    chain: 'bsc',
+    tokenAddress: BSC_ADDRESS,
+    currentPrice: 2,
+    currentMarketCap: 2_000,
+    markers: [{
+      id: 'buy',
+      side: 'BUY',
+      marketCap: 2_000,
+      price: 2,
+      label: 'Paper Buy'
+    }]
+  };
+}
+
+test('MARKET_CAP hint resolves an exact PRICE MCAP tie in favor of market cap', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+
+  chart.markers(tiedAxisPayload(), {
+    axisHint: 'MARKET_CAP',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+
+  assert.equal(chart.api.snapshot().stableScale.type, 'MARKET_CAP');
+  assert.equal(chart.api.snapshot().stableScale.factor, 1_000);
+});
+
+test('PRICE hint resolves an exact PRICE MCAP tie in favor of price', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+
+  chart.markers(tiedAxisPayload(), {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+
+  assert.equal(chart.api.snapshot().stableScale.type, 'PRICE');
+  assert.equal(chart.api.snapshot().stableScale.factor, 1);
+});
+
+test('new frame context rejects old anchors and an older generation cannot restore them', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.markers(tiedAxisPayload(), {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+
+  chart.markers(tiedAxisPayload(), {
+    axisHint: 'MARKET_CAP',
+    frameGeneration: 2,
+    probeId: 'test:2'
+  });
+  assert.equal(chart.api.snapshot().stableScale, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+
+  chart.markers(tiedAxisPayload(), {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().frameContext.frameGeneration, 2);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+
+  for (const [text, y] of [['$1', 420], ['$2', 320], ['$3', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+  assert.equal(chart.api.snapshot().stableScale.type, 'MARKET_CAP');
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+});
+
+test('same-generation axis hint change requires anchors observed after the change', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.markers(tiedAxisPayload(), {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().stableScale.type, 'PRICE');
+
+  chart.markers(tiedAxisPayload(), {
+    axisHint: 'MARKET_CAP',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().stableScale, null);
+  assert.equal(chart.api.snapshot().overlayChildren, 0);
+
+  for (const [text, y] of [['$1', 420], ['$2', 320], ['$3', 220]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+  assert.equal(chart.api.snapshot().stableScale.type, 'MARKET_CAP');
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+});
+
+test('malformed frame context cannot replace or clear current chart state', () => {
+  const chart = loadChartBridge();
+  for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.markers(tiedAxisPayload(), {
+    axisHint: 'PRICE',
+    frameGeneration: 1,
+    probeId: 'test:1'
+  });
+  const before = JSON.parse(JSON.stringify(chart.api.snapshot()));
+
+  chart.rawMessage({
+    source: 'TANGO_PAPER_PARENT',
+    type: 'CHART_MARKERS',
+    context: {
+      axisHint: 'MARKET_CAP',
+      frameGeneration: '2',
+      probeId: 'test:2'
+    },
+    payload: { markers: [] }
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(chart.api.snapshot())), before);
 });
 
 test('same marker id follows a changed economic value below the jitter deadband', () => {
