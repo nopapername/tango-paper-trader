@@ -2,6 +2,188 @@
   const Tango = global.Tango = global.Tango || {};
   const TRUSTED_METADATA_SOURCES = new Set(['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK']);
 
+  const UNKNOWN_FALLBACK_SOURCE = 'UNKNOWN_FALLBACK';
+  const UNKNOWN_FALLBACK_PROVENANCE = 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1';
+
+  function utf8TextBytes(value) {
+    const text = String(value);
+    let bytes = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      if (code <= 0x7f) {
+        bytes += 1;
+      } else if (code <= 0x7ff) {
+        bytes += 2;
+      } else if (code >= 0xd800 && code <= 0xdbff
+        && index + 1 < text.length
+        && text.charCodeAt(index + 1) >= 0xdc00
+        && text.charCodeAt(index + 1) <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    }
+    return bytes;
+  }
+
+  function serializedStateBytes(state) {
+    return utf8TextBytes(JSON.stringify(state));
+  }
+
+  function storageBudgetError(code, measuredBytes, budgetBytes, cause) {
+    const error = new Error(code);
+    error.name = 'TangoStorageBudgetError';
+    error.code = code;
+    error.measuredBytes = Number(measuredBytes);
+    error.budgetBytes = Number(budgetBytes);
+    if (cause !== undefined) error.cause = cause;
+    return error;
+  }
+
+  function historyRecordKey(collection, record, originalIndex) {
+    const timestamp = Number(collection === 'calibration' ? record.createdAt : record.executedAt);
+    return {
+      timestamp: Number.isSafeInteger(timestamp) && timestamp >= 0
+        ? timestamp
+        : Number.MAX_SAFE_INTEGER,
+      priority: collection === 'calibration' ? 0 : 1,
+      id: String(record.id || ''),
+      originalIndex
+    };
+  }
+
+  function compareHistoryKeys(left, right) {
+    if (left.timestamp !== right.timestamp) return left.timestamp - right.timestamp;
+    if (left.priority !== right.priority) return left.priority - right.priority;
+    if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+    return left.originalIndex - right.originalIndex;
+  }
+
+  function durableFallbackKey(trade) {
+    return trade?.supplySource === UNKNOWN_FALLBACK_SOURCE
+      && trade?.provisionalSupplyProvenance === UNKNOWN_FALLBACK_PROVENANCE
+      ? `${trade.chain}:${trade.tokenAddress}`
+      : '';
+  }
+
+  function arrayContentsBytes(entries) {
+    if (!entries.length) return 0;
+    return entries.reduce((sum, entry) => sum + entry.bytes, 0) + entries.length - 1;
+  }
+
+  function compactStateForStorage(state, settings, options = {}) {
+    const budgetBytes = Number(options.budgetBytes ?? Tango.STATE_STORAGE_BUDGET_BYTES);
+    if (!Number.isSafeInteger(budgetBytes) || budgetBytes <= 0) {
+      throw new Error('invalidStorageBudget');
+    }
+    const normalized = Tango.State.normalizeState(state, settings);
+    const protectedTradeIndexes = new Set(options.protectedTradeIndexes || []);
+    const protectedCalibrationIndexes = new Set(options.protectedCalibrationIndexes || []);
+    const openFallbackKeys = new Set(Object.values(normalized.positions || {})
+      .filter((position) => position?.supplySource === UNKNOWN_FALLBACK_SOURCE)
+      .map((position) => `${position.chain}:${position.tokenAddress}`));
+    const removedTradeIndexes = new Set();
+    const removedCalibrationIndexes = new Set();
+    const removedTradeIds = [];
+    const removedCalibrationIds = [];
+    const fallbackUnits = new Map();
+    const units = [];
+
+    const tradeEntries = normalized.trades.map((record, originalIndex) => ({
+      collection: 'trade',
+      record,
+      originalIndex,
+      key: historyRecordKey('trade', record, originalIndex),
+      bytes: utf8TextBytes(JSON.stringify(record))
+    }));
+    const calibrationEntries = normalized.calibrations.map((record, originalIndex) => ({
+      collection: 'calibration',
+      record,
+      originalIndex,
+      key: historyRecordKey('calibration', record, originalIndex),
+      bytes: utf8TextBytes(JSON.stringify(record))
+    }));
+
+    for (const entry of tradeEntries) {
+      const dependencyKey = durableFallbackKey(entry.record);
+      if (!dependencyKey) {
+        units.push({ entries: [entry], protected: protectedTradeIndexes.has(entry.originalIndex) });
+        continue;
+      }
+      const unit = fallbackUnits.get(dependencyKey) || {
+        entries: [],
+        protected: openFallbackKeys.has(dependencyKey)
+      };
+      unit.entries.push(entry);
+      unit.protected = unit.protected || protectedTradeIndexes.has(entry.originalIndex);
+      fallbackUnits.set(dependencyKey, unit);
+    }
+    units.push(...fallbackUnits.values());
+    units.push(...calibrationEntries.map((entry) => ({
+      entries: [entry],
+      protected: protectedCalibrationIndexes.has(entry.originalIndex)
+    })));
+    for (const unit of units) {
+      unit.entries.sort((left, right) => compareHistoryKeys(left.key, right.key));
+      unit.key = unit.entries[0].key;
+    }
+    const candidates = units
+      .filter((unit) => !unit.protected)
+      .sort((left, right) => compareHistoryKeys(left.key, right.key));
+
+    const baseState = { ...normalized, trades: [], calibrations: [] };
+    let measuredBytes = serializedStateBytes(baseState)
+      + arrayContentsBytes(tradeEntries)
+      + arrayContentsBytes(calibrationEntries);
+    let remainingTrades = tradeEntries.length;
+    let remainingCalibrations = calibrationEntries.length;
+
+    for (const unit of candidates) {
+      if (measuredBytes <= budgetBytes) break;
+      const trades = unit.entries.filter(({ collection }) => collection === 'trade');
+      const calibrations = unit.entries.filter(({ collection }) => collection === 'calibration');
+      if (trades.length) {
+        const after = remainingTrades - trades.length;
+        measuredBytes -= trades.reduce((sum, entry) => sum + entry.bytes, 0)
+          + Math.max(remainingTrades - 1, 0) - Math.max(after - 1, 0);
+        remainingTrades = after;
+        for (const entry of trades) {
+          removedTradeIndexes.add(entry.originalIndex);
+          removedTradeIds.push(String(entry.record.id));
+        }
+      }
+      if (calibrations.length) {
+        const after = remainingCalibrations - calibrations.length;
+        measuredBytes -= calibrations.reduce((sum, entry) => sum + entry.bytes, 0)
+          + Math.max(remainingCalibrations - 1, 0) - Math.max(after - 1, 0);
+        remainingCalibrations = after;
+        for (const entry of calibrations) {
+          removedCalibrationIndexes.add(entry.originalIndex);
+          removedCalibrationIds.push(String(entry.record.id));
+        }
+      }
+    }
+
+    const compacted = {
+      ...normalized,
+      trades: normalized.trades.filter((_, index) => !removedTradeIndexes.has(index)),
+      calibrations: normalized.calibrations.filter((_, index) => !removedCalibrationIndexes.has(index))
+    };
+    measuredBytes = serializedStateBytes(compacted);
+    if (measuredBytes > budgetBytes) {
+      throw storageBudgetError('storageFull', measuredBytes, budgetBytes);
+    }
+    Tango.State.normalizeState(compacted, settings, { strict: true });
+    return {
+      state: compacted,
+      measuredBytes,
+      budgetBytes,
+      removedTradeIds,
+      removedCalibrationIds
+    };
+  }
+
   function canonicalizeFallbackOrder(order, executionNow) {
     const quote = order?.quote;
     const token = order?.token;
@@ -149,10 +331,73 @@
     return { ...order, quote: canonicalQuote };
   }
 
-  function create({ readRaw, writeRaw, now = () => Date.now() } = {}) {
+  function isNativeStorageQuotaError(error) {
+    const name = String(error?.name || '');
+    const code = String(error?.code || '');
+    const message = String(error?.message || '');
+    return name === 'QuotaExceededError'
+      || code === 'QUOTA_BYTES'
+      || /(?:QUOTA_BYTES|quota\s+(?:has been\s+)?exceeded|storage\s+full)/i.test(message);
+  }
+
+  function create({
+    readRaw,
+    writeRaw,
+    now = () => Date.now(),
+    stateBudgetBytes = Tango.STATE_STORAGE_BUDGET_BYTES
+  } = {}) {
     if (typeof readRaw !== 'function' || typeof writeRaw !== 'function') {
       throw new Error('invalidCoordinatorStorage');
     }
+    if (!Number.isSafeInteger(Number(stateBudgetBytes)) || Number(stateBudgetBytes) <= 0) {
+      throw new Error('invalidStorageBudget');
+    }
+    stateBudgetBytes = Number(stateBudgetBytes);
+
+    function addedRecordIndexes(previous = [], next = []) {
+      const remaining = new Map();
+      for (const record of previous) {
+        const id = String(record?.id || '');
+        remaining.set(id, (remaining.get(id) || 0) + 1);
+      }
+      const indexes = [];
+      next.forEach((record, index) => {
+        const id = String(record?.id || '');
+        const count = remaining.get(id) || 0;
+        if (count > 0) remaining.set(id, count - 1);
+        else indexes.push(index);
+      });
+      return indexes;
+    }
+
+    function historyProtection(previous, next) {
+      return {
+        protectedTradeIndexes: addedRecordIndexes(previous?.trades, next?.trades),
+        protectedCalibrationIndexes: addedRecordIndexes(previous?.calibrations, next?.calibrations)
+      };
+    }
+
+    function prepareState(state, settings, protection = {}) {
+      return compactStateForStorage(state, settings, {
+        budgetBytes: stateBudgetBytes,
+        ...protection
+      });
+    }
+
+    async function writeStored(values, stateForDetails) {
+      try {
+        await writeRaw(values);
+      } catch (error) {
+        if (!isNativeStorageQuotaError(error)) throw error;
+        throw storageBudgetError(
+          'storageFull',
+          serializedStateBytes(stateForDetails),
+          stateBudgetBytes,
+          error
+        );
+      }
+    }
+
     let tail = Promise.resolve();
 
     function serialized(work) {
@@ -161,28 +406,39 @@
       return result;
     }
 
-    async function readSnapshot({ persistMigration = true } = {}) {
+    async function readSnapshot({
+      persistMigration = true,
+      migrateInMemory = persistMigration
+    } = {}) {
       const raw = await readRaw([Tango.STORAGE_KEY, Tango.SETTINGS_KEY]);
       const settings = Tango.State.normalizeSettings(raw[Tango.SETTINGS_KEY]);
       const storedState = raw[Tango.STORAGE_KEY];
-      const state = Tango.State.normalizeState(storedState, settings, { migrationNow: now() });
-      if (persistMigration && Number(storedState?.schemaVersion) === 1) {
+      let state = Tango.State.normalizeState(storedState, settings, { migrationNow: now() });
+      const migrationPending = Number(storedState?.schemaVersion) === 1;
+      if (migrationPending && migrateInMemory) {
         state.stateRevision = Number(storedState.stateRevision || 0) + 1;
-        await writeRaw({
+        state = prepareState(state, settings).state;
+      }
+      if (migrationPending && persistMigration) {
+        await writeStored({
           [Tango.STORAGE_KEY]: state,
           [Tango.SETTINGS_KEY]: settings
-        });
+        }, state);
       }
-      return { state, settings };
+      return { state, settings, migrationPending: migrationPending && migrateInMemory };
     }
 
-    async function commitState(previous, next) {
-      const state = {
+    async function commitState(previous, next, settings, { persistSettings = false } = {}) {
+      const revised = {
         ...next,
         stateRevision: Number(previous.stateRevision || 0) + 1
       };
-      await writeRaw({ [Tango.STORAGE_KEY]: state });
-      return state;
+      const prepared = prepareState(revised, settings, historyProtection(previous, revised));
+      await writeStored({
+        [Tango.STORAGE_KEY]: prepared.state,
+        ...(persistSettings ? { [Tango.SETTINGS_KEY]: settings } : {})
+      }, prepared.state);
+      return prepared.state;
     }
 
     function getAll() {
@@ -191,8 +447,14 @@
 
     function mutate(command) {
       return serialized(async () => {
-        const { state, settings } = await readSnapshot({
-          persistMigration: !['RESET_CHAIN', 'RESET_ALL_WITH_BALANCE', 'IMPORT'].includes(command?.type)
+        const genericMutation = ![
+          'INITIALIZE', 'SAVE_SETTINGS', 'PATCH_SETTINGS', 'IMPORT',
+          'RESET_ALL_WITH_BALANCE', 'RESET_CHAIN'
+        ].includes(command?.type);
+        const { state, settings, migrationPending } = await readSnapshot({
+          persistMigration: !genericMutation
+            && !['RESET_CHAIN', 'RESET_ALL_WITH_BALANCE', 'IMPORT'].includes(command?.type),
+          migrateInMemory: genericMutation
         });
         if (command?.type === 'INITIALIZE') {
           const nextSettings = Tango.State.normalizeSettings({ ...settings, language: command.language });
@@ -201,15 +463,16 @@
           const initialized = Tango.State.createInitialState({ now: now(), initialBalances });
           initialized.initialized = true;
           initialized.stateRevision = Number(state.stateRevision || 0) + 1;
-          await writeRaw({
-            [Tango.STORAGE_KEY]: initialized,
+          const prepared = prepareState(initialized, nextSettings);
+          await writeStored({
+            [Tango.STORAGE_KEY]: prepared.state,
             [Tango.SETTINGS_KEY]: nextSettings
-          });
-          return { state: initialized, settings: nextSettings };
+          }, prepared.state);
+          return { state: prepared.state, settings: nextSettings };
         }
         if (command?.type === 'SAVE_SETTINGS') {
           const nextSettings = Tango.State.normalizeSettings(command.settings);
-          await writeRaw({ [Tango.SETTINGS_KEY]: nextSettings });
+          await writeStored({ [Tango.SETTINGS_KEY]: nextSettings }, state);
           return { state, settings: nextSettings };
         }
         if (command?.type === 'PATCH_SETTINGS') {
@@ -235,7 +498,7 @@
             ...topLevelPatch,
             chains
           }, { strict: true, requireAllChains: true });
-          await writeRaw({ [Tango.SETTINGS_KEY]: nextSettings });
+          await writeStored({ [Tango.SETTINGS_KEY]: nextSettings }, state);
           return { state, settings: nextSettings };
         }
         if (command?.type === 'IMPORT') {
@@ -254,10 +517,14 @@
           });
           importedState.initialized = true;
           importedState.stateRevision = Number(state.stateRevision || 0) + 1;
-          await writeRaw({
+          const measuredBytes = serializedStateBytes(importedState);
+          if (measuredBytes > stateBudgetBytes) {
+            throw storageBudgetError('importTooLarge', measuredBytes, stateBudgetBytes);
+          }
+          await writeStored({
             [Tango.STORAGE_KEY]: importedState,
             [Tango.SETTINGS_KEY]: importedSettings
-          });
+          }, importedState);
           return { state: importedState, settings: importedSettings };
         }
         if (command?.type === 'RESET_ALL_WITH_BALANCE') {
@@ -294,11 +561,12 @@
           }, { strict: true, requireAllChains: true });
           const nextState = Tango.State.resetAll(nextSettings, now());
           nextState.stateRevision = Number(state.stateRevision || 0) + 1;
-          await writeRaw({
-            [Tango.STORAGE_KEY]: nextState,
+          const prepared = prepareState(nextState, nextSettings);
+          await writeStored({
+            [Tango.STORAGE_KEY]: prepared.state,
             [Tango.SETTINGS_KEY]: nextSettings
-          });
-          return { state: nextState, settings: nextSettings };
+          }, prepared.state);
+          return { state: prepared.state, settings: nextSettings };
         }
         let result;
         if (command?.type === 'EXECUTE_BUY') {
@@ -345,11 +613,12 @@
               [chain.id]: { ...settings.chains[chain.id], initialBalanceNative: balanceNative }
             }
           });
-          await writeRaw({
-            [Tango.STORAGE_KEY]: nextState,
+          const prepared = prepareState(nextState, nextSettings);
+          await writeStored({
+            [Tango.STORAGE_KEY]: prepared.state,
             [Tango.SETTINGS_KEY]: nextSettings
-          });
-          return { state: nextState, settings: nextSettings };
+          }, prepared.state);
+          return { state: prepared.state, settings: nextSettings };
         } else if (command?.type === 'RESET_ALL') {
           result = { state: Tango.State.resetAll(settings, now()) };
         } else if (command?.type === 'REPLACE_STATE') {
@@ -358,8 +627,18 @@
         } else {
           throw new Error('unsupportedMutation');
         }
-        if (result.state === state) return result;
-        const committed = await commitState(state, result.state);
+        if (result.state === state) {
+          if (!migrationPending) return result;
+          const prepared = prepareState(state, settings);
+          await writeStored({
+            [Tango.STORAGE_KEY]: prepared.state,
+            [Tango.SETTINGS_KEY]: settings
+          }, prepared.state);
+          return { ...result, state: prepared.state };
+        }
+        const committed = await commitState(state, result.state, settings, {
+          persistSettings: migrationPending
+        });
         return { ...result, state: committed };
       });
     }
@@ -367,6 +646,6 @@
     return { getAll, mutate };
   }
 
-  Tango.StateCoordinator = { create };
+  Tango.StateCoordinator = { create, serializedStateBytes, compactStateForStorage };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.StateCoordinator;
 })(globalThis);
