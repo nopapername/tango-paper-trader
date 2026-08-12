@@ -57,7 +57,7 @@ async function loadDashboard({
   closeSucceeds = true, corruptResetReadback = false,
   emitStorageDuringReset = false, failOpenGmgn = false, openGmgnFailures = 0,
   deferResetAllWithBalance = false, deferOpenGmgn = false,
-  initialState = null, initialSettings = null
+  initialState = null, initialSettings = null, importFailure = null
 } = {}) {
   const appElements = new Map();
   let document;
@@ -127,7 +127,10 @@ async function loadDashboard({
     I18n: {
       resolveLanguage: (value) => value || 'en',
       t: (key, _language, vars) => key === 'onboardingCapitalAllocation'
-        ? `${key}:${vars?.amount}` : key
+        ? `${key}:${vars?.amount}`
+        : key === 'importTooLarge'
+          ? `${key}:${vars?.measured}/${vars?.budget}`
+          : key
     },
     Format: { native: (value, symbol) => `${value} ${symbol}`, usd: (value) => `$${value}`, percent: String, number: String, duration: String },
     Engine: {
@@ -232,7 +235,10 @@ async function loadDashboard({
         return { state: persistedState, settings: persistedSettings };
       },
       async exportData() { calls.exportData += 1; return { product: 'Tango Paper Trader', state: persistedState, settings: persistedSettings }; },
-      async importData() { return { state: persistedState, settings: persistedSettings }; },
+      async importData() {
+        if (importFailure) throw importFailure;
+        return { state: persistedState, settings: persistedSettings };
+      },
       subscribe(callback) { storageSubscriber = callback; }
     }
   };
@@ -282,7 +288,7 @@ async function loadDashboard({
   try { await context.__dashboardTest.load(); } catch (error) { initialLoadError = error; }
   return {
     api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings,
-    resetAllWithBalanceGate, openGmgnGate, document, context, initialLoadError,
+    resetAllWithBalanceGate, openGmgnGate, document, context, initialLoadError, fileInput,
     async emitStorage() { return storageSubscriber?.(); },
     setConfirm(callback) { confirmImpl = callback; },
     get persistedState() { return persistedState; },
@@ -905,4 +911,28 @@ test('Dashboard preserves native price observation timestamps from the backgroun
   assert.equal(dashboard.api.runtime.nativePrices.eth, 2_000);
   assert.equal(dashboard.api.runtime.nativePriceObservedAt.eth, 111);
   assert.equal(dashboard.calls.nativeMessages.every((message) => message.type === 'TANGO_GET_NATIVE_PRICE'), true);
+});
+
+test('Dashboard reports oversized import bytes and keeps authoritative data unchanged', async () => {
+  const initialState = stateFixture();
+  const initialSettings = settingsFixture();
+  const error = new Error('importTooLarge');
+  error.code = 'importTooLarge';
+  error.measuredBytes = 9 * 1024 * 1024;
+  error.budgetBytes = 8 * 1024 * 1024;
+  const dashboard = await loadDashboard({
+    initialState,
+    initialSettings,
+    importFailure: error
+  });
+  dashboard.fileInput.files = [{
+    text: async () => JSON.stringify({ product: 'Tango Paper Trader' })
+  }];
+
+  await dashboard.fileInput.emit('change');
+
+  assert.equal(dashboard.api.runtime.toast, 'importTooLarge:9.00/8.00');
+  assert.equal(JSON.stringify(dashboard.api.runtime.state), JSON.stringify(initialState));
+  assert.equal(JSON.stringify(dashboard.api.runtime.settings), JSON.stringify(initialSettings));
+  assert.equal(dashboard.fileInput.value, '');
 });

@@ -595,8 +595,18 @@
       runtime.state = data.state; runtime.settings = data.settings;
       runtime.selectedChain = Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
       showToast(t('dataImported'));
-    } catch {
-      showToast(t('importFailed'));
+    } catch (error) {
+      if (error?.code === 'importTooLarge'
+        && Number.isSafeInteger(error.measuredBytes)
+        && Number.isSafeInteger(error.budgetBytes)) {
+        const toMiB = (bytes) => (bytes / (1024 * 1024)).toFixed(2);
+        showToast(t('importTooLarge', {
+          measured: toMiB(error.measuredBytes),
+          budget: toMiB(error.budgetBytes)
+        }));
+      } else {
+        showToast(t('importFailed'));
+      }
     } finally {
       fileInput.value = '';
     }
