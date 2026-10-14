@@ -28,6 +28,10 @@ Tango Paper Trader is a bilingual, local-first Chrome extension for paper tradin
 - Cross-page position drawer and enlarged draggable PnL bar
 - Dashboard, trade history and monthly PnL calendar
 - CSV/JSON export, JSON restore and PNG result cards
+- History pagination covers all retained trades; CSV exports all retained trades on the selected chain with 29 execution/provenance columns
+- Monthly PnL uses persistent daily totals; trade counts, win rates and best/worst results describe retained history
+- USD summaries refresh each chain independently every 30 seconds and exclude prices older than 60 seconds; manual refresh is available
+- Dark, light and system themes apply to the Popup, Dashboard and GMGN overlay
 - English and Simplified Chinese
 - No wallet, activation code, account or real transactions
 
@@ -40,6 +44,16 @@ npm.cmd run build
 ```
 
 Load `dist/tango-paper-trader` from `chrome://extensions` using **Load unpacked**.
+
+Use Node.js 22 or newer. The quick-buy layout and mutation regression tests require local Chrome; set `CHROME_PATH` if it is not installed in the standard location. These tests open isolated local fixtures with external network resolution disabled.
+
+Build validation checks required local assets before replacing `dist/tango-paper-trader` and preserves other files in `dist`. Backups above 10,000 trade records or 10,000 calibration records are rejected explicitly rather than truncated. Runtime compaction protects open fallback origins and keeps persistent daily PnL totals.
+
+Tango quick-buy geometry is locked to Giant: the slot, wrapper, action host and paper button share a 36px rectangle even when GMGN changes its native button size. Synthetic fallback market caps do not produce chart coordinates; independently observed prices or market caps remain eligible.
+
+The [2026-10-13 audit](docs/project-audit-2026-10-13.md) records the original findings. The [fix and verification report](docs/project-fixes-2026-10-13.md) tracks the subsequent changes and remaining live-page verification. Current GMGN compatibility requires testing the loaded extension against the current site.
+
+The [2026-10-14 follow-up](docs/project-follow-up-2026-10-14.md) records current GMGN DOM inspection, multi-button amount and market-cap fixes, and the review of previously uncommitted changes. On dual-button cards the secondary preset stays independent of the primary column input. Card-based average-entry market-cap markers require complete, independently observed execution history; incomplete or mixed history hides that coordinate.
 
 ## Safety
 

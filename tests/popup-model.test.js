@@ -154,7 +154,8 @@ function popupRuntime() {
   );
   assert.notEqual(source, popupSource, 'popup test harness must replace startup');
   const context = {
-    Promise, Object, Number, String, Array, Map, Set, Math, console, Tango, document,
+    Promise, Object, Number, String, Array, Map, Set, Math, Date, console, Tango, document,
+    setTimeout: () => 0, clearTimeout: () => {},
     chrome: { runtime: { sendMessage: async () => ({ ok: false }), openOptionsPage() {} }, tabs: { create() {} } },
     confirm: () => true
   };

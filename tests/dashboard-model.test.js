@@ -84,6 +84,38 @@ test('Dashboard global USD exactly sums the canonical USD totals displayed by it
   assert.deepEqual(model.globalUsd.missingChains, ['sol', 'base', 'robinhood', 'xlayer']);
 });
 
+test('Dashboard retains finite partial USD totals when one finite provider price overflows its account conversion', () => {
+  const prices = Object.fromEntries(Tango.Chains.all().map(chain => [chain.id, 1]));
+  prices.eth = 1e308;
+  const state = Tango.State.createInitialState();
+  state.initialized = true;
+  const model = DashboardModel.build(state, settings, 'eth', prices);
+  const eth = model.accounts.find(({ chain }) => chain.id === 'eth');
+  assert.equal(eth.usdSummary, null);
+  assert.equal(eth.summary.equityNative, 10);
+  assert.equal(model.summary.equityNative, 10);
+  assert.deepEqual(model.globalUsd.missingChains, ['eth']);
+  assert.equal(model.globalUsd.complete, false);
+  assert.equal(model.globalUsd.assetsUsd, 50);
+  assert.equal(model.globalUsd.pnlUsd, 0);
+  assert.ok(model.accounts.filter(({ chain }) => chain.id !== 'eth').every(card => card.usdSummary.assetsUsd === 10));
+});
+
+test('Dashboard excludes nonfinite native prices from card USD summaries without hiding unrelated engine errors', () => {
+  const state = Tango.State.createInitialState();
+  const model = DashboardModel.build(state, settings, 'eth', { eth: Infinity, bsc: 1 });
+  assert.equal(model.accounts.find(({ chain }) => chain.id === 'eth').usdSummary, null);
+  assert.ok(Number.isFinite(model.globalUsd.assetsUsd) && Number.isFinite(model.globalUsd.pnlUsd));
+  const original = Tango.Engine.chainUsdSummary;
+  try {
+    Tango.Engine.chainUsdSummary = (...args) => {
+      if (args[1] === 'eth') throw new Error('unexpectedSummaryFailure');
+      return original(...args);
+    };
+    assert.throws(() => DashboardModel.build(state, settings, 'eth', { eth: 1 }), /unexpectedSummaryFailure/);
+  } finally { Tango.Engine.chainUsdSummary = original; }
+});
+
 test('Dashboard selected and account-card native summaries use each current native price', () => {
   const model = DashboardModel.build(fixture(), settings, 'eth', { eth: 1_000, bsc: 600 }, {});
 
@@ -178,6 +210,17 @@ test('calendar values are selected-chain-only', () => {
   assert.equal(view.days['2026-07-18'].usdAtExecution, 2_000);
   assert.equal(view.trades.length, 1);
   assert.equal(view.totalNative, 1);
+});
+
+test('calendar monthly PnL preserves daily aggregates after retained history is removed', () => {
+  const state = fixture();
+  state.trades = [];
+  state.dailyRealizedByChain.eth['2026-07-19'] = { native: -0.25, usdAtExecution: -500 };
+  const view = DashboardModel.calendar(state, 'eth', 2026, 6);
+  assert.equal(view.totalNative, 0.75);
+  assert.equal(view.trades.length, 0);
+  assert.equal(view.winRate, 0);
+  assert.equal(view.statisticsScope, 'retainedHistory');
 });
 
 test('unsupported operational chain falls back to Solana and never creates ALL', () => {

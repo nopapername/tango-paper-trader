@@ -815,6 +815,16 @@
   function cardTokenIdentity(card, expectedAddress = '', chainId = null) {
     const fromCard = cardIdentityFromText(card?.innerText || card?.textContent || '', expectedAddress, chainId);
     if (!fromCard) return null;
+    const symbolNode = card?.querySelector?.('[data-sentry-component="TooltipCopy"]');
+    const structuredSymbol = String(symbolNode?.textContent || '').trim();
+    const structuredName = String(symbolNode?.nextElementSibling?.textContent || '').trim();
+    // Explicit symbol/name fields need no heuristic metric-prefix filtering:
+    // legitimate symbols such as FOUR CATS would otherwise be rejected as F.
+    if (structuredSymbol && structuredSymbol.length <= 32 && !tokenAddressLine(structuredSymbol)) {
+      return { symbol: structuredSymbol,
+        name: structuredName && structuredName.length <= 100 && !tokenAddressLine(structuredName)
+          ? structuredName : structuredSymbol };
+    }
     if (fromCard.symbol !== 'TOKEN') return fromCard;
     const selectors = ['[data-testid="token-symbol"]', '[data-token-symbol]', '[class*="token-symbol"]'];
     for (const selector of selectors) {
@@ -1062,7 +1072,12 @@
   }
 
   function cardMarketSnapshot(card, chain, address, token = {}) {
-    const marketCapUsd = cardMarketCap(card?.innerText || card?.textContent || '');
+    // New trenches render the MC prefix through CSS/icon content, so it is
+    // absent from innerText. Read the explicitly identified field, never V/N.
+    const marketCapField = card?.querySelector?.('[data-icon="MC"]');
+    const marketCapUsd = marketCapField
+      ? parseUsdMoney(marketCapField.textContent)
+      : cardMarketCap(card?.innerText || card?.textContent || '');
     const supply = Tango.Supply?.resolve?.({
       chain, launchpad: token.launchpad, launchMode: token.launchMode, marketCapUsd, priceUsd: 0
     }) || null;
@@ -1183,9 +1198,9 @@
       replacement.className = [...classes, 'tango-list-quick-buy'].join(' ');
     }
     stripQuickBuyActionAttributes(replacement);
-    replacement.type = 'button';
-    replacement.dataset.tangoQuickBuy = '1';
-    replacement.dataset.tangoPaperAction = 'quick-buy';
+    if (replacement.type !== 'button') replacement.type = 'button';
+    if (replacement.dataset.tangoQuickBuy !== '1') replacement.dataset.tangoQuickBuy = '1';
+    if (replacement.dataset.tangoPaperAction !== 'quick-buy') replacement.dataset.tangoPaperAction = 'quick-buy';
   }
 
   function registerPaperQuickBuy(slot, binding, actionId = binding?.actionId) {
@@ -1535,27 +1550,46 @@
 
   function clearLockedQuickBuyStructuralHosts(binding) {
     for (const host of binding?.structuralHosts || []) {
-      host?.classList?.remove?.('tango-quick-buy-structural-host');
+      setQuickBuyClass(host, 'tango-quick-buy-structural-host', false);
     }
     if (binding) binding.structuralHosts = [];
   }
 
+  function setQuickBuyClass(element, name, enabled) {
+    if (!element?.classList) return;
+    if (typeof element.classList.contains !== 'function' && typeof element.className !== 'string') {
+      element.classList[enabled ? 'add' : 'remove']?.(name);
+      return;
+    }
+    const hasClass = element.classList.contains?.(name)
+      ?? String(element.className || '').split(/\s+/).includes(name);
+    if (enabled && !hasClass) element.classList.add?.(name);
+    if (!enabled && hasClass) element.classList.remove?.(name);
+  }
+
   function applyLockedQuickBuyPresentation(replacement, slot = null) {
     if (!replacement) return LOCKED_QUICK_BUY_PROFILE;
-    replacement.className = 'tango-list-quick-buy';
-    if (replacement.style) replacement.style.cssText = '';
+    if (replacement.className !== 'tango-list-quick-buy') replacement.className = 'tango-list-quick-buy';
+    if (replacement.style && replacement.style.cssText !== '') replacement.style.cssText = '';
     ensureInertQuickBuy(replacement);
-    replacement.dataset.tangoQuickBuySize = LOCKED_QUICK_BUY_PROFILE.id;
-    if (slot?.dataset) slot.dataset.tangoQuickBuySize = LOCKED_QUICK_BUY_PROFILE.id;
+    if (replacement.dataset.tangoQuickBuySize !== LOCKED_QUICK_BUY_PROFILE.id) {
+      replacement.dataset.tangoQuickBuySize = LOCKED_QUICK_BUY_PROFILE.id;
+    }
+    if (slot?.dataset && slot.dataset.tangoQuickBuySize !== LOCKED_QUICK_BUY_PROFILE.id) {
+      slot.dataset.tangoQuickBuySize = LOCKED_QUICK_BUY_PROFILE.id;
+    }
     const binding = slot?.__tangoQuickBuyBinding;
     const actionHost = lockedQuickBuyActionHost(slot, replacement);
     if (binding?.actionHost && binding.actionHost !== actionHost) {
-      binding.actionHost.classList?.remove?.('tango-quick-buy-action-host');
+      setQuickBuyClass(binding.actionHost, 'tango-quick-buy-action-host', false);
     }
-    clearLockedQuickBuyStructuralHosts(binding);
     const structuralHosts = lockedQuickBuyStructuralHosts(slot, actionHost);
-    structuralHosts.forEach((host) => host.classList?.add?.('tango-quick-buy-structural-host'));
-    actionHost?.classList?.add?.('tango-quick-buy-action-host');
+    const nextHosts = new Set(structuralHosts);
+    for (const previous of binding?.structuralHosts || []) {
+      if (!nextHosts.has(previous)) setQuickBuyClass(previous, 'tango-quick-buy-structural-host', false);
+    }
+    structuralHosts.forEach((host) => setQuickBuyClass(host, 'tango-quick-buy-structural-host', true));
+    setQuickBuyClass(actionHost, 'tango-quick-buy-action-host', true);
     if (binding) {
       binding.actionHost = actionHost;
       binding.structuralHosts = structuralHosts;
@@ -1591,7 +1625,15 @@
 
   function cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol) {
     const columnInput = trenchColumn(card)?.querySelector('[data-sentry-component="BuyAmountInput"] input');
-    return selectQuickBuyAmount(columnInput?.value, nativeControl?.textContent, slot.dataset.tangoAmountSol, defaultAmountSol);
+    // The secondary preset is independent of the primary column input. The
+    // current native action can also be the slot itself rather than a child.
+    const slots = Array.from(card?.querySelectorAll?.('.BuyButton-continer') || []);
+    const secondary = slots.length > 1 && slots.includes(slot) && slots.at(-1) !== slot;
+    const rootText = Array.from(slot?.childNodes || [])
+      .filter((node) => node.nodeType === 3).map((node) => node.textContent || '').join(' ');
+    const nativeText = nativeControl?.textContent || rootText;
+    return selectQuickBuyAmount(secondary ? '' : columnInput?.value,
+      nativeText, slot.dataset.tangoAmountSol, defaultAmountSol);
   }
 
   function renderQuickBuyContent(replacement, paperLabel, amountNative, nativeSymbol) {
@@ -1716,7 +1758,7 @@
       invoke: () => acceptQuickBuyIdentityActivation(binding, quickBuyActivationContext(binding))
     };
     applyPaperStateCopy(binding, 'resolving-identity');
-    slot.classList.add('tango-native-buy-overridden');
+    setQuickBuyClass(slot, 'tango-native-buy-overridden', true);
     if (!commitPaperQuickBuy(slot, binding, action)) return false;
     slot.dataset.tangoAmountSol = String(amountNative);
     slot.dataset.tangoPaperLabel = paperLabel;
@@ -1920,7 +1962,7 @@
     };
     applyPaperStateCopy(nextBinding, 'resolving-identity');
     if (!commitPaperQuickBuy(slot, nextBinding, action)) return false;
-    slot.classList.add('tango-native-buy-overridden');
+    setQuickBuyClass(slot, 'tango-native-buy-overridden', true);
     slot.dataset.tangoQuickBuy = '1';
     delete slot.dataset.tangoTokenAddress;
     delete slot.dataset.tangoBindingKey;
@@ -2154,7 +2196,7 @@
         && existingBinding.policyKey === policyKey
         && existingBinding.card === card) {
         // GMGN can reconcile the original control back into the slot. Remove it again fail-closed.
-        slot.classList.add('tango-native-buy-overridden');
+        setQuickBuyClass(slot, 'tango-native-buy-overridden', true);
         slot.dataset.tangoQuickBuy = '1';
         slot.dataset.tangoTokenAddress = address;
         slot.dataset.tangoAmountSol = String(amountSol);
@@ -2197,7 +2239,7 @@
         slot, card, replacement, bindingKey, chain, address, actionId,
         onQuickBuy, amountNative: amountSol
       });
-      slot.classList.add('tango-native-buy-overridden');
+      setQuickBuyClass(slot, 'tango-native-buy-overridden', true);
       const existingOperation = activeQuickBuyOperation(bindingKey, slot);
       const binding = {
         slot, key: bindingKey, chain, address, href, card, nativeControl, replacement,

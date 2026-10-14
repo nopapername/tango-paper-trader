@@ -178,8 +178,8 @@
     if (hasOwn(source, 'theme') && !['auto', 'dark', 'light'].includes(source.theme)) throw new Error('invalidSettings');
     if (hasOwn(source, 'pnlBarPosition') && !['top', 'bottom'].includes(source.pnlBarPosition)) throw new Error('invalidSettings');
     if (hasOwn(source, 'selectedChain') && !Tango.Chains.get(source.selectedChain)) throw new Error('invalidSettings');
-    if (!optional(source, 'slippageBps', (value) => finiteBetween(value, 0, 10_000))) throw new Error('invalidSettings');
-    if (!optional(source, 'platformFeeBps', (value) => finiteBetween(value, 0, 10_000))) throw new Error('invalidSettings');
+    if (!optional(source, 'slippageBps', (value) => finiteBetween(value, 0, 9_999))) throw new Error('invalidSettings');
+    if (!optional(source, 'platformFeeBps', (value) => finiteBetween(value, 0, 9_999))) throw new Error('invalidSettings');
     if (!optional(source, 'sellPresets', (value) => validatePresetList(value, { maximum: 100 }))) throw new Error('invalidSettings');
     if (!optional(source, 'buyPresets', validatePresetList)) throw new Error('invalidSettings');
     if (!optional(source, 'networkFeeSol', (value) => finiteBetween(value, 0, 1_000_000))) throw new Error('invalidSettings');
@@ -528,7 +528,7 @@
     ));
   }
 
-  function normalizePosition(position, key, accounts, strict, legacyKey = false, trades = []) {
+  function normalizePosition(position, key, accounts, strict, legacyKey = false, trades = [], maximumTimestamp) {
     const chainId = String(position?.chain || '').toLowerCase();
     const chain = Tango.Chains.get(chainId);
     const address = position?.tokenAddress ?? position?.address;
@@ -554,6 +554,8 @@
         || !finite(position?.realizedPnlNative ?? position?.realizedPnlSol ?? 0)
         || !validTimestamp(position?.openedAt)
         || !validTimestamp(position?.updatedAt)
+        || position.openedAt > position.updatedAt
+        || (maximumTimestamp != null && position.openedAt > maximumTimestamp)
         || !validProvenance(position)
         || !optional(position, 'quoteObservedAt', validTimestamp)
         || !optional(position, 'metadataUpdatedAt', validTimestamp)) {
@@ -616,6 +618,19 @@
       lastNativePriceUsd: native(position, 'lastNativePriceUsd', 'lastSolPriceUsd'),
       ...(marketCapProvenance ? { marketCapProvenance } : {})
     });
+    // Recover the timestamp of an already stored legacy position without
+    // changing its economics. Strict backup imports reject this inconsistency.
+    if (!strict && validTimestamp(position.openedAt) && validTimestamp(position.updatedAt)
+      && position.openedAt > position.updatedAt) {
+      if (trustedSupplyIdentity(position)?.source === UNKNOWN_FALLBACK_SOURCE
+        && hasCanonicalUnknownFallbackEntry(position, trades)) {
+        // The opening timestamp identifies the durable fallback origin. A
+        // clock rollback must not sever that dependency during recovery.
+        normalizedPosition.updatedAt = position.openedAt;
+      } else {
+        normalizedPosition.openedAt = position.updatedAt;
+      }
+    }
     if (marketCapProvenance === MARKET_CAP_PROVENANCE && !hasOwn(position, 'totalSupply')) {
       normalizedPosition.totalSupply = MARKET_CAP_DIVISOR;
       normalizedPosition.supplySource = 'LEGACY_PUMP_RULE';
@@ -658,7 +673,7 @@
     return valid.length ? Math.max(...valid) : 0;
   }
 
-  function migrateV1(raw, settings, strict, migrationNow) {
+  function migrateV1(raw, settings, strict, migrationNow, maximumTimestamp) {
     if (strict) {
       if (!isRecord(raw.account)) throw new Error('invalidAccount');
       if (!isRecord(raw.positions)) throw new Error('invalidPositions');
@@ -689,15 +704,16 @@
     };
     state.positions = {};
     Object.entries(raw.positions || {}).forEach(([key, position]) => {
-      const normalized = normalizePosition(position, key, state.accounts, strict, true);
+      const normalized = normalizePosition(position, key, state.accounts, strict, true, [], maximumTimestamp);
       if (!normalized) return;
       if (state.positions[normalized[0]] && strict) throw new Error('positionCollision');
       if (strict && !normalized[2]) throw new Error('invalidPosition');
       state.positions[normalized[0]] = normalized[1];
     });
-    state.trades = Array.isArray(raw.trades) ? raw.trades.slice(0, Tango.MAX_TRADES).map((trade) => migrateTrade(trade, strict)) : [];
+    state.trades = Array.isArray(raw.trades) ? raw.trades.map((trade) => migrateTrade(trade, strict)) : [];
     state.dailyRealizedByChain.sol = normalizeDaily(raw.dailyRealized, strict, true);
     state.initialized = Boolean(raw.initialized);
+    if (strict && state.trades.length > Tango.MAX_TRADES) throw new Error('importTooManyRecords');
     return state;
   }
 
@@ -705,7 +721,9 @@
     const strict = Boolean(options.strict);
     if (!raw) return createInitialState();
     if (strict && !isRecord(raw)) throw new Error('invalidState');
-    if ((strict ? raw.schemaVersion : Number(raw.schemaVersion)) === 1) return migrateV1(raw, settings, strict, options.migrationNow);
+    if ((strict ? raw.schemaVersion : Number(raw.schemaVersion)) === 1) {
+      return migrateV1(raw, settings, strict, options.migrationNow, options.maximumTimestamp);
+    }
     if (Number(raw.schemaVersion) !== 2) {
       if (strict) throw new Error('unsupportedSchema');
       return createInitialState();
@@ -728,12 +746,12 @@
       normalizeAccount(raw.accounts?.[chain.id], base.accounts[chain.id], strict)
     ]));
     const trades = Array.isArray(raw.trades)
-      ? raw.trades.slice(0, Tango.MAX_TRADES).map((trade) => normalizeV2Trade(trade, strict))
+      ? raw.trades.map((trade) => normalizeV2Trade(trade, strict))
       : [];
     if (strict) validateUnknownFallbackTradeHistories(trades);
     const positions = {};
     Object.entries(raw.positions || {}).forEach(([key, position]) => {
-      const normalized = normalizePosition(position, key, accounts, strict, false, trades);
+      const normalized = normalizePosition(position, key, accounts, strict, false, trades, options.maximumTimestamp);
       if (!normalized) return;
       if (positions[normalized[0]] && strict) throw new Error('positionCollision');
       if (strict && !normalized[2]) throw new Error('invalidPosition');
@@ -744,8 +762,14 @@
       normalizeDaily(raw.dailyRealizedByChain?.[chain.id], strict)
     ]));
     const calibrations = Array.isArray(raw.calibrations)
-      ? raw.calibrations.slice(0, Tango.MAX_TRADES).map((event) => normalizeCalibration(event, strict)).filter(Boolean)
+      ? raw.calibrations.map((event) => normalizeCalibration(event, strict)).filter(Boolean)
       : [];
+    // Validate the complete input before rejecting a lossless import. Runtime
+    // history limits are enforced together with byte limits by the coordinator,
+    // where open fallback origins and the current mutation can be protected.
+    if (strict && (trades.length > Tango.MAX_TRADES || calibrations.length > Tango.MAX_TRADES)) {
+      throw new Error('importTooManyRecords');
+    }
     return {
       ...base,
       ...raw,

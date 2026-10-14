@@ -1,0 +1,1138 @@
+TAP version 13
+# Subtest: all native presentations produce one locked Tango giant control
+ok 1 - all native presentations produce one locked Tango giant control
+  ---
+  duration_ms: 8.5227
+  type: 'test'
+  ...
+# Subtest: native presentation mutation preserves giant geometry and action identity
+ok 2 - native presentation mutation preserves giant geometry and action identity
+  ---
+  duration_ms: 0.6674
+  type: 'test'
+  ...
+# Subtest: real slot-local wrapper chain receives and cleans only Tango structural geometry
+ok 3 - real slot-local wrapper chain receives and cleans only Tango structural geometry
+  ---
+  duration_ms: 0.7969
+  type: 'test'
+  ...
+# Subtest: two verified slots keep independent Giant Guard callbacks
+ok 4 - two verified slots keep independent Giant Guard callbacks
+  ---
+  duration_ms: 1.702
+  type: 'test'
+  ...
+# Subtest: adapter callback rechecks live trench slot route href and generation when Guard is bypassed
+ok 5 - adapter callback rechecks live trench slot route href and generation when Guard is bypassed
+  ---
+  duration_ms: 10.0311
+  type: 'test'
+  ...
+# Subtest: two slots on one card isolate Guard callbacks reinsertion and in-flight state
+ok 6 - two slots on one card isolate Guard callbacks reinsertion and in-flight state
+  ---
+  duration_ms: 1.0485
+  type: 'test'
+  ...
+# Subtest: headless telemetry rejects the initial title as an incomplete protocol state
+ok 7 - headless telemetry rejects the initial title as an incomplete protocol state
+  ---
+  duration_ms: 0.2912
+  type: 'test'
+  ...
+# Subtest: headless Chrome fills the exact Giant slot through direct nested and GMGN-shaped wrapper chains
+ok 8 - headless Chrome fills the exact Giant slot through direct nested and GMGN-shaped wrapper chains
+  ---
+  duration_ms: 432.2695
+  type: 'test'
+  ...
+# Subtest: extracts GMGN and Pump.fun token addresses
+ok 9 - extracts GMGN and Pump.fun token addresses
+  ---
+  duration_ms: 0.2324
+  type: 'test'
+  ...
+# Subtest: parses compact money and GMGN subscript prices
+ok 10 - parses compact money and GMGN subscript prices
+  ---
+  duration_ms: 0.2682
+  type: 'test'
+  ...
+# Subtest: extracts trench market cap and symbol from card text
+ok 11 - extracts trench market cap and symbol from card text
+  ---
+  duration_ms: 0.3208
+  type: 'test'
+  ...
+# Subtest: extracts symbol and name from a trench title without opening token detail
+ok 12 - extracts symbol and name from a trench title without opening token detail
+  ---
+  duration_ms: 0.423
+  type: 'test'
+  ...
+# Subtest: trench identity starts after the card address instead of avatar badge counts
+ok 13 - trench identity starts after the card address instead of avatar badge counts
+  ---
+  duration_ms: 0.0834
+  type: 'test'
+  ...
+# Subtest: a numeric token name remains valid when it appears after the card address
+ok 14 - a numeric token name remains valid when it appears after the card address
+  ---
+  duration_ms: 0.0544
+  type: 'test'
+  ...
+# Subtest: detail address hints accept the matching abbreviated CA only
+ok 15 - detail address hints accept the matching abbreviated CA only
+  ---
+  duration_ms: 0.1001
+  type: 'test'
+  ...
+# Subtest: trench identity is bound to the expected CA when another truncated value appears first
+ok 16 - trench identity is bound to the expected CA when another truncated value appears first
+  ---
+  duration_ms: 0.4022
+  type: 'test'
+  ...
+# Subtest: a card whose href CA is ahead of its visible DOM fails closed without reading its old logo
+ok 17 - a card whose href CA is ahead of its visible DOM fails closed without reading its old logo
+  ---
+  duration_ms: 0.1771
+  type: 'test'
+  ...
+# Subtest: trench logo comes from the card avatar group rather than nested token images
+ok 18 - trench logo comes from the card avatar group rather than nested token images
+  ---
+  duration_ms: 0.0618
+  type: 'test'
+  ...
+# Subtest: a stale detail header is rejected until its CA matches the new SPA route
+ok 19 - a stale detail header is rejected until its CA matches the new SPA route
+  ---
+  duration_ms: 0.6038
+  type: 'test'
+  ...
+# Subtest: detail header accepts a nearby CA leaf in its small exclusive identity container
+ok 20 - detail header accepts a nearby CA leaf in its small exclusive identity container
+  ---
+  duration_ms: 0.1684
+  type: 'test'
+  ...
+# Subtest: detail scope prefers the current BaseInfoBar when another widget repeats the same CA
+ok 21 - detail scope prefers the current BaseInfoBar when another widget repeats the same CA
+  ---
+  duration_ms: 0.163
+  type: 'test'
+  ...
+# Subtest: a transient empty detail read preserves the verified context for the same route only
+ok 22 - a transient empty detail read preserves the verified context for the same route only
+  ---
+  duration_ms: 0.2575
+  type: 'test'
+  ...
+# Subtest: periodic reads keep richer exact-route metadata and quote fields over an address-only placeholder
+ok 23 - periodic reads keep richer exact-route metadata and quote fields over an address-only placeholder
+  ---
+  duration_ms: 0.1061
+  type: 'test'
+  ...
+# Subtest: verified exact-route detail metadata upgrades identity without discarding the richer quote
+ok 24 - verified exact-route detail metadata upgrades identity without discarding the richer quote
+  ---
+  duration_ms: 0.1866
+  type: 'test'
+  ...
+# Subtest: equal-rank detail reads fill placeholder metadata without downgrading rich exact-route fields
+ok 25 - equal-rank detail reads fill placeholder metadata without downgrading rich exact-route fields
+  ---
+  duration_ms: 0.1382
+  type: 'test'
+  ...
+# Subtest: current-token reads reject a verified context for the wrong route identity
+ok 26 - current-token reads reject a verified context for the wrong route identity
+  ---
+  duration_ms: 0.0729
+  type: 'test'
+  ...
+# Subtest: Solana detail identity remains case-sensitive while EVM identity normalizes case
+ok 27 - Solana detail identity remains case-sensitive while EVM identity normalizes case
+  ---
+  duration_ms: 0.1072
+  type: 'test'
+  ...
+# Subtest: detail context is retried while the current route has not been resolved
+ok 28 - detail context is retried while the current route has not been resolved
+  ---
+  duration_ms: 0.1638
+  type: 'test'
+  ...
+# Subtest: quick-buy injection is restricted to the Solana trench root
+ok 29 - quick-buy injection is restricted to the Solana trench root
+  ---
+  duration_ms: 0.1024
+  type: 'test'
+  ...
+# Subtest: sol detail route is supported
+ok 30 - sol detail route is supported
+  ---
+  duration_ms: 0.0869
+  type: 'test'
+  ...
+# Subtest: eth detail route is supported
+ok 31 - eth detail route is supported
+  ---
+  duration_ms: 0.0283
+  type: 'test'
+  ...
+# Subtest: bsc detail route is supported
+ok 32 - bsc detail route is supported
+  ---
+  duration_ms: 0.0229
+  type: 'test'
+  ...
+# Subtest: base detail route is supported
+ok 33 - base detail route is supported
+  ---
+  duration_ms: 0.0227
+  type: 'test'
+  ...
+# Subtest: robinhood detail route is supported
+ok 34 - robinhood detail route is supported
+  ---
+  duration_ms: 0.0213
+  type: 'test'
+  ...
+# Subtest: xlayer detail route is supported
+ok 35 - xlayer detail route is supported
+  ---
+  duration_ms: 0.0238
+  type: 'test'
+  ...
+# Subtest: trading panel requires an exact registered token detail route and valid address
+ok 36 - trading panel requires an exact registered token detail route and valid address
+  ---
+  duration_ms: 0.0968
+  type: 'test'
+  ...
+# Subtest: Solana cards retain Pump.fun support while EVM cards reject Base58 addresses
+ok 37 - Solana cards retain Pump.fun support while EVM cards reject Base58 addresses
+  ---
+  duration_ms: 0.1343
+  type: 'test'
+  ...
+# Subtest: Solana card metadata keeps address identity case-sensitive
+ok 38 - Solana card metadata keeps address identity case-sensitive
+  ---
+  duration_ms: 0.0962
+  type: 'test'
+  ...
+# Subtest: EVM card metadata normalizes address case
+ok 39 - EVM card metadata normalizes address case
+  ---
+  duration_ms: 0.0875
+  type: 'test'
+  ...
+# Subtest: card launchpad matches a differently cased EVM address link
+ok 40 - card launchpad matches a differently cased EVM address link
+  ---
+  duration_ms: 0.1697
+  type: 'test'
+  ...
+# Subtest: nested Solana card links require a case-sensitive visible address match
+ok 41 - nested Solana card links require a case-sensitive visible address match
+  ---
+  duration_ms: 0.1347
+  type: 'test'
+  ...
+# Subtest: a stale detail header linked to another chain fails closed
+ok 42 - a stale detail header linked to another chain fails closed
+  ---
+  duration_ms: 0.122
+  type: 'test'
+  ...
+# Subtest: detail token logo ignores unrelated token images elsewhere on the page
+ok 43 - detail token logo ignores unrelated token images elsewhere on the page
+  ---
+  duration_ms: 0.0795
+  type: 'test'
+  ...
+# Subtest: detail identity parses a combined title and accepts a numeric token symbol
+ok 44 - detail identity parses a combined title and accepts a numeric token symbol
+  ---
+  duration_ms: 0.2259
+  type: 'test'
+  ...
+# Subtest: detail identity reads the GMGN symbol and original name from the bound info row
+ok 45 - detail identity reads the GMGN symbol and original name from the bound info row
+  ---
+  duration_ms: 0.0913
+  type: 'test'
+  ...
+# Subtest: trench column amount takes priority over the replaced native button amount
+ok 46 - trench column amount takes priority over the replaced native button amount
+  ---
+  duration_ms: 0.0442
+  type: 'test'
+  ...
+# Subtest: quick-buy does not reuse a cached market cap after the live card value disappears
+ok 47 - quick-buy does not reuse a cached market cap after the live card value disappears
+  ---
+  duration_ms: 1.3638
+  type: 'test'
+  ...
+# Subtest: quick-buy preserves trusted Pump market-cap valuation and gives supplyless EVM trenches a provisional valuation
+ok 48 - quick-buy preserves trusted Pump market-cap valuation and gives supplyless EVM trenches a provisional valuation
+  ---
+  duration_ms: 1.5807
+  type: 'test'
+  ...
+# Subtest: quick-buy binds launchpad supply rules to the same GMGN card address
+ok 49 - quick-buy binds launchpad supply rules to the same GMGN card address
+  ---
+  duration_ms: 1.3617
+  type: 'test'
+  ...
+# Subtest: Pump Mayhem quick-buy emits a trusted 2B order and derives engine quantity from 2B
+ok 50 - Pump Mayhem quick-buy emits a trusted 2B order and derives engine quantity from 2B
+  ---
+  duration_ms: 3.3496
+  type: 'test'
+  ...
+# Subtest: Pump token identity or unrelated prose containing Mayhem does not select 2B mode
+ok 51 - Pump token identity or unrelated prose containing Mayhem does not select 2B mode
+  ---
+  duration_ms: 0.3913
+  type: 'test'
+  ...
+# Subtest: quick-buy ignores a launchpad link exposing another card address
+ok 52 - quick-buy ignores a launchpad link exposing another card address
+  ---
+  duration_ms: 0.3866
+  type: 'test'
+  ...
+# Subtest: quick-buy emits a provisional 1B valuation for an unknown platform card
+ok 53 - quick-buy emits a provisional 1B valuation for an unknown platform card
+  ---
+  duration_ms: 0.3098
+  type: 'test'
+  ...
+# Subtest: verified non-Pump Solana cards receive Tango quick-buy with a provisional market-cap quote
+ok 54 - verified non-Pump Solana cards receive Tango quick-buy with a provisional market-cap quote
+  ---
+  duration_ms: 0.6893
+  type: 'test'
+  ...
+# Subtest: authoritative discovery removes omitted overrides without restoring a native real-buy leaf
+ok 55 - authoritative discovery removes omitted overrides without restoring a native real-buy leaf
+  ---
+  duration_ms: 0.2666
+  type: 'test'
+  ...
+# Subtest: explicit quick-buy clear still restores a current identity-matched native control
+ok 56 - explicit quick-buy clear still restores a current identity-matched native control
+  ---
+  duration_ms: 0.5603
+  type: 'test'
+  ...
+# Subtest: leaving the trench removes paper overrides without restoring a native real-buy leaf
+ok 57 - leaving the trench removes paper overrides without restoring a native real-buy leaf
+  ---
+  duration_ms: 0.2287
+  type: 'test'
+  ...
+# Subtest: quick-buy restoration does not reparent an original control already connected elsewhere
+ok 58 - quick-buy restoration does not reparent an original control already connected elsewhere
+  ---
+  duration_ms: 0.2227
+  type: 'test'
+  ...
+# Subtest: quick-buy restoration does not move a primary control out of a detached React staging tree
+ok 59 - quick-buy restoration does not move a primary control out of a detached React staging tree
+  ---
+  duration_ms: 0.1956
+  type: 'test'
+  ...
+# Subtest: trench snapshots are bounded and isolated by exact chain and normalized address
+ok 60 - trench snapshots are bounded and isolated by exact chain and normalized address
+  ---
+  duration_ms: 0.6141
+  type: 'test'
+  ...
+# Subtest: amount-driven paper rebind never restores a detached native control with a stale real amount
+ok 61 - amount-driven paper rebind never restores a detached native control with a stale real amount
+  ---
+  duration_ms: 1.4474
+  type: 'test'
+  ...
+# Subtest: amount-driven rebind leaves a connected stale native control elsewhere and paper in the live slot
+ok 62 - amount-driven rebind leaves a connected stale native control elsewhere and paper in the live slot
+  ---
+  duration_ms: 1.3466
+  type: 'test'
+  ...
+# Subtest: a native-leafless full-height GMGN slot mounts paper inside its preserved action host
+ok 63 - a native-leafless full-height GMGN slot mounts paper inside its preserved action host
+  ---
+  duration_ms: 0.9211
+  type: 'test'
+  ...
+# Subtest: a late GMGN action host adopts the existing paper button without rebinding its action
+ok 64 - a late GMGN action host adopts the existing paper button without rebinding its action
+  ---
+  duration_ms: 1.0594
+  type: 'test'
+  ...
+# Subtest: a staged paper shell moves into a late action host when its token becomes coherent
+ok 65 - a staged paper shell moves into a late action host when its token becomes coherent
+  ---
+  duration_ms: 1.6123
+  type: 'test'
+  ...
+# Subtest: an unbound staged card gets an inert paper shell and upgrades that same shell in place
+ok 66 - an unbound staged card gets an inert paper shell and upgrades that same shell in place
+  ---
+  duration_ms: 1.5334
+  type: 'test'
+  ...
+# Subtest: an unverified staged native presentation cannot overwrite the trusted chain presentation
+ok 67 - an unverified staged native presentation cannot overwrite the trusted chain presentation
+  ---
+  duration_ms: 1.2756
+  type: 'test'
+  ...
+# Subtest: an active card reused for an incomplete token keeps its locked Giant presentation
+ok 68 - an active card reused for an incomplete token keeps its locked Giant presentation
+  ---
+  duration_ms: 1.5743
+  type: 'test'
+  ...
+# Subtest: clearing an unverified staged shell never restores its native real-buy leaf
+ok 69 - clearing an unverified staged shell never restores its native real-buy leaf
+  ---
+  duration_ms: 0.7638
+  type: 'test'
+  ...
+# Subtest: a staged shell activated for a reused card never restores the prior token native leaf
+ok 70 - a staged shell activated for a reused card never restores the prior token native leaf
+  ---
+  duration_ms: 0.9588
+  type: 'test'
+  ...
+# Subtest: a staged shell adopts the coherent live native leaf as restore provenance
+ok 71 - a staged shell adopts the coherent live native leaf as restore provenance
+  ---
+  duration_ms: 1.3123
+  type: 'test'
+  ...
+# Subtest: a new token without a native leaf retains the locked Giant presentation
+ok 72 - a new token without a native leaf retains the locked Giant presentation
+  ---
+  duration_ms: 1.0355
+  type: 'test'
+  ...
+# Subtest: locked Giant paper shell drift is detected and repaired without a native leaf
+ok 73 - locked Giant paper shell drift is detected and repaired without a native leaf
+  ---
+  duration_ms: 0.9093
+  type: 'test'
+  ...
+# Subtest: a disconnected paper leaf is rebuilt from its binding without waiting for a native leaf
+ok 74 - a disconnected paper leaf is rebuilt from its binding without waiting for a native leaf
+  ---
+  duration_ms: 1.129
+  type: 'test'
+  ...
+# Subtest: a bound card keeps the approved href action until virtual reuse publishes a new href
+ok 75 - a bound card keeps the approved href action until virtual reuse publishes a new href
+  ---
+  duration_ms: 1.2699
+  type: 'test'
+  ...
+# Subtest: a ready quick-buy rejects same-token query and hash drift until rediscovery
+ok 76 - a ready quick-buy rejects same-token query and hash drift until rediscovery
+  ---
+  duration_ms: 0.3543
+  type: 'test'
+  ...
+# Subtest: a ready quick-buy rejects an href rewrite to a different address before rediscovery
+ok 77 - a ready quick-buy rejects an href rewrite to a different address before rediscovery
+  ---
+  duration_ms: 0.2562
+  type: 'test'
+  ...
+# Subtest: a bound card stays inert while its href temporarily disappears
+ok 78 - a bound card stays inert while its href temporarily disappears
+  ---
+  duration_ms: 1.2903
+  type: 'test'
+  ...
+# Subtest: temporary card class drift holds a connected binding behind the paper barrier until recovery
+ok 79 - temporary card class drift holds a connected binding behind the paper barrier until recovery
+  ---
+  duration_ms: 1.689
+  type: 'test'
+  ...
+# Subtest: an untagged native action leaf in a reused new-card slot is detected and removed fail-closed
+ok 80 - an untagged native action leaf in a reused new-card slot is detected and removed fail-closed
+  ---
+  duration_ms: 1.1089
+  type: 'test'
+  ...
+# Subtest: sequential same-binding React reinsertions restore only the latest coherent native generation
+ok 81 - sequential same-binding React reinsertions restore only the latest coherent native generation
+  ---
+  duration_ms: 1.145
+  type: 'test'
+  ...
+# Subtest: all sibling native action leaves survive paper mode and are restored when master is turned off
+ok 82 - all sibling native action leaves survive paper mode and are restored when master is turned off
+  ---
+  duration_ms: 1.5242
+  type: 'test'
+  ...
+# Subtest: master OFF does not move a sibling control out of a detached React staging tree
+ok 83 - master OFF does not move a sibling control out of a detached React staging tree
+  ---
+  duration_ms: 1.2666
+  type: 'test'
+  ...
+# Subtest: a native action wrapper is preserved after its real leaf is replaced by the paper shell
+ok 84 - a native action wrapper is preserved after its real leaf is replaced by the paper shell
+  ---
+  duration_ms: 1.9406
+  type: 'test'
+  ...
+# Subtest: a bound card stays inert while its trench column temporarily disappears
+ok 85 - a bound card stays inert while its trench column temporarily disappears
+  ---
+  duration_ms: 0.9472
+  type: 'test'
+  ...
+# Subtest: clearing during a token identity transition never restores a stale native control
+ok 86 - clearing during a token identity transition never restores a stale native control
+  ---
+  duration_ms: 0.9256
+  type: 'test'
+  ...
+# Subtest: metadata enrichment never gates an address-bound paper shell
+ok 87 - metadata enrichment never gates an address-bound paper shell
+  ---
+  duration_ms: 1.7252
+  type: 'test'
+  ...
+# Subtest: a native leaf seen only during metadata transition never replaces verified restore provenance
+ok 88 - a native leaf seen only during metadata transition never replaces verified restore provenance
+  ---
+  duration_ms: 1.2336
+  type: 'test'
+  ...
+# Subtest: an in-flight paper click stays clickable and deduplicated through metadata drift
+ok 89 - an in-flight paper click stays clickable and deduplicated through metadata drift
+  ---
+  duration_ms: 1.0749
+  type: 'test'
+  ...
+# Subtest: same-token recovery cannot reopen an in-flight paper action after the cooldown
+ok 90 - same-token recovery cannot reopen an in-flight paper action after the cooldown
+  ---
+  duration_ms: 1.1156
+  type: 'test'
+  ...
+# Subtest: React leaf rebuild cannot reopen an in-flight paper action with a new action id
+ok 91 - React leaf rebuild cannot reopen an in-flight paper action with a new action id
+  ---
+  duration_ms: 1.1141
+  type: 'test'
+  ...
+# Subtest: same-binding reconciliation repairs forbidden native disabled state
+ok 92 - same-binding reconciliation repairs forbidden native disabled state
+  ---
+  duration_ms: 1.0791
+  type: 'test'
+  ...
+# Subtest: health reconciliation restores a removed leaf action id without replacing or duplicating its binding
+ok 93 - health reconciliation restores a removed leaf action id without replacing or duplicating its binding
+  ---
+  duration_ms: 1.0258
+  type: 'test'
+  ...
+# Subtest: quick-buy health probe ignores a permanently ineligible unbound slot
+ok 94 - quick-buy health probe ignores a permanently ineligible unbound slot
+  ---
+  duration_ms: 0.1172
+  type: 'test'
+  ...
+# Subtest: quick-buy health probe reports a visible identity-bound unbound native control
+ok 95 - quick-buy health probe reports a visible identity-bound unbound native control
+  ---
+  duration_ms: 0.1764
+  type: 'test'
+  ...
+# Subtest: quick-buy health probe round-robins bounded unbound slots and finds a coherent card without a native leaf
+ok 96 - quick-buy health probe round-robins bounded unbound slots and finds a coherent card without a native leaf
+  ---
+  duration_ms: 0.598
+  type: 'test'
+  ...
+# Subtest: quick-buy health probe performs at most twenty-four eligibility geometry checks per pass
+ok 97 - quick-buy health probe performs at most twenty-four eligibility geometry checks per pass
+  ---
+  duration_ms: 0.6232
+  type: 'test'
+  ...
+# Subtest: active quick-buy identity probes share the twenty-four-slot round-robin budget
+ok 98 - active quick-buy identity probes share the twenty-four-slot round-robin budget
+  ---
+  duration_ms: 5.1474
+  type: 'test'
+  ...
+# Subtest: active quick-buy safety scans every tracked slot before budgeted identity parsing
+ok 99 - active quick-buy safety scans every tracked slot before budgeted identity parsing
+  ---
+  duration_ms: 5.2671
+  type: 'test'
+  ...
+# Subtest: quick-buy health probe detects a tracked virtual slot whose live card address changed
+ok 100 - quick-buy health probe detects a tracked virtual slot whose live card address changed
+  ---
+  duration_ms: 0.3239
+  type: 'test'
+  ...
+# Subtest: quick-buy health probe detects a tracked nested-link card whose token identity changed
+ok 101 - quick-buy health probe detects a tracked nested-link card whose token identity changed
+  ---
+  duration_ms: 0.3562
+  type: 'test'
+  ...
+# Subtest: Guard registration failure cannot publish an active-looking successor
+ok 102 - Guard registration failure cannot publish an active-looking successor
+  ---
+  duration_ms: 0.252
+  type: 'test'
+  ...
+# Subtest: an unpublished mounted successor stays hidden and cannot receive pointer input
+ok 103 - an unpublished mounted successor stays hidden and cannot receive pointer input
+  ---
+  duration_ms: 1.1488
+  type: 'test'
+  ...
+# Subtest: health reconciliation repairs a visible binding whose Guard trust was lost
+ok 104 - health reconciliation repairs a visible binding whose Guard trust was lost
+  ---
+  duration_ms: 0.289
+  type: 'test'
+  ...
+# Subtest: successor registration failure preserves the exact trusted predecessor publication
+ok 105 - successor registration failure preserves the exact trusted predecessor publication
+  ---
+  duration_ms: 0.281
+  type: 'test'
+  ...
+# Subtest: ready promotion failure restores the exact resolving-identity publication
+ok 106 - ready promotion failure restores the exact resolving-identity publication
+  ---
+  duration_ms: 0.6789
+  type: 'test'
+  ...
+# Subtest: promotion failure may retry only inside the original inclusive 300 ms intent
+ok 107 - promotion failure may retry only inside the original inclusive 300 ms intent
+  ---
+  duration_ms: 13.1212
+  type: 'test'
+  ...
+# Subtest: successor and predecessor registration failure leaves both actions unpublished and inert
+ok 108 - successor and predecessor registration failure leaves both actions unpublished and inert
+  ---
+  duration_ms: 0.7561
+  type: 'test'
+  ...
+# Subtest: ready promotion preserves identity and locked Giant presentation
+ok 109 - ready promotion preserves identity and locked Giant presentation
+  ---
+  duration_ms: 0.3838
+  type: 'test'
+  ...
+# Subtest: a staged addressless card exposes one protected resolving-identity action
+ok 110 - a staged addressless card exposes one protected resolving-identity action
+  ---
+  duration_ms: 0.3314
+  type: 'test'
+  ...
+# Subtest: valid address executes without waiting for symbol image or launchpad enrichment
+ok 111 - valid address executes without waiting for symbol image or launchpad enrichment
+  ---
+  duration_ms: 0.5525
+  type: 'test'
+  ...
+# Subtest: one addressless intent resolves only on the same card generation approved href
+ok 112 - one addressless intent resolves only on the same card generation approved href
+  ---
+  duration_ms: 2.0137
+  type: 'test'
+  ...
+# Subtest: same-node virtual reuse cannot spend an addressless intent on the replacement token
+ok 113 - same-node virtual reuse cannot spend an addressless intent on the replacement token
+  ---
+  duration_ms: 0.5566
+  type: 'test'
+  ...
+# Subtest: addressless intent cancels on amount
+ok 114 - addressless intent cancels on amount
+  ---
+  duration_ms: 0.7995
+  type: 'test'
+  ...
+# Subtest: addressless intent cancels on chain
+ok 115 - addressless intent cancels on chain
+  ---
+  duration_ms: 0.4879
+  type: 'test'
+  ...
+# Subtest: addressless intent cancels on disconnect
+ok 116 - addressless intent cancels on disconnect
+  ---
+  duration_ms: 0.3415
+  type: 'test'
+  ...
+# Subtest: addressless intent cancels on card-reuse
+ok 117 - addressless intent cancels on card-reuse
+  ---
+  duration_ms: 0.4406
+  type: 'test'
+  ...
+# Subtest: addressless intent cancels on expiry
+ok 118 - addressless intent cancels on expiry
+  ---
+  duration_ms: 0.42
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on card drift without paper or native side effects
+ok 119 - identity intent cancels on card drift without paper or native side effects
+  ---
+  duration_ms: 0.5423
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on slot drift without paper or native side effects
+ok 120 - identity intent cancels on slot drift without paper or native side effects
+  ---
+  duration_ms: 0.4235
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on root drift without paper or native side effects
+ok 121 - identity intent cancels on root drift without paper or native side effects
+  ---
+  duration_ms: 0.3483
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on generation drift without paper or native side effects
+ok 122 - identity intent cancels on generation drift without paper or native side effects
+  ---
+  duration_ms: 0.3454
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on nonce drift without paper or native side effects
+ok 123 - identity intent cancels on nonce drift without paper or native side effects
+  ---
+  duration_ms: 0.3313
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on chain drift without paper or native side effects
+ok 124 - identity intent cancels on chain drift without paper or native side effects
+  ---
+  duration_ms: 0.3279
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on amount drift without paper or native side effects
+ok 125 - identity intent cancels on amount drift without paper or native side effects
+  ---
+  duration_ms: 0.3295
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on route drift without paper or native side effects
+ok 126 - identity intent cancels on route drift without paper or native side effects
+  ---
+  duration_ms: 0.3852
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on settings drift without paper or native side effects
+ok 127 - identity intent cancels on settings drift without paper or native side effects
+  ---
+  duration_ms: 0.4263
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on disconnect drift without paper or native side effects
+ok 128 - identity intent cancels on disconnect drift without paper or native side effects
+  ---
+  duration_ms: 0.3805
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on conflicting-href drift without paper or native side effects
+ok 129 - identity intent cancels on conflicting-href drift without paper or native side effects
+  ---
+  duration_ms: 0.3217
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on href-removed drift without paper or native side effects
+ok 130 - identity intent cancels on href-removed drift without paper or native side effects
+  ---
+  duration_ms: 0.657
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on href-rewritten drift without paper or native side effects
+ok 131 - identity intent cancels on href-rewritten drift without paper or native side effects
+  ---
+  duration_ms: 0.5227
+  type: 'test'
+  ...
+# Subtest: identity intent cancels on pre-existing-attribute-hydration drift without paper or native side effects
+ok 132 - identity intent cancels on pre-existing-attribute-hydration drift without paper or native side effects
+  ---
+  duration_ms: 0.3087
+  type: 'test'
+  ...
+# Subtest: first birth href at 300 ms auto-executes 1 order
+ok 133 - first birth href at 300 ms auto-executes 1 order
+  ---
+  duration_ms: 0.6366
+  type: 'test'
+  ...
+# Subtest: first birth href at 301 ms auto-executes 0 order
+ok 134 - first birth href at 301 ms auto-executes 0 order
+  ---
+  duration_ms: 0.3622
+  type: 'test'
+  ...
+# Subtest: fresh add remove reinsert provenance cannot auto-claim an addressless paper intent
+ok 135 - fresh add remove reinsert provenance cannot auto-claim an addressless paper intent
+  ---
+  duration_ms: 0.4586
+  type: 'test'
+  ...
+# Subtest: ordered valid href removal and restore oldValue provenance cannot auto-consume an intent
+ok 136 - ordered valid href removal and restore oldValue provenance cannot auto-consume an intent
+  ---
+  duration_ms: 0.5003
+  type: 'test'
+  ...
+# Subtest: ordered valid href rewrite and restore oldValue provenance cannot auto-consume an intent
+ok 137 - ordered valid href rewrite and restore oldValue provenance cannot auto-consume an intent
+  ---
+  duration_ms: 0.3359
+  type: 'test'
+  ...
+# Subtest: an href appearing immediately before resolving dispatch consumes that same click once
+ok 138 - an href appearing immediately before resolving dispatch consumes that same click once
+  ---
+  duration_ms: 0.6559
+  type: 'test'
+  ...
+# Subtest: a network quote alone cannot bind an addressless trench card
+ok 139 - a network quote alone cannot bind an addressless trench card
+  ---
+  duration_ms: 0.4498
+  type: 'test'
+  ...
+# Subtest: benign addressless rediscovery preserves one intent and its binding nonce
+ok 140 - benign addressless rediscovery preserves one intent and its binding nonce
+  ---
+  duration_ms: 0.2853
+  type: 'test'
+  ...
+# Subtest: an addressless amount mutation permanently cancels the old intent
+ok 141 - an addressless amount mutation permanently cancels the old intent
+  ---
+  duration_ms: 0.3942
+  type: 'test'
+  ...
+# Subtest: paper quick buy remains clickable while an order is in flight
+ok 142 - paper quick buy remains clickable while an order is in flight
+  ---
+  duration_ms: 0.3993
+  type: 'test'
+  ...
+# Subtest: quick-buy rechecks the active chain after injection before dispatching
+ok 143 - quick-buy rechecks the active chain after injection before dispatching
+  ---
+  duration_ms: 0.3077
+  type: 'test'
+  ...
+# Subtest: a linkless same-address detail header falls back to the route placeholder across an EVM chain transition
+ok 144 - a linkless same-address detail header falls back to the route placeholder across an EVM chain transition
+  ---
+  duration_ms: 116.9455
+  type: 'test'
+  ...
+# Subtest: detail quote fields are read only from the verified BaseInfoBar scope
+ok 145 - detail quote fields are read only from the verified BaseInfoBar scope
+  ---
+  duration_ms: 63.7593
+  type: 'test'
+  ...
+# Subtest: detail without a K-line cannot promote a bare Price value over the verified Bankr 100B dimension
+ok 146 - detail without a K-line cannot promote a bare Price value over the verified Bankr 100B dimension
+  ---
+  duration_ms: 63.5144
+  type: 'test'
+  ...
+# Subtest: detail without a K-line leaves unknown-launchpad fallback construction to the content resolver
+ok 147 - detail without a K-line leaves unknown-launchpad fallback construction to the content resolver
+  ---
+  duration_ms: 60.4014
+  type: 'test'
+  ...
+# Subtest: detail DOM price and supply stay untrusted until the current-route chart frame is READY
+ok 148 - detail DOM price and supply stay untrusted until the current-route chart frame is READY
+  ---
+  duration_ms: 62.8508
+  type: 'test'
+  ...
+# Subtest: verified detail snapshot synchronously reads a newer quote from the same bound DOM nodes
+ok 149 - verified detail snapshot synchronously reads a newer quote from the same bound DOM nodes
+  ---
+  duration_ms: 61.764
+  type: 'test'
+  ...
+# Subtest: verified detail snapshot rejects a replaced DOM binding even with the same fingerprint
+ok 150 - verified detail snapshot rejects a replaced DOM binding even with the same fingerprint
+  ---
+  duration_ms: 62.9843
+  type: 'test'
+  ...
+# Subtest: verified detail snapshot rejects mismatched, untrusted, and non-chain-bound detail contexts
+ok 151 - verified detail snapshot rejects mismatched, untrusted, and non-chain-bound detail contexts
+  ---
+  duration_ms: 246.8875
+  type: 'test'
+  ...
+# Subtest: a direct TradingView-titled current-route frame can establish chart trust
+ok 152 - a direct TradingView-titled current-route frame can establish chart trust
+  ---
+  duration_ms: 62.009
+  type: 'test'
+  ...
+# Subtest: token-A READY cannot authorize token-B DOM price during an overlapping SPA route transition
+ok 153 - token-A READY cannot authorize token-B DOM price during an overlapping SPA route transition
+  ---
+  duration_ms: 187.009
+  type: 'test'
+  ...
+# Subtest: chart frame load invalidates DOM quote trust until that generation sends READY again
+ok 154 - chart frame load invalidates DOM quote trust until that generation sends READY again
+  ---
+  duration_ms: 185.6383
+  type: 'test'
+  ...
+# Subtest: detail with a trusted K-line preserves the factual observed Price
+ok 155 - detail with a trusted K-line preserves the factual observed Price
+  ---
+  duration_ms: 61.8731
+  type: 'test'
+  ...
+# Subtest: detail market cap uses an explicit MC item before Total Supply
+ok 156 - detail market cap uses an explicit MC item before Total Supply
+  ---
+  duration_ms: 60.2568
+  type: 'test'
+  ...
+# Subtest: detail market cap accepts limited whitespace after the USD marker in one InfoItem
+ok 157 - detail market cap accepts limited whitespace after the USD marker in one InfoItem
+  ---
+  duration_ms: 61.4678
+  type: 'test'
+  ...
+# Subtest: detail market cap accepts the explicit Chinese 市值 title
+ok 158 - detail market cap accepts the explicit Chinese 市值 title
+  ---
+  duration_ms: 61.7393
+  type: 'test'
+  ...
+# Subtest: detail market cap safely falls back to an unstructured labeled USD field
+ok 159 - detail market cap safely falls back to an unstructured labeled USD field
+  ---
+  duration_ms: 62.803
+  type: 'test'
+  ...
+# Subtest: Sol detail without explicit market cap keeps factual price and supply without a synthetic MC
+ok 160 - Sol detail without explicit market cap keeps factual price and supply without a synthetic MC
+  ---
+  duration_ms: 61.968
+  type: 'test'
+  ...
+# Subtest: detail FDV guard discards contaminated market caps on every supported chain
+ok 161 - detail FDV guard discards contaminated market caps on every supported chain
+  ---
+  duration_ms: 374.8779
+  type: 'test'
+  ...
+# Subtest: detail FDV guard accepts exactly two times FDV and rejects values above it
+ok 162 - detail FDV guard accepts exactly two times FDV and rejects values above it
+  ---
+  duration_ms: 123.6328
+  type: 'test'
+  ...
+# Subtest: detail market cap discards a value materially above exact price times supply
+ok 163 - detail market cap discards a value materially above exact price times supply
+  ---
+  duration_ms: 63.317
+  type: 'test'
+  ...
+# Subtest: unlabeled supply cannot become market cap
+ok 164 - unlabeled supply cannot become market cap
+  ---
+  duration_ms: 62.8915
+  type: 'test'
+  ...
+# Subtest: detail market cap accepts a legacy unlabeled USD item
+ok 165 - detail market cap accepts a legacy unlabeled USD item
+  ---
+  duration_ms: 62.0235
+  type: 'test'
+  ...
+# Subtest: verified Pump detail scope carries Mayhem mode into the 2B launchpad rule
+ok 166 - verified Pump detail scope carries Mayhem mode into the 2B launchpad rule
+  ---
+  duration_ms: 62.8584
+  type: 'test'
+  ...
+# Subtest: Pump detail mode requires a dedicated badge and a same-address launchpad link
+ok 167 - Pump detail mode requires a dedicated badge and a same-address launchpad link
+  ---
+  duration_ms: 188.004
+  type: 'test'
+  ...
+# Subtest: detail launchpad metadata rejects a same-address noncanonical hostname
+ok 168 - detail launchpad metadata rejects a same-address noncanonical hostname
+  ---
+  duration_ms: 61.8339
+  type: 'test'
+  ...
+# Subtest: detail quote reads price, market cap, and exact total supply from one verified scope
+ok 169 - detail quote reads price, market cap, and exact total supply from one verified scope
+  ---
+  duration_ms: 62.4441
+  type: 'test'
+  ...
+# Subtest: detail quote timestamps and sources every positive DOM observation dimension
+ok 170 - detail quote timestamps and sources every positive DOM observation dimension
+  ---
+  duration_ms: 61.4686
+  type: 'test'
+  ...
+# Subtest: detail quote leaves unobserved DOM dimensions without freshness or source metadata
+ok 171 - detail quote leaves unobserved DOM dimensions without freshness or source metadata
+  ---
+  duration_ms: 62.9605
+  type: 'test'
+  ...
+# Subtest: a liquidity-only detail observation carries aggregate and field freshness
+ok 172 - a liquidity-only detail observation carries aggregate and field freshness
+  ---
+  duration_ms: 62.2593
+  type: 'test'
+  ...
+# Subtest: a confirmed detail header retains exact identity metadata without factual quote fields
+ok 173 - a confirmed detail header retains exact identity metadata without factual quote fields
+  ---
+  duration_ms: 62.341
+  type: 'test'
+  ...
+# Subtest: trench quick buy snapshots once and dispatches without polling timers
+ok 174 - trench quick buy snapshots once and dispatches without polling timers
+  ---
+  duration_ms: 0.4142
+  type: 'test'
+  ...
+# Subtest: quick-buy records the click-time trench snapshot before its callback can navigate
+ok 175 - quick-buy records the click-time trench snapshot before its callback can navigate
+  ---
+  duration_ms: 0.363
+  type: 'test'
+  ...
+# Subtest: only an actually added TokenItem root receives an addressless auto-claim birth
+ok 176 - only an actually added TokenItem root receives an addressless auto-claim birth
+  ---
+  duration_ms: 0.2174
+  type: 'test'
+  ...
+# Subtest: deferred overflow discovery reuses the birth recorded in the fast mutation turn
+ok 177 - deferred overflow discovery reuses the birth recorded in the fast mutation turn
+  ---
+  duration_ms: 0.8251
+  type: 'test'
+  ...
+# Subtest: deferred overflow discovery reuses a TokenItem ancestor birth
+ok 178 - deferred overflow discovery reuses a TokenItem ancestor birth
+  ---
+  duration_ms: 0.8875
+  type: 'test'
+  ...
+# Subtest: conflicting same-chain card addresses never publish a ready quick-buy action
+ok 179 - conflicting same-chain card addresses never publish a ready quick-buy action
+  ---
+  duration_ms: 0.2494
+  type: 'test'
+  ...
+# Subtest: a detached or ambiguous TokenItem root cannot retain an eligible addressless birth
+ok 180 - a detached or ambiguous TokenItem root cannot retain an eligible addressless birth
+  ---
+  duration_ms: 0.5519
+  type: 'test'
+  ...
+# Subtest: incremental discovery scans only supplied mutation roots
+ok 181 - incremental discovery scans only supplied mutation roots
+  ---
+  duration_ms: 0.2355
+  type: 'test'
+  ...
+# Subtest: detached quick-buy slots release Guard actions without a document rescan
+ok 182 - detached quick-buy slots release Guard actions without a document rescan
+  ---
+  duration_ms: 1.3258
+  type: 'test'
+  ...
+# Subtest: incremental discovery supports slot and closest roots beyond 80 visible controls
+ok 183 - incremental discovery supports slot and closest roots beyond 80 visible controls
+  ---
+  duration_ms: 5.136
+  type: 'test'
+  ...
+# Subtest: virtual-list card reuse without a native leaf keeps one inert paper shell and dispatches only its new action
+ok 184 - virtual-list card reuse without a native leaf keeps one inert paper shell and dispatches only its new action
+  ---
+  duration_ms: 2.1669
+  type: 'test'
+  ...
+# Subtest: whole-card and slot replacement releases old bindings and injects only the current live slot
+ok 185 - whole-card and slot replacement releases old bindings and injects only the current live slot
+  ---
+  duration_ms: 0.414
+  type: 'test'
+  ...
+# Subtest: Guard invokes one paper action and never the native handler
+ok 186 - Guard invokes one paper action and never the native handler
+  ---
+  duration_ms: 1.0857
+  type: 'test'
+  ...
+# Subtest: incremental discovery leaves unrelated tracked overrides intact
+ok 187 - incremental discovery leaves unrelated tracked overrides intact
+  ---
+  duration_ms: 0.4263
+  type: 'test'
+  ...
+# Subtest: native MutationObserver converges after rediscovery class drift and React reinsertion
+ok 188 - native MutationObserver converges after rediscovery class drift and React reinsertion
+  ---
+  duration_ms: 452.5882
+  type: 'test'
+  ...
+1..188
+# tests 188
+# suites 0
+# pass 188
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3944.6208

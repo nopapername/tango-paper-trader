@@ -1,0 +1,472 @@
+{
+  "generatedAt": "2026-10-13T05:08:29.147Z",
+  "fallbackTrade": {
+    "id": "1000-774e5d57-83c8-4a5a-8529-af513a180c65",
+    "chain": "base",
+    "tokenAddress": "0x1111111111111111111111111111111111111111",
+    "symbol": "FALLBACK",
+    "name": "FALLBACK",
+    "logoUrl": "",
+    "side": "BUY",
+    "quantity": 625000000,
+    "amountNative": 1,
+    "observedPriceUsd": 0.0000032,
+    "executionPriceUsd": 0.0000032,
+    "marketCapUsd": 3200,
+    "liquidityUsd": 0,
+    "nativePriceUsd": 2000,
+    "nativeSymbol": "ETH",
+    "slippageBps": 0,
+    "platformFeeNative": 0,
+    "networkFeeNative": 0,
+    "realizedPnlNative": 0,
+    "realizedPnlUsd": 0,
+    "valuationMode": "MARKET_CAP",
+    "priceProvenance": "SYNTHETIC_PRICE",
+    "quoteSource": "TANGO_FALLBACK",
+    "paperFallback": true,
+    "provisional": true,
+    "syntheticTokenPrice": true,
+    "syntheticNativePrice": false,
+    "totalSupply": 1000000000,
+    "supplySource": "UNKNOWN_FALLBACK",
+    "marketCapDivisor": 1000000000,
+    "provisionalSupply": 1000000000,
+    "provisionalSupplyProvenance": "TANGO_INTERNAL_UNKNOWN_FALLBACK_V1",
+    "launchpad": "",
+    "launchMode": "",
+    "quoteObservedAtOriginal": 1000,
+    "nativePriceObservedAtOriginal": 1000,
+    "sourceUrl": "",
+    "executedAt": 1000
+  },
+  "fallbackPayload": {
+    "chain": "base",
+    "tokenAddress": "0x1111111111111111111111111111111111111111",
+    "currentPrice": 0.002,
+    "currentMarketCap": 200000000,
+    "markers": [
+      {
+        "id": "entry:base:0x1111111111111111111111111111111111111111",
+        "side": "BUY",
+        "marketCap": 3200,
+        "price": 3.2e-8,
+        "label": "Paper Buy",
+        "closeLabel": "Hide line"
+      }
+    ]
+  },
+  "fallbackRendered": {
+    "overlayChildren": 1,
+    "overlayTops": [
+      "300px"
+    ],
+    "diagnostic": {
+      "reason": "RENDERED",
+      "axisHint": "PRICE",
+      "frameGeneration": 1
+    }
+  },
+  "firstBuyBlocked": [
+    {
+      "id": "entry:base:0x1111111111111111111111111111111111111111",
+      "side": "BUY",
+      "marketCap": 3200,
+      "price": 0,
+      "label": "Paper Buy",
+      "closeLabel": "Hide line"
+    }
+  ],
+  "sellSlotsBlocked": [
+    {
+      "id": "sell:base:0x1111111111111111111111111111111111111111:fallback-sell-1",
+      "side": "SELL",
+      "marketCap": 3200,
+      "price": 0,
+      "label": "Paper Sell",
+      "closeLabel": "Hide line"
+    },
+    {
+      "id": "sell:base:0x1111111111111111111111111111111111111111:fallback-sell-2",
+      "side": "SELL",
+      "marketCap": 3200,
+      "price": 0,
+      "label": "Paper Sell",
+      "closeLabel": "Hide line"
+    },
+    {
+      "id": "sell:base:0x1111111111111111111111111111111111111111:factual-sell-1",
+      "side": "SELL",
+      "marketCap": 10001,
+      "price": 0.000008,
+      "label": "Paper Sell",
+      "closeLabel": "Hide line"
+    },
+    {
+      "id": "sell:base:0x1111111111111111111111111111111111111111:factual-sell-2",
+      "side": "SELL",
+      "marketCap": 10002,
+      "price": 0.000008,
+      "label": "Paper Sell",
+      "closeLabel": "Hide line"
+    }
+  ],
+  "giantLayout": {
+    "states": [
+      {
+        "fixture": "direct",
+        "requestedHostHeight": 24,
+        "hostHeight": 36,
+        "overflowHeight": 0,
+        "slotHeight": 36,
+        "paper": {
+          "top": 12,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 12,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      },
+      {
+        "fixture": "nested",
+        "requestedHostHeight": 24,
+        "hostHeight": 36,
+        "overflowHeight": 0,
+        "slotHeight": 36,
+        "paper": {
+          "top": 12,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 12,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      },
+      {
+        "fixture": "real",
+        "requestedHostHeight": 24,
+        "hostHeight": 36,
+        "overflowHeight": 36,
+        "slotHeight": 36,
+        "paper": {
+          "top": 12,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 12,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      },
+      {
+        "fixture": "direct",
+        "requestedHostHeight": 36,
+        "hostHeight": 36,
+        "overflowHeight": 0,
+        "slotHeight": 36,
+        "paper": {
+          "top": 12,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 12,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      },
+      {
+        "fixture": "nested",
+        "requestedHostHeight": 36,
+        "hostHeight": 36,
+        "overflowHeight": 0,
+        "slotHeight": 36,
+        "paper": {
+          "top": 64,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 64,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      },
+      {
+        "fixture": "real",
+        "requestedHostHeight": 36,
+        "hostHeight": 36,
+        "overflowHeight": 36,
+        "slotHeight": 36,
+        "paper": {
+          "top": 64,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 64,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      },
+      {
+        "fixture": "direct",
+        "requestedHostHeight": 48,
+        "hostHeight": 48,
+        "overflowHeight": 0,
+        "slotHeight": 48,
+        "paper": {
+          "top": 70,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 70,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      },
+      {
+        "fixture": "nested",
+        "requestedHostHeight": 48,
+        "hostHeight": 48,
+        "overflowHeight": 0,
+        "slotHeight": 48,
+        "paper": {
+          "top": 70,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 70,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      },
+      {
+        "fixture": "real",
+        "requestedHostHeight": 48,
+        "hostHeight": 48,
+        "overflowHeight": 48,
+        "slotHeight": 48,
+        "paper": {
+          "top": 134,
+          "height": 36,
+          "width": 120
+        },
+        "wrapper": {
+          "top": 134,
+          "height": 36,
+          "width": 120
+        },
+        "amountFont": 14,
+        "hintFont": 10,
+        "paperRadius": "6px",
+        "paperColor": "rgb(125, 211, 252)",
+        "wrapperBackground": "color(srgb 0.490196 0.827451 0.988235 / 0.16)",
+        "centeredOffset": 0
+      }
+    ],
+    "focus": {
+      "active": true,
+      "focusVisible": true,
+      "wrapperOutlineWidth": 1,
+      "wrapperOutlineStyle": "solid",
+      "attempts": 1
+    }
+  },
+  "mutationFeedback": {
+    "callbacks": 7,
+    "rediscoveries": 6,
+    "relevantClassRecords": 28,
+    "examples": [
+      {
+        "target": "BuyButton-continer tango-native-buy-overridden",
+        "oldValue": "BuyButton-continer tango-native-buy-overridden"
+      },
+      {
+        "target": "group/btn tango-quick-buy-action-host tango-quick-buy-structural-host",
+        "oldValue": "group/btn tango-quick-buy-structural-host tango-quick-buy-action-host"
+      },
+      {
+        "target": "group/btn tango-quick-buy-action-host tango-quick-buy-structural-host",
+        "oldValue": "group/btn tango-quick-buy-action-host"
+      },
+      {
+        "target": "group/btn tango-quick-buy-action-host tango-quick-buy-structural-host",
+        "oldValue": "group/btn tango-quick-buy-action-host tango-quick-buy-structural-host"
+      },
+      {
+        "target": "BuyButton-continer tango-native-buy-overridden",
+        "oldValue": "BuyButton-continer tango-native-buy-overridden"
+      },
+      {
+        "target": "group/btn tango-quick-buy-action-host tango-quick-buy-structural-host",
+        "oldValue": "group/btn tango-quick-buy-action-host tango-quick-buy-structural-host"
+      }
+    ]
+  },
+  "offActions": [
+    {
+      "action": "sell",
+      "modalBeforeOff": "confirm",
+      "blocked": {
+        "pending": true,
+        "disabled": true
+      },
+      "sellCalls": 1,
+      "closeAllCalls": 0,
+      "orderQuote": {
+        "totalSupply": 1000,
+        "marketCapUsd": 2000,
+        "priceUsd": 2,
+        "supplySource": "GMGN_RATIO",
+        "valuationSource": "OBSERVED_PRICE",
+        "liquidityUsd": 0,
+        "source": "GMGN",
+        "observedAt": 1000000,
+        "valuationMode": "PRICE",
+        "nativePriceUsd": 3000,
+        "nativePriceObservedAt": 1000000,
+        "syntheticTokenPrice": false,
+        "syntheticNativePrice": false,
+        "provisional": false,
+        "priceObservedAt": 1000000,
+        "priceSource": "GMGN",
+        "marketCapObservedAt": 1000000,
+        "marketCapSource": "GMGN",
+        "liquidityObservedAt": 0,
+        "liquiditySource": "",
+        "liquidityObservationId": "",
+        "totalSupplyObservedAt": 0,
+        "totalSupplyObservationSource": "",
+        "totalSupplyObservationId": "",
+        "totalSupplySource": "",
+        "totalSupplyField": "",
+        "totalSupplyTrustRank": 0,
+        "chain": "eth",
+        "address": "0x1111111111111111111111111111111111111111",
+        "provisionalSupply": 0,
+        "provisionalTokenPrice": false,
+        "launchpad": "",
+        "launchMode": "",
+        "marketCapObservationId": "",
+        "originalObservedAt": 1000000,
+        "nativeOriginalObservedAt": 1000000,
+        "priceProvenance": "OBSERVED_PRICE",
+        "marketCapDivisor": 1000,
+        "supplyConfidence": "inferred",
+        "paperFallback": true
+      }
+    },
+    {
+      "action": "closeAll",
+      "modalBeforeOff": "confirm",
+      "blocked": {
+        "pending": true,
+        "disabled": true
+      },
+      "sellCalls": 0,
+      "closeAllCalls": 1
+    }
+  ],
+  "coordinatorOffSell": {
+    "enabledInStorage": false,
+    "quantityBefore": 2000,
+    "quantityAfter": 1000,
+    "tradeSide": "SELL",
+    "writes": 1
+  },
+  "malformedMessages": [
+    {
+      "data": {
+        "source": "TANGO_GMGN_PAGE",
+        "type": "TOKEN_QUOTES",
+        "quotes": {}
+      },
+      "result": "TypeError: (event.data.quotes || []).forEach is not a function"
+    },
+    {
+      "data": {
+        "source": "TANGO_GMGN_PAGE",
+        "type": "TOKEN_QUOTES",
+        "quotes": [
+          null
+        ]
+      },
+      "result": "accepted without error"
+    },
+    {
+      "data": {
+        "source": "TANGO_GMGN_PAGE",
+        "type": "NATIVE_PRICES",
+        "prices": {}
+      },
+      "result": "TypeError: object is not iterable (cannot read property Symbol(Symbol.iterator))"
+    },
+    {
+      "data": {
+        "source": "TANGO_GMGN_PAGE",
+        "type": "NATIVE_PRICES",
+        "prices": [
+          null
+        ]
+      },
+      "result": "TypeError: Cannot read properties of null (reading 'symbol')"
+    }
+  ]
+}

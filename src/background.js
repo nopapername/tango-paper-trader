@@ -20,6 +20,7 @@ const tokenQuoteCache = new Map();
 const tokenQuoteRequests = new Map();
 const NATIVE_PRICE_CACHE_MS = Number(globalThis.Tango?.QUOTE_STALE_MS || 15_000);
 const TOKEN_QUOTE_CACHE_MS = 15_000;
+const PROVIDER_TIMEOUT_MS = 6_000;
 const positiveFinite = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
 const nonnegativeFiniteOrZero = (value) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
 let onboardingOpened = false;
@@ -170,14 +171,9 @@ async function fetchNativePriceObservation(chain, key) {
   let price = 0;
   let observedAt = 0;
   try {
-    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(chain.coingeckoId)}&vs_currencies=usd`, {
-      headers: { accept: 'application/json' }
-    });
-    if (response.ok) {
-      const body = await response.json();
-      price = Number(body?.[key]?.usd || 0);
-       if (positiveFinite(price)) observedAt = Date.now();
-    }
+    const body = await fetchProviderJson(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(chain.coingeckoId)}&vs_currencies=usd`);
+    price = Number(body?.[key]?.usd || 0);
+    if (positiveFinite(price)) observedAt = Date.now();
   } catch {}
   if (!positiveFinite(price) && chain.wrappedNativeAddress && chain.dexScreenerChain) {
     const wrappedNative = await getTokenQuote(chain.id, chain.wrappedNativeAddress);
@@ -188,6 +184,31 @@ async function fetchNativePriceObservation(chain, key) {
   if (!(observedAt > 0)) observedAt = Date.now();
   nativePriceCache.set(key, { price, fetchedAt: observedAt });
   return { price, observedAt };
+}
+
+async function fetchProviderJson(url) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    // Bound both the connection and response body; some providers stall after headers.
+    return await Promise.race([
+      (async () => {
+        const response = await fetch(url, {
+          headers: { accept: 'application/json' }, signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`Price request failed: ${response.status}`);
+        return response.json();
+      })(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('Price request timed out'));
+          controller.abort();
+        }, PROVIDER_TIMEOUT_MS);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function quoteKey(chain, address) {
@@ -212,11 +233,7 @@ async function getTokenQuote(chainId, address) {
 }
 
 async function fetchTokenQuote(chain, address, key) {
-  const response = await fetch(`https://api.dexscreener.com/tokens/v1/${encodeURIComponent(chain.dexScreenerChain)}/${encodeURIComponent(address)}`, {
-    headers: { accept: 'application/json' }
-  });
-  if (!response.ok) throw new Error(`Token quote request failed: ${response.status}`);
-  const pairs = await response.json();
+  const pairs = await fetchProviderJson(`https://api.dexscreener.com/tokens/v1/${encodeURIComponent(chain.dexScreenerChain)}/${encodeURIComponent(address)}`);
   const matching = Array.isArray(pairs) ? pairs.filter((pair) =>
     Chains.validateAddress(chain.id, pair?.baseToken?.address)
       && Chains.normalizeAddress(chain.id, pair.baseToken.address) === address

@@ -1,0 +1,5 @@
+
+> tango-paper-trader@0.3.0 build
+> node scripts/build.js
+
+Built unpacked extension at D:\web3\code_project\tango-paper-trade\dist\tango-paper-trader

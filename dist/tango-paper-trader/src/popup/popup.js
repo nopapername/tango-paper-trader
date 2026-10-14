@@ -12,10 +12,14 @@
   let settingsWrite = Promise.resolve();
   let loadError = false;
   let statusMessage = '';
+  const nativePriceRequests = {};
+  let nativePriceRefreshTimer = null;
+  const NATIVE_PRICE_TTL_MS = 60_000;
+  const NATIVE_PRICE_TIMEOUT_MS = 8_000;
 
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   const language = () => Tango.I18n.resolveLanguage(settings?.language);
-  const t = (key) => Tango.I18n.t(key, settings?.language);
+  const t = (key, vars) => Tango.I18n.t(key, settings?.language, vars);
   const cls = (value) => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : '';
   const selectedChainLabel = () => language() === 'zh-CN' ? '已选链' : 'Selected chain';
   const allChainsLabel = () => language() === 'zh-CN' ? '全部链' : 'All chains';
@@ -35,7 +39,14 @@
     };
   }
   function model() {
-    return Tango.PopupModel.build(state, settings, visibleSelectedChain, nativePrices);
+    return Tango.PopupModel.build(state, settings, visibleSelectedChain, freshNativePrices());
+  }
+  function freshNativePrices() {
+    return Object.fromEntries(Tango.Chains.all().map((chain) => {
+      const price = Number(nativePrices[chain.id]);
+      const age = Date.now() - Number(nativePriceObservedAt[chain.id]);
+      return [chain.id, Number.isFinite(price) && price > 0 && age >= -5_000 && age <= NATIVE_PRICE_TTL_MS ? price : 0];
+    }));
   }
 
   async function activeGmgnChain() {
@@ -75,7 +86,7 @@
       loadError = false;
       statusMessage = '';
       render();
-      if (state.initialized) refreshNativePrices();
+      if (state.initialized) { refreshNativePrices(); scheduleNativePriceRefresh(); }
       return true;
     } catch {
       loadError = true;
@@ -110,14 +121,6 @@
     return promise;
   }
 
-  async function selectedModel(chainId = visibleSelectedChain) {
-    const pending = selectionPending;
-    if (pending) await pending.promise;
-    if (visibleSelectedChain !== chainId || settings?.selectedChain !== chainId) return null;
-    const selected = model();
-    return selected.chain.id === chainId ? selected : null;
-  }
-
   function persistSettings(patch, { isCurrent = () => true } = {}) {
     const write = settingsWrite.then(async () => {
       if (!isCurrent()) return settings;
@@ -139,15 +142,51 @@
   }
 
   async function refreshNativePrices() {
-    const observations = await Promise.all(Tango.Chains.all().map(async (chain) => {
-      try {
-        const observation = await global.chrome?.runtime?.sendMessage({ type: 'TANGO_GET_NATIVE_PRICE', chain: chain.id });
-        return [chain.id, observation?.ok && Number(observation.price) > 0 ? observation : null];
-      } catch { return [chain.id, null]; }
-    }));
-    nativePrices = Object.fromEntries(observations.map(([chain, observation]) => [chain, Number(observation?.price || 0)]));
-    nativePriceObservedAt = Object.fromEntries(observations.map(([chain, observation]) => [chain, Number(observation?.observedAt || 0)]));
+    return Promise.all(Tango.Chains.all().map((chain) => refreshNativePrice(chain)));
+  }
+  function renderPriceUpdate() {
+    const balanceInput = document.querySelector('#common-capital-balance');
+    const balanceDraft = balanceInput?.value;
+    const details = app.querySelector?.('.account-settings');
+    const detailsOpen = details?.open;
+    const focusedId = document.activeElement?.id;
     render();
+    const refreshed = document.querySelector('#common-capital-balance');
+    if (refreshed && balanceDraft !== undefined) refreshed.value = balanceDraft;
+    const refreshedDetails = app.querySelector?.('.account-settings');
+    if (refreshedDetails && detailsOpen !== undefined) refreshedDetails.open = detailsOpen;
+    if (focusedId) document.querySelector(`#${focusedId}`)?.focus?.();
+  }
+  function refreshNativePrice(chain) {
+    if (nativePriceRequests[chain.id]) return nativePriceRequests[chain.id];
+    const request = (async () => {
+      let timer;
+      try {
+        const observation = await Promise.race([
+          global.chrome?.runtime?.sendMessage({ type: 'TANGO_GET_NATIVE_PRICE', chain: chain.id }),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('nativePriceTimeout')), NATIVE_PRICE_TIMEOUT_MS); })
+        ]);
+        const price = Number(observation?.price);
+        const observedAt = Number(observation?.observedAt);
+        const age = Date.now() - observedAt;
+        if (observation?.ok && Number.isFinite(price) && price > 0 && Number.isFinite(observedAt)
+          && observedAt > 0 && age >= -5_000 && age <= NATIVE_PRICE_TTL_MS) {
+          nativePrices[chain.id] = price;
+          nativePriceObservedAt[chain.id] = observedAt;
+        }
+      } catch { /* stale retained prices are excluded by freshNativePrices */ }
+      finally { clearTimeout(timer); delete nativePriceRequests[chain.id]; renderPriceUpdate(); }
+    })();
+    nativePriceRequests[chain.id] = request;
+    return request;
+  }
+  function scheduleNativePriceRefresh() {
+    if (nativePriceRefreshTimer != null) return;
+    nativePriceRefreshTimer = setTimeout(() => {
+      nativePriceRefreshTimer = null;
+      if (state?.initialized) { renderPriceUpdate(); refreshNativePrices(); }
+      scheduleNativePriceRefresh();
+    }, 30_000);
   }
 
   function selectedPositions(chainModel) {
@@ -160,6 +199,8 @@
 
   function render() {
     document.documentElement.lang = language();
+    if (document.documentElement.dataset) document.documentElement.dataset.theme = Tango.I18n.resolveTheme?.(settings?.theme)
+      || (settings?.theme === 'light' ? 'light' : 'dark');
     if (loadError || !state || !settings) {
       app.innerHTML = `<div class="popup"><section class="setup-card storage-error">
         <h2>${t('storageLoadFailed')}</h2><p>${t('storageLoadFailedHint')}</p>
@@ -194,10 +235,11 @@
         <section class="global-summary"><h2>${globalUsdLabel()}</h2><div class="stats">
           <div class="stat"><span>${t('totalAssets')}</span><strong>${Tango.Format.usd(chainModel.globalUsd.assetsUsd, language())}</strong></div>
           <div class="stat"><span>${t('totalPnl')}</span><strong class="${cls(chainModel.globalUsd.pnlUsd)}">${Tango.Format.usd(chainModel.globalUsd.pnlUsd, language())}</strong></div>
-        </div>${chainModel.globalUsd.complete ? '' : `<p class="partial-data">${t('partialUsdData')}</p>`}</section>` : `<div class="disabled-note">${t('disabled')}</div>`}
+        </div>${chainModel.globalUsd.complete ? '' : `<p class="partial-data">${t('nativePriceStale')}</p>`}
+        <button class="button secondary" id="refresh-native-prices">${t('nativePriceRefresh')}</button></section>` : `<div class="disabled-note">${t('disabled')}</div>`}
         <details class="account-settings"><summary>${t('accountSettings')}</summary>
           <label class="field"><span>${t('language')}</span><select id="account-language"><option value="zh-CN" ${language() === 'zh-CN' ? 'selected' : ''}>${t('chinese')}</option><option value="en" ${language() === 'en' ? 'selected' : ''}>${t('english')}</option></select></label>
-          <label class="field"><span>${t('commonCapital')}</span><input class="input" id="common-capital-balance" type="number" min="0.01" max="1000000000000000" step="any" value="${esc(commonCapital.value)}"></label>
+          <label class="field"><span>${t('commonCapital')}</span><input class="input" id="common-capital-balance" type="number" min="0" max="1000000000000000" step="any" value="${esc(commonCapital.value)}"></label>
           <button class="button secondary reset-balance" id="save-common-capital">${allChainsLabel()} · ${t('resetWithBalance')}</button>
           <small class="reset-note">${t('independentChains')}</small>
           <small class="reset-note">${t('calendarClearedOnReset')}</small>
@@ -212,6 +254,7 @@
   }
 
   function bind() {
+    document.querySelector('#refresh-native-prices')?.addEventListener('click', refreshNativePrices);
     document.querySelector('#master-enabled')?.addEventListener('change', async (event) => {
       await persistSettings({ enabled: event.target.checked });
     });
@@ -226,7 +269,7 @@
     });
     document.querySelector('#save-common-capital')?.addEventListener('click', async () => {
       const balance = Number(document.querySelector('#common-capital-balance')?.value);
-      if (!validCommonCapital(balance)) return;
+      if (!validCommonCapital(balance)) { statusMessage = t('invalidCommonCapital'); renderPriceUpdate(); return; }
       await settingsWrite;
       try { await reload(); } catch { /* runStoreWrite will surface a failed mutation */ }
       const currentCapital = commonCapitalSnapshot();
@@ -250,9 +293,13 @@
     });
     document.querySelector('#dashboard')?.addEventListener('click', () => global.chrome.runtime.openOptionsPage());
     document.querySelector('#gmgn')?.addEventListener('click', async () => {
-      const chainId = visibleSelectedChain;
-      const chainModel = await selectedModel(chainId);
-      if (chainModel) await global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_GMGN' });
+      const selectionRevision = selectedChainRevision;
+      if (selectionPending) await selectionPending.promise;
+      if (selectionRevision !== selectedChainRevision) return;
+      try {
+        const response = await global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_GMGN' });
+        if (!response?.ok) throw new Error('openGmgnFailed');
+      } catch { statusMessage = t('openGmgnFailed'); render(); }
     });
   }
 
@@ -267,6 +314,9 @@
     });
   });
 
+  global.matchMedia?.('(prefers-color-scheme: light)')?.addEventListener?.('change', () => {
+    if (settings?.theme === 'auto') renderPriceUpdate();
+  });
   activeTabChain = await activeGmgnChain();
   await loadInitial();
 })(globalThis);

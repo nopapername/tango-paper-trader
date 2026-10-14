@@ -1,0 +1,40 @@
+TAP version 13
+# Subtest: build replaces only its own output and includes security and smoke documentation
+ok 1 - build replaces only its own output and includes security and smoke documentation
+  ---
+  duration_ms: 67.2334
+  type: 'test'
+  ...
+# Subtest: missing required inputs fail before deleting the previous build or unrelated dist files
+ok 2 - missing required inputs fail before deleting the previous build or unrelated dist files
+  ---
+  duration_ms: 255.8409
+  type: 'test'
+  ...
+# Subtest: invalid manifest fails before output cleanup
+ok 3 - invalid manifest fails before output cleanup
+  ---
+  duration_ms: 40.317
+  type: 'test'
+  ...
+# Subtest: an absent optional security document does not prevent a complete build
+ok 4 - an absent optional security document does not prevent a complete build
+  ---
+  duration_ms: 55.7894
+  type: 'test'
+  ...
+# Subtest: a redirected dist directory cannot delete files outside the package workspace
+ok 5 - a redirected dist directory cannot delete files outside the package workspace
+  ---
+  duration_ms: 45.0202
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 517.998

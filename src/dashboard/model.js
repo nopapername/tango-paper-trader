@@ -1,5 +1,13 @@
 (function initDashboardModel(global) {
   const Tango = global.Tango = global.Tango || {};
+  const CSV_FIELDS = Object.freeze([
+    'executedAt', 'chain', 'nativeSymbol', 'tokenAddress', 'symbol', 'side', 'amountNative',
+    'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'nativePriceUsd',
+    'slippageBps', 'platformFeeNative', 'networkFeeNative', 'realizedPnlNative',
+    'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'quoteSource', 'paperFallback',
+    'provisional', 'syntheticTokenPrice', 'syntheticNativePrice', 'totalSupply', 'supplySource',
+    'launchpad', 'launchMode', 'sourceUrl'
+  ]);
 
   function dateKey(timestamp) {
     const date = new Date(timestamp);
@@ -29,6 +37,17 @@
     return trade?.valuationMode === 'MARKET_CAP';
   }
 
+  function availableChainUsdSummary(state, chainId, nativePriceUsd) {
+    const price = Number(nativePriceUsd);
+    if (!Number.isFinite(price) || !(price > 0)) return null;
+    try {
+      return Tango.Engine.chainUsdSummary(state, chainId, price);
+    } catch (error) {
+      if (!['invalidArithmetic', 'invalidNativePrice', 'unsupportedChain'].includes(error?.message)) throw error;
+      return null;
+    }
+  }
+
   function build(state, settings, selectedChain, nativePrices = {}, filters = {}) {
     const chain = Tango.Chains.get(selectedChain) || Tango.Chains.get('sol');
     const nativePriceUsd = Number(nativePrices?.[chain.id] || 0);
@@ -46,26 +65,16 @@
         chain: entry,
         summary: Tango.Engine.portfolioSummary(state, entry.id, Number(nativePrices?.[entry.id] || 0)),
         nativePriceUsd: Number(nativePrices?.[entry.id] || 0),
-        usdSummary: Number(nativePrices?.[entry.id] || 0) > 0
-          ? Tango.Engine.chainUsdSummary(state, entry.id, nativePrices[entry.id])
-          : null
+        usdSummary: availableChainUsdSummary(state, entry.id, nativePrices?.[entry.id])
       }))
     };
   }
 
   function tradesCsvRows(state, chain) {
     const selected = Tango.Chains.get(chain) || Tango.Chains.get('sol');
-    const fields = [
-      'executedAt', 'chain', 'nativeSymbol', 'tokenAddress', 'symbol', 'side', 'amountNative',
-      'quantity', 'observedPriceUsd', 'executionPriceUsd', 'marketCapUsd', 'nativePriceUsd',
-      'slippageBps', 'platformFeeNative', 'networkFeeNative', 'realizedPnlNative',
-      'realizedPnlUsd', 'valuationMode', 'priceProvenance', 'quoteSource', 'paperFallback',
-      'provisional', 'syntheticTokenPrice', 'syntheticNativePrice', 'totalSupply', 'supplySource',
-      'launchpad', 'launchMode', 'sourceUrl'
-    ];
     return Tango.ChainView.trades(state, selected.id).map((trade) => {
       const derived = hasDerivedMarketCapPrice(trade);
-      return Object.fromEntries(fields.map((field) => [field,
+      return Object.fromEntries(CSV_FIELDS.map((field) => [field,
         field === 'executedAt' ? new Date(trade.executedAt).toISOString()
           : derived && (field === 'observedPriceUsd' || field === 'executionPriceUsd') ? ''
             : trade[field]
@@ -92,13 +101,14 @@
       chain: selected,
       days,
       trades,
-      totalNative: realized.reduce((sum, value) => sum + value, 0),
+      totalNative: Object.values(days).reduce((sum, value) => sum + value.native, 0),
+      statisticsScope: 'retainedHistory',
       winRate: trades.length ? wins.length / trades.length * 100 : 0,
       bestNative: realized.length ? Math.max(...realized) : 0,
       worstNative: realized.length ? Math.min(...realized) : 0
     };
   }
 
-  Tango.DashboardModel = { build, matchesFilters, tradesCsvRows, calendar, hasDerivedMarketCapPrice };
+  Tango.DashboardModel = { build, matchesFilters, tradesCsvRows, calendar, hasDerivedMarketCapPrice, CSV_FIELDS };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.DashboardModel;
 })(globalThis);

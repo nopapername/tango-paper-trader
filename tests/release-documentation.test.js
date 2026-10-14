@@ -59,7 +59,7 @@ test('release documentation covers resilient paper-trading behavior and its pape
   assert.match(readme, /changing common capital requires explicit confirmation and atomically resets every chain/i);
   assert.match(readme, /no wallet connection, signature, approval, swap, transaction broadcast, RPC broadcast, or real funds/i);
 
-  assert.match(smoke, /four GMGN sizes in each of the two trench columns/i);
+  assert.match(smoke, /each native quick-buy slot.*exactly one Tango Paper control/i);
   assert.match(smoke, /virtual-scroll.*preserv/i);
   assert.match(smoke, /quick buy.*without a chart or detail page/i);
   assert.match(smoke, /large fallback quantity/i);

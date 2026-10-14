@@ -495,22 +495,45 @@ function headlessLockedGiantQuickBuyLayoutReport() {
   const userDataDir = path.join(tempRoot, 'chrome-profile');
   try {
     const page = `<!doctype html><html><head><meta charset="utf-8"><title>${HEADLESS_LAYOUT_PENDING_TITLE}</title><style>
-${safetyCss}
-${contentCss}
 html, body { margin: 0; padding: 0; }
 body { background: #0c0d12; font: 13px/1 Arial, sans-serif; }
 #cases { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px; }
-.fixture { width: 160px; }
-.host { background: red; display: flex; height: var(--requested-height); width: 120px; }
-.BuyButton-continer { width: 120px; }
-.BuyButton-continer > [class~="group/btn"] { height: var(--requested-height); }
-.host [data-testid="quickbuy"] { border-radius: 9999px; color: red; font-size: 64px; height: 100px; }
+.fixture { width: 120px; }
+.hostile-slot, .hostile-wrapper, .hostile-host {
+  align-items: flex-end !important;
+  border: 3px solid red !important;
+  box-sizing: border-box !important;
+  height: var(--requested-height) !important;
+  max-height: var(--requested-height) !important;
+  min-height: var(--requested-height) !important;
+  margin: 5px !important;
+  padding: 7px !important;
+  transform: translateY(6px) !important;
+  width: 120px !important;
+}
+.hostile-wrapper { overflow: hidden !important; }
+${safetyCss}
+${contentCss}
 </style></head><body><main id="cases"></main><script>
 (() => {
-  const heights = [24, 36, 48];
+  const heights = [24, 28, 32, 36, 48, 113];
   const rect = (element) => {
     const value = element.getBoundingClientRect();
-    return { top: value.top, height: value.height, width: value.width };
+    return {
+      left: value.left, top: value.top, right: value.right, bottom: value.bottom,
+      width: value.width, height: value.height
+    };
+  };
+  const geometryStyle = (element, kind) => {
+    const value = getComputedStyle(element);
+    return {
+      kind,
+      marginTop: value.marginTop,
+      paddingTop: value.paddingTop,
+      borderTopWidth: value.borderTopWidth,
+      transform: value.transform,
+      overflow: value.overflow
+    };
   };
   const build = (id, requestedHostHeight) => {
     const fixture = document.createElement('section');
@@ -518,68 +541,82 @@ body { background: #0c0d12; font: 13px/1 Arial, sans-serif; }
     fixture.id = id + '-' + requestedHostHeight;
     fixture.style.setProperty('--requested-height', requestedHostHeight + 'px');
     const slot = document.createElement('div');
-    slot.className = 'BuyButton-continer tango-native-buy-overridden';
+    slot.className = 'relative !w-full !h-full !box-border group-btns max-w-[200px] border BuyButton-continer tango-native-buy-overridden hostile-slot';
     slot.dataset.tangoQuickBuy = '1';
+    slot.dataset.tangoQuickBuySize = 'giant';
     const nested = id !== 'direct';
     const overflow = id === 'real-wrapper' ? document.createElement('div') : null;
     if (overflow) {
-      overflow.className = 'overflow-wrapper tango-quick-buy-structural-host';
-      overflow.style.cssText = 'height:var(--requested-height);overflow:hidden;width:120px';
+      overflow.className = 'w-full h-full overflow-hidden hostile-wrapper tango-quick-buy-structural-host';
     }
     const host = nested ? document.createElement('div') : slot;
-    host.classList.add('host', 'tango-quick-buy-action-host');
-    if (nested) host.classList.add('group/btn', 'tango-quick-buy-structural-host');
-    const native = document.createElement('button');
-    native.dataset.testid = 'quickbuy';
-    native.textContent = 'REAL';
+    if (nested) {
+      host.className = 'relative w-fit !w-full !h-full !box-border border-none z-10 group/btn hostile-host tango-quick-buy-action-host tango-quick-buy-structural-host';
+    } else {
+      host.classList.add('tango-quick-buy-action-host');
+    }
     const paper = document.createElement('button');
     paper.className = 'tango-list-quick-buy';
     paper.dataset.tangoQuickBuySize = 'giant';
-    const wrapper = document.createElement('span');
-    wrapper.className = 'tango-quick-buy-content';
+    paper.dataset.tangoPublished = '1';
+    const content = document.createElement('span');
+    content.className = 'tango-quick-buy-content';
     const hint = document.createElement('span');
     hint.className = 'tango-paper-hint';
     hint.textContent = 'PAPER';
     const amount = document.createElement('span');
     amount.className = 'tango-buy-amount';
     amount.textContent = '0.1 ETH';
-    wrapper.append(hint, amount);
-    paper.append(wrapper);
-    host.append(native, paper);
+    content.append(hint, amount);
+    paper.append(content);
+    host.append(paper);
     if (overflow) {
       overflow.append(host);
       slot.append(overflow);
     } else if (nested) slot.append(host);
     fixture.append(slot);
     document.querySelector('#cases').append(fixture);
-    return { fixture, slot, overflow, host, paper, wrapper, hint, amount, requestedHostHeight };
+    return { fixture, fixtureKind: id, slot, overflow, host, paper, content, hint, amount, requestedHostHeight };
   };
   const controls = heights.flatMap((height) => [
     build('direct', height), build('nested', height), build('real-wrapper', height)
   ]);
   document.body.offsetHeight;
-  const states = controls.map(({ fixture, slot, overflow, host, paper, wrapper, hint, amount, requestedHostHeight }) => ({
-    fixture: fixture.id.split('-')[0],
+  const states = controls.map(({ fixtureKind, slot, overflow, host, paper, content, hint, amount, requestedHostHeight }) => ({
+    fixture: fixtureKind,
     requestedHostHeight,
-    hostHeight: host.getBoundingClientRect().height,
-    overflowHeight: overflow?.getBoundingClientRect().height || 0,
-    slotHeight: slot.getBoundingClientRect().height,
-    paper: rect(paper),
-    wrapper: rect(wrapper),
+    rects: {
+      slot: rect(slot),
+      overflow: overflow ? rect(overflow) : null,
+      host: rect(host),
+      paper: rect(paper),
+      content: rect(content)
+    },
+    upstreamStyles: [
+      geometryStyle(slot, 'slot'),
+      ...(overflow ? [geometryStyle(overflow, 'overflow')] : []),
+      ...(host !== slot ? [geometryStyle(host, 'host')] : [])
+    ],
     amountFont: Number.parseFloat(getComputedStyle(amount).fontSize),
     hintFont: Number.parseFloat(getComputedStyle(hint).fontSize),
     paperRadius: getComputedStyle(paper).borderRadius,
     paperColor: getComputedStyle(paper).color,
-    wrapperBackground: getComputedStyle(wrapper).backgroundColor,
-    centeredOffset: Math.abs(
-      (paper.getBoundingClientRect().top + paper.getBoundingClientRect().height / 2)
-        - (host.getBoundingClientRect().top + host.getBoundingClientRect().height / 2)
-    )
+    contentBackground: getComputedStyle(content).backgroundColor,
+    contentAlign: getComputedStyle(content).alignItems,
+    contentJustify: getComputedStyle(content).justifyContent,
+    textInsideContent: [hint, amount].every((child) => {
+      const childRect = child.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      return childRect.left >= contentRect.left - 0.5
+        && childRect.right <= contentRect.right + 0.5
+        && childRect.top >= contentRect.top - 0.5
+        && childRect.bottom <= contentRect.bottom + 0.5;
+    })
   }));
   const focusPaper = controls[0].paper;
   focusPaper.focus({ focusVisible: true });
   const writeFocusTelemetry = (attempt) => {
-    const focusWrapperStyle = getComputedStyle(controls[0].wrapper);
+    const focusWrapperStyle = getComputedStyle(controls[0].content);
     const focus = {
       active: document.activeElement === focusPaper,
       focusVisible: focusPaper.matches(':focus-visible'),
@@ -627,23 +664,38 @@ body { background: #0c0d12; font: 13px/1 Arial, sans-serif; }
   }
 }
 
-test('headless Chrome centers an exact 36px Tango control in short equal and tall hosts', () => {
+test('headless Chrome fills the exact Giant slot through direct nested and GMGN-shaped wrapper chains', () => {
   const report = headlessLockedGiantQuickBuyLayoutReport();
-  assert.equal(report.states.length, 9, 'direct nested and real-wrapper fixtures x three host heights');
+  assert.equal(report.states.length, 18, 'three topologies x six hostile native heights');
+  const near = (actual, expected, message) => {
+    assert.ok(Math.abs(actual - expected) <= 0.5, `${message}: ${actual} vs ${expected}`);
+  };
   for (const state of report.states) {
-    assert.equal(state.paper.height, 36, `${state.fixture}:${state.requestedHostHeight}: paper height`);
-    assert.ok(state.slotHeight >= 36, `${state.fixture}:${state.requestedHostHeight}: slot minimum`);
-    assert.ok(state.hostHeight >= 36, `${state.fixture}:${state.requestedHostHeight}: host minimum`);
-    if (state.fixture === 'real-wrapper') {
-      assert.ok(state.overflowHeight >= 36,
-        `${state.fixture}:${state.requestedHostHeight}: slot-local overflow wrapper minimum`);
+    const expected = state.rects.slot;
+    assert.equal(expected.height, 36, `${state.fixture}:${state.requestedHostHeight}: slot height`);
+    assert.equal(expected.width, 120, `${state.fixture}:${state.requestedHostHeight}: slot width`);
+    for (const [layer, layerRect] of Object.entries(state.rects)) {
+      if (!layerRect) continue;
+      for (const edge of ['left', 'top', 'right', 'bottom', 'width', 'height']) {
+        near(layerRect[edge], expected[edge],
+          `${state.fixture}:${state.requestedHostHeight}:${layer}:${edge}`);
+      }
     }
-    assert.ok(state.centeredOffset <= 0.5, `${state.fixture}:${state.requestedHostHeight}: vertical center`);
+    for (const style of state.upstreamStyles) {
+      assert.equal(style.marginTop, '0px', `${state.fixture}:${style.kind}: margin`);
+      assert.equal(style.paddingTop, '0px', `${state.fixture}:${style.kind}: padding`);
+      assert.equal(style.borderTopWidth, '0px', `${state.fixture}:${style.kind}: border`);
+      assert.equal(style.transform, 'none', `${state.fixture}:${style.kind}: transform`);
+      if (style.kind !== 'slot') assert.equal(style.overflow, 'visible');
+    }
     assert.equal(state.amountFont, 14, `${state.fixture}: amount font`);
     assert.equal(state.hintFont, 10, `${state.fixture}: hint font`);
     assert.equal(state.paperRadius, '6px', `${state.fixture}: Tango radius`);
     assert.equal(state.paperColor, 'rgb(125, 211, 252)', `${state.fixture}: Tango accent`);
-    assert.notEqual(state.wrapperBackground, 'rgba(0, 0, 0, 0)', `${state.fixture}: painted surface`);
+    assert.notEqual(state.contentBackground, 'rgba(0, 0, 0, 0)', `${state.fixture}: painted surface`);
+    assert.equal(state.contentAlign, 'center');
+    assert.equal(state.contentJustify, 'center');
+    assert.equal(state.textInsideContent, true, `${state.fixture}: unclipped centered text`);
   }
   assert.equal(report.focus.active, true);
   assert.equal(report.focus.focusVisible, true);
@@ -1667,6 +1719,98 @@ test('trench column amount takes priority over the replaced native button amount
   assert.equal(GMGN._selectQuickBuyAmount('', '0.5 BNB', '1', 0.1), 0.5);
   assert.equal(GMGN._selectQuickBuyAmount('', '0.5 OKB', '1', 0.1), 0.5);
   assert.equal(GMGN._selectQuickBuyAmount('', '', '2', 0.1), 2);
+});
+
+test('October trench icon-labelled MC produces a factual quote and clears when the field disappears', async () => {
+  const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  harness.card.innerText = `${EVM_ADDRESS}\nTEST\nTest Token\n$4.1K\n$90K`;
+  let mc = { textContent: '$4.1K' };
+  harness.card.querySelector = (selector) => selector === '[data-icon="MC"]' ? mc : null;
+  const clock = { now: 10_000 };
+  await withQuickBuyGlobals(harness, { clock }, async () => {
+    const orders = [];
+    assert.equal(GMGN.discoverTokenCards((order) => orders.push(order)), 1);
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders[0].quote.marketCapUsd, 4100);
+    assert.equal(orders[0].quote.source, 'GMGN_TRENCH');
+    assert.ok(orders[0].quote.observedAt > 0);
+    mc = null;
+    clock.now += 1000;
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders[1].quote.marketCapUsd, 0, 'volume and cached MC cannot replace missing MC');
+    assert.equal(orders[1].quote.observedAt, 0);
+  });
+});
+
+test('October dual trench buttons retain the secondary amount while the primary follows its column', async () => {
+  const first = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  const second = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  const slots = [first.slot, second.slot];
+  first.setColumnAmount('1');
+  first.nativeControl.textContent = '0.5 BNB';
+  second.nativeControl.textContent = '1 BNB';
+  first.card.querySelectorAll = (selector) => selector === '.BuyButton-continer' ? slots : [];
+  second.slot.closest = (selector) => selector === '.BuyButton-continer' ? second.slot : first.card;
+  second.nativeControl.closest = (selector) => selector === '.BuyButton-continer' ? second.slot : null;
+  const query = first.document.querySelectorAll.bind(first.document);
+  first.document.querySelectorAll = (selector) => selector === '.BuyButton-continer' ? slots : query(selector);
+  await withQuickBuyGlobals(first, {}, async () => {
+    const orders = [];
+    const onBuy = (order) => orders.push(order);
+    assert.equal(GMGN.discoverTokenCards(onBuy), 2);
+    assert.equal(first.slot.dataset.tangoAmountSol, '0.5');
+    assert.equal(second.slot.dataset.tangoAmountSol, '1');
+    await first.slot.__tangoQuickBuyHandler();
+    await second.slot.__tangoQuickBuyHandler();
+    assert.deepEqual(orders.map((order) => order.amountNative), [0.5, 1]);
+    first.setColumnAmount('2');
+    GMGN.discoverTokenCards(onBuy);
+    assert.equal(first.slot.dataset.tangoAmountSol, '0.5');
+    assert.equal(second.slot.dataset.tangoAmountSol, '2');
+    assert.equal(first.nativeControl.realHandlerCalls + second.nativeControl.realHandlerCalls, 0);
+  });
+});
+
+test('October quickbuy root text supplies the secondary amount without reading paper text', async () => {
+  const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  const sibling = {};
+  harness.card.querySelectorAll = (selector) => selector === '.BuyButton-continer' ? [harness.slot, sibling] : [];
+  harness.nativeControl.isConnected = false;
+  harness.slot.childNodes = [{ nodeType: 3, textContent: ' 0.5 BNB' },
+    { nodeType: 1, textContent: 'PAPER 9 BNB' }];
+  harness.setColumnAmount('1');
+  await withQuickBuyGlobals(harness, {}, async () => {
+    const orders = [];
+    GMGN.discoverTokenCards((order) => orders.push(order));
+    assert.equal(harness.slot.dataset.tangoAmountSol, '0.5');
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders[0].amountNative, 0.5);
+  });
+});
+
+test('October structured trench symbol preserves spaces and original name after address verification', async () => {
+  const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  harness.card.innerText = `${EVM_ADDRESS}\nGTA6 Coin\nGrand Theft Auto\nTax 3%\nBNB\nMC\n$3.1K`;
+  const symbol = { textContent: 'GTA6 Coin', nextElementSibling: { textContent: 'Grand Theft Auto' } };
+  harness.card.querySelector = (selector) => selector === '[data-sentry-component="TooltipCopy"]' ? symbol : null;
+  await withQuickBuyGlobals(harness, {}, async () => {
+    const orders = [];
+    GMGN.discoverTokenCards((order) => orders.push(order));
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders[0].token.symbol, 'GTA6 Coin');
+    assert.equal(orders[0].token.name, 'Grand Theft Auto');
+    symbol.textContent = 'FOUR CATS';
+    symbol.nextElementSibling.textContent = 'Four cats';
+    harness.card.innerText = `${EVM_ADDRESS}\nFOUR CATS\nFour cats\nMC\n$3.1K`;
+    GMGN.discoverTokenCards((order) => orders.push(order));
+    assert.equal(GMGN.readTrenchSnapshot('bsc', EVM_ADDRESS).token.symbol, 'FOUR CATS');
+    assert.equal(GMGN.readTrenchSnapshot('bsc', EVM_ADDRESS).token.name, 'Four cats');
+    harness.exposeCardHref(`https://gmgn.ai/bsc/token/${EVM_ADDRESS_2}`);
+    GMGN.discoverTokenCards((order) => orders.push(order));
+    await harness.slot.__tangoQuickBuyHandler?.();
+    assert.equal(orders[1].token.metadataVerified, false, 'structured symbol cannot verify stale address text');
+    assert.equal(orders[1].token.symbol, 'TOKEN');
+  });
 });
 
 test('quick-buy does not reuse a cached market cap after the live card value disappears', async () => {
@@ -5641,4 +5785,213 @@ test('incremental discovery leaves unrelated tracked overrides intact', () => {
   } finally {
     Object.assign(global, original);
   }
+});
+
+// Run the current production observer against the native DOM, rather than a classList mock:
+// adding an already-present class can itself emit a MutationRecord in Chromium.
+function headlessQuickBuyMutationLifecycleReport() {
+  const root = path.resolve(__dirname, '..');
+  const content = fs.readFileSync(path.join(root, 'src/content/content.js'), 'utf8');
+  const helpersStart = content.indexOf('  function paperQuickBuyMutationNode');
+  const helpersEnd = content.indexOf('  function syncQuickBuyButtons(', helpersStart);
+  const observerStart = content.indexOf('    runtime.observer = new MutationObserver((records) => {');
+  const observerEnd = content.indexOf('    runtime.observer.observe(document.body, {', observerStart);
+  const optionsEnd = content.indexOf('    Tango.Store.subscribe', observerEnd);
+  assert.ok(helpersStart >= 0 && helpersEnd > helpersStart && observerStart >= 0
+    && observerEnd > observerStart && optionsEnd > observerEnd,
+  'native lifecycle gate must exercise the current production mutation helpers and callback');
+  const helpers = content.slice(helpersStart, helpersEnd);
+  const observerSource = content.slice(observerStart, optionsEnd);
+  const sources = ['src/core/chains.js', 'src/core/supply.js', 'src/adapters/gmgn.js']
+    .map((file) => fs.readFileSync(path.join(root, file), 'utf8'));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tango-mutation-lifecycle-'));
+  const pagePath = path.join(tempRoot, 'lifecycle.html');
+  try {
+    const page = `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'">
+<title>${HEADLESS_LAYOUT_PENDING_TITLE}</title></head><body>
+<div data-sentry-component="TrenchColumn">New creation
+ <div class="group/a" href="https://gmgn.ai/base/token/${EVM_ADDRESS}">${EVM_ADDRESS}<br>TEST Test Token<br>MC<br>$10K
+  <div class="BuyButton-continer"><div class="initial-wrapper"><div class="group/btn"><button data-testid="quickbuy">0.1 ETH</button></div></div></div>
+ </div>
+</div><script>
+(() => {
+  const location = { href: 'https://gmgn.ai/?chain=base', origin: 'https://gmgn.ai' };
+  const fakeContext = { location, document, Tango: { NativeQuickBuyGuard: {
+    registerPaperAction: () => true, isPaperActionTrusted: () => true,
+    revokePaperAction: () => true
+  } } };
+  ${sources.map((source) => `Function('globalThis', 'location', ${JSON.stringify(source)})(fakeContext, location);`).join('\n')}
+  const Tango = fakeContext.Tango, gmgn = Tango.GMGN;
+  const slot = document.querySelector('.BuyButton-continer');
+  const initialWrapper = document.querySelector('.initial-wrapper');
+  const initialHost = initialWrapper.firstElementChild;
+  const originalNative = initialHost.querySelector('button');
+  let paperOrders = 0, nativeOrders = 0, mutationTimer;
+  originalNative.addEventListener('click', () => nativeOrders++);
+  const onQuickBuy = () => paperOrders++;
+  const report = { phases: [] };
+  const counts = { batches: 0, relevantClassStyleRecords: 0, fast: 0, deferred: 0 };
+  const runtime = {
+    lastUrl: location.href, pendingMutationRoots: new Set(),
+    settings: { enabled: true, showListQuickBuy: true }, state: { initialized: true },
+    quickBuySettingsPending: false, quickBuyAuthoritativelyDisabled: false
+  };
+  ${helpers}
+  const NativeMutationObserver = window.MutationObserver;
+  class MutationObserver extends NativeMutationObserver {
+    constructor(callback) { super((records) => {
+      counts.batches++;
+      counts.relevantClassStyleRecords += records.filter((record) =>
+        record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
+        && quickBuyMutationRoots(record.target).length).length;
+      callback(records);
+    }); }
+  }
+  const chartFrames = () => [], registerChartFrame = () => {}, handleRouteChange = () => {};
+  const quickBuyPolicyKey = () => '';
+  const renderHeaderAccountSummary = () => {}, tickQuote = () => {}, replayChartMarkers = () => {};
+  const syncQuickBuyButtons = (roots, options) => {
+    counts[options.fast ? 'fast' : 'deferred']++;
+    return gmgn.discoverTokenCards(onQuickBuy, 0.1, 'PAPER', roots, options);
+  };
+  const snapshot = (name) => {
+    const binding = slot.__tangoQuickBuyBinding;
+    report.phases.push({ name, ...counts,
+      papers: slot.querySelectorAll('.tango-list-quick-buy').length,
+      nativeControls: [...slot.querySelectorAll('button')].filter((node) => !paperQuickBuyMutationNode(node)).length,
+      bindingNonce: binding?.bindingNonce, paperConnected: binding?.replacement?.isConnected === true,
+      structuralHosts: binding?.structuralHosts?.length || 0,
+      wrappersMarked: (binding?.structuralHosts || []).every((node) => node.classList.contains('tango-quick-buy-structural-host')),
+      actionHostMarked: binding?.actionHost?.classList.contains('tango-quick-buy-action-host') === true,
+      nativeOrders, paperOrders
+    });
+  };
+  const complete = () => { document.title = ${JSON.stringify(HEADLESS_LAYOUT_COMPLETE_PREFIX)} + btoa(JSON.stringify(report)); };
+  try {
+    report.initialInjected = gmgn.discoverTokenCards(onQuickBuy, 0.1, 'PAPER');
+    const initialBinding = slot.__tangoQuickBuyBinding;
+    if (!initialBinding) throw new Error('initial fixture did not establish a quick-buy binding');
+    ${observerSource}
+    gmgn.discoverTokenCards(onQuickBuy, 0.1, 'PAPER', [slot]);
+    setTimeout(() => {
+      snapshot('stable-rediscovery');
+      initialHost.className = 'group/btn gmgn-new-class';
+    }, 500);
+    setTimeout(() => snapshot('class-drift-repaired'), 1000);
+    setTimeout(() => {
+      snapshot('class-drift-settled');
+      // Chromium emits an attribute record even though React wrote the same class string.
+      initialHost.setAttribute('class', initialHost.getAttribute('class'));
+    }, 1300);
+    setTimeout(() => {
+      snapshot('redundant-host-write');
+      const wrapper = document.createElement('div');
+      wrapper.className = 'react-wrapper';
+      wrapper.innerHTML = '<div class="group/btn"><button data-testid="quickbuy">0.1 ETH</button></div>';
+      const native = wrapper.querySelector('button');
+      native.addEventListener('click', () => nativeOrders++);
+      report.reactNative = native;
+      initialWrapper.replaceWith(wrapper);
+    }, 1700);
+    setTimeout(() => {
+      snapshot('react-wrapper-recovered');
+      report.oldHostClassesCleaned = !initialHost.classList.contains('tango-quick-buy-action-host')
+        && !initialHost.classList.contains('tango-quick-buy-structural-host')
+        && !initialWrapper.classList.contains('tango-quick-buy-structural-host');
+    }, 2300);
+    setTimeout(() => {
+      snapshot('react-wrapper-settled');
+      const binding = slot.__tangoQuickBuyBinding;
+      report.beforeLeafBinding = binding.bindingNonce;
+      const native = document.createElement('button');
+      native.dataset.testid = 'quickbuy';
+      native.textContent = '0.1 ETH';
+      native.addEventListener('click', () => nativeOrders++);
+      report.latestNative = native;
+      binding.actionHost.append(native);
+    }, 2600);
+    setTimeout(() => {
+      snapshot('react-leaf-recovered');
+      report.latestNativeIsAuthoritative = slot.__tangoQuickBuyBinding?.nativeControl === report.latestNative;
+    }, 3200);
+    setTimeout(() => {
+      snapshot('react-leaf-settled');
+      runtime.observer.disconnect();
+      if (mutationTimer) clearTimeout(mutationTimer);
+      gmgn.clearQuickBuy(true);
+      report.restored = {
+        latestNativeConnected: report.latestNative.isConnected,
+        precedingNativeConnected: report.reactNative.isConnected,
+        originalNativeConnected: originalNative.isConnected,
+        papers: slot.querySelectorAll('.tango-list-quick-buy').length,
+        structuralHosts: slot.querySelectorAll('.tango-quick-buy-structural-host').length,
+        actionHosts: slot.querySelectorAll('.tango-quick-buy-action-host').length,
+        overridden: slot.classList.contains('tango-native-buy-overridden'),
+        nativeOrders, paperOrders
+      };
+      delete report.reactNative; delete report.latestNative;
+      complete();
+    }, 3500);
+  } catch (error) { report.error = error.stack || error.message; complete(); }
+})();
+</script></body></html>`;
+    fs.writeFileSync(pagePath, page, 'utf8');
+    const result = spawnSync(localChromeExecutable(), [
+      '--headless', '--disable-background-networking', '--disable-component-update', '--disable-sync',
+      '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-gpu', '--no-sandbox',
+      '--host-resolver-rules=MAP * 0.0.0.0, EXCLUDE localhost', '--virtual-time-budget=4000', '--dump-dom',
+      `--user-data-dir=${path.join(tempRoot, 'chrome-profile')}`, pathToFileURL(pagePath).href
+    ], { encoding: 'utf8', timeout: 60_000, windowsHide: true });
+    assert.equal(result.error, undefined, `Headless Chrome failed to start: ${result.error?.message || ''}`);
+    assert.equal(result.status, 0, `Headless Chrome exited ${result.status}: ${result.stderr || result.stdout}`);
+    const title = result.stdout.match(/<title>([^<]+)<\/title>/i)?.[1];
+    const report = decodeHeadlessLayoutTelemetry(title);
+    assert.equal(report.error, undefined, report.error);
+    return report;
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+test('native MutationObserver converges after rediscovery class drift and React reinsertion', () => {
+  const report = headlessQuickBuyMutationLifecycleReport();
+  assert.equal(report.initialInjected, 1);
+  const phases = Object.fromEntries(report.phases.map((phase) => [phase.name, phase]));
+  const stable = phases['stable-rediscovery'];
+  assert.equal(stable.relevantClassStyleRecords, 0,
+    'stable adapter rediscovery must emit no ancestor class/style records');
+  assert.equal(stable.fast + stable.deferred, 0, 'a stable rediscovery schedules no feedback work');
+  for (const phase of report.phases) {
+    assert.equal(phase.papers, 1, `${phase.name}: exactly one connected paper control`);
+    assert.equal(phase.nativeControls, 0, `${phase.name}: React cannot leave a live native buy control`);
+    assert.equal(phase.paperConnected, true, `${phase.name}: connected paper binding`);
+    assert.equal(phase.structuralHosts, 2, `${phase.name}: wrapper chain retained`);
+    assert.equal(phase.wrappersMarked, true, `${phase.name}: structural geometry restored`);
+    assert.equal(phase.actionHostMarked, true, `${phase.name}: action geometry restored`);
+    assert.equal(phase.nativeOrders + phase.paperOrders, 0, `${phase.name}: reconciliation never invokes an order`);
+  }
+  const converged = (before, after) => {
+    for (const key of ['batches', 'fast', 'deferred', 'relevantClassStyleRecords']) {
+      assert.equal(phases[before][key], phases[after][key], `${after}: ${key} stopped increasing`);
+    }
+  };
+  converged('class-drift-repaired', 'class-drift-settled');
+  converged('react-wrapper-recovered', 'react-wrapper-settled');
+  converged('react-leaf-recovered', 'react-leaf-settled');
+  assert.ok(phases['class-drift-repaired'].deferred <= 2,
+    'one host drift requires at most a repair discovery and its final settling discovery');
+  assert.equal(phases['redundant-host-write'].deferred, phases['class-drift-settled'].deferred,
+    'same-value host attributes are ignored by the production observer');
+  assert.equal(report.oldHostClassesCleaned, true, 'replaced wrapper chain releases Tango classes');
+  assert.notEqual(phases['react-wrapper-recovered'].bindingNonce, stable.bindingNonce,
+    'whole-wrapper replacement creates a fresh connected binding');
+  assert.equal(phases['react-leaf-recovered'].bindingNonce, report.beforeLeafBinding,
+    'same-binding native leaf reinsertion preserves paper action identity');
+  assert.equal(report.latestNativeIsAuthoritative, true);
+  assert.deepEqual(report.restored, {
+    latestNativeConnected: true, precedingNativeConnected: false, originalNativeConnected: false,
+    papers: 0, structuralHosts: 0, actionHosts: 0, overridden: false,
+    nativeOrders: 0, paperOrders: 0
+  }, 'master OFF restores only the latest coherent native generation and releases geometry');
 });

@@ -659,7 +659,7 @@
       lastPriceUsd: newPriceUsd,
       lastMarketCapUsd: Number(quote.marketCapUsd || existing.lastMarketCapUsd || 0),
       lastNativePriceUsd: newNativePriceUsd,
-      quoteObservedAt: Number(quote.observedAt),
+      quoteObservedAt: safeDurableObservedAt(quote.observedAt, Number(now)) ?? Number(now),
       updatedAt: Number(now),
       lastPriceProvenance: priceProvenanceForQuote(quote, existing),
       totalSupply: selectedTotalSupply,
@@ -704,7 +704,7 @@
       costBasisNative: Number(existing.costBasisNative),
       createdAt: Number(now)
     };
-    nextState.calibrations = [event, ...(state.calibrations || [])].slice(0, Tango.MAX_TRADES || 10_000);
+    nextState.calibrations = [event, ...(state.calibrations || [])];
     return { status: 'CALIBRATED', state: nextState };
   }
 
@@ -904,7 +904,7 @@
     if (positionQuoteObservedAt == null) delete nextState.positions[key].quoteObservedAt;
     if (!legacyExecutionSupply) delete nextState.positions[key].marketCapProvenance;
     if (!unknownFallbackSupply) delete nextState.positions[key].provisionalSupplyProvenance;
-    nextState.trades = [trade, ...(workingState.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
+    nextState.trades = [trade, ...(workingState.trades || [])];
     return {
       state: nextState,
       trade,
@@ -1003,7 +1003,7 @@
     const nextCashBalanceNative = checkedArithmetic(cashBalanceNative + netProceedsNative, 'nonnegative');
     const nextAccountRealizedPnlNative = checkedArithmetic(accountRealizedPnlNative + realizedPnlNative);
     const nextPositionRealizedPnlNative = checkedArithmetic(positionRealizedPnlNative + realizedPnlNative);
-    const heldMs = checkedArithmetic(now - Number(existing.openedAt ?? now), 'nonnegative');
+    const heldMs = checkedArithmetic(Math.max(0, now - Number(existing.openedAt ?? now)), 'nonnegative');
     const dayKey = localDateKey(now);
     const day = workingState.dailyRealizedByChain?.[chain]?.[dayKey]
       || { native: 0, usdAtExecution: 0 };
@@ -1030,6 +1030,7 @@
     if (existingCostBasisNative > 0 && roundedRemainingQuantity > 0 && roundedRemainingCost <= 0) {
       throw new Error('invalidArithmetic');
     }
+    if (remainingQuantity > 0 && roundedRemainingQuantity <= 0) throw new Error('invalidArithmetic');
     const roundedNextPositionRealizedPnlNative = checkedRound(nextPositionRealizedPnlNative);
     const roundedNextDayNative = checkedRound(nextDayNative);
     const roundedNextDayUsdAtExecution = checkedRound(nextDayUsdAtExecution);
@@ -1070,7 +1071,7 @@
     nextState.accounts[chain].cashBalanceNative = roundedNextCashBalanceNative;
     nextState.accounts[chain].realizedPnlNative = roundedNextAccountRealizedPnlNative;
     nextState.accounts[chain].updatedAt = now;
-    if (fullClose || remainingQuantity <= 1e-12) delete nextState.positions[key];
+    if (fullClose || remainingQuantity === 0) delete nextState.positions[key];
     else {
       nextState.positions[key] = {
         ...existing, quantity: roundedRemainingQuantity, costBasisNative: roundedRemainingCost,
@@ -1100,7 +1101,7 @@
       if (!legacyExecutionSupply) delete nextState.positions[key].marketCapProvenance;
       if (!unknownFallbackSupply) delete nextState.positions[key].provisionalSupplyProvenance;
     }
-    nextState.trades = [trade, ...(workingState.trades || [])].slice(0, Tango.MAX_TRADES || 10_000);
+    nextState.trades = [trade, ...(workingState.trades || [])];
     nextState.dailyRealizedByChain[chain][dayKey] = {
       native: roundedNextDayNative, usdAtExecution: roundedNextDayUsdAtExecution
     };
@@ -1125,7 +1126,7 @@
         continue;
       }
       try {
-        const result = executeSell(nextState, { ...order, percent: 100 }, settings, now);
+        const result = executeSell(nextState, { ...order, quantity: undefined, percent: 100 }, settings, now);
         nextState = result.state;
         trades.push(result.trade);
         if (result.calibration) calibrations.push(result.calibration);
@@ -1186,24 +1187,35 @@
   function chainUsdSummary(state, chain, nativePriceUsd) {
     const account = chainAccount(state, chain);
     const price = Number(nativePriceUsd);
-    if (!(price > 0)) throw new Error('invalidNativePrice');
+    if (!Number.isFinite(price) || !(price > 0)) throw new Error('invalidNativePrice');
     const positionsUsd = Object.values(state.positions || {})
       .filter((position) => position.chain === chain)
-      .reduce((sum, position) => sum + Number(position.quantity) * markPosition(position).priceUsd, 0);
-    const cashUsd = Number(account.cashBalanceNative) * price;
-    const principalUsd = Number(account.initialBalanceNative) * price;
-    const assetsUsd = cashUsd + positionsUsd;
-    return { cashUsd, positionsUsd, assetsUsd, principalUsd, pnlUsd: assetsUsd - principalUsd };
+      .reduce((sum, position) => checkedArithmetic(
+        sum + checkedArithmetic(Number(position.quantity) * markPosition(position).priceUsd, 'nonnegative'),
+        'nonnegative'
+      ), 0);
+    const cashUsd = checkedArithmetic(Number(account.cashBalanceNative) * price, 'nonnegative');
+    const principalUsd = checkedArithmetic(Number(account.initialBalanceNative) * price, 'nonnegative');
+    const assetsUsd = checkedArithmetic(cashUsd + positionsUsd, 'nonnegative');
+    const pnlUsd = checkedArithmetic(assetsUsd - principalUsd);
+    return { cashUsd, positionsUsd, assetsUsd, principalUsd, pnlUsd };
   }
 
   function globalUsdSummary(state, nativePricesByChain) {
     let assetsUsd = 0; let pnlUsd = 0; const missingChains = [];
     Tango.Chains.all().forEach((chain) => {
       const price = Number(nativePricesByChain?.[chain.id] || 0);
-      if (!(price > 0)) { missingChains.push(chain.id); return; }
-      const summary = chainUsdSummary(state, chain.id, price);
-      assetsUsd += summary.assetsUsd;
-      pnlUsd += summary.pnlUsd;
+      if (!Number.isFinite(price) || !(price > 0)) { missingChains.push(chain.id); return; }
+      try {
+        const summary = chainUsdSummary(state, chain.id, price);
+        const nextAssetsUsd = checkedArithmetic(assetsUsd + summary.assetsUsd, 'nonnegative');
+        const nextPnlUsd = checkedArithmetic(pnlUsd + summary.pnlUsd);
+        assetsUsd = nextAssetsUsd;
+        pnlUsd = nextPnlUsd;
+      } catch (error) {
+        if (!['invalidArithmetic', 'invalidNativePrice', 'unsupportedChain'].includes(error?.message)) throw error;
+        missingChains.push(chain.id);
+      }
     });
     return { assetsUsd, pnlUsd, complete: missingChains.length === 0, missingChains };
   }
@@ -1229,7 +1241,7 @@
       ...existing, lastPriceUsd: effectiveQuotePrice(quote, existing),
       lastMarketCapUsd: Number(quote.marketCapUsd || existing.lastMarketCapUsd || 0),
       lastNativePriceUsd: Number(quote.nativePriceUsd || existing.lastNativePriceUsd || 0),
-      quoteObservedAt: Number(quote.observedAt), updatedAt: Number(now),
+      quoteObservedAt: safeDurableObservedAt(quote.observedAt, Number(now)) ?? Number(now), updatedAt: Number(now),
       lastPriceProvenance: priceProvenanceForQuote(quote, existing, trustedMarketCap),
       totalSupply: Number(executionSupply.totalSupply), supplySource: String(executionSupply.supplySource),
       launchpad: executionSupply.launchpad, launchMode: executionSupply.launchMode,

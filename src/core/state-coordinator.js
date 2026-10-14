@@ -140,9 +140,13 @@
     let remainingCalibrations = calibrationEntries.length;
 
     for (const unit of candidates) {
-      if (measuredBytes <= budgetBytes) break;
+      const tradesOverLimit = remainingTrades > Tango.MAX_TRADES;
+      const calibrationsOverLimit = remainingCalibrations > Tango.MAX_TRADES;
+      if (measuredBytes <= budgetBytes && !tradesOverLimit && !calibrationsOverLimit) break;
       const trades = unit.entries.filter(({ collection }) => collection === 'trade');
       const calibrations = unit.entries.filter(({ collection }) => collection === 'calibration');
+      if (measuredBytes <= budgetBytes
+        && !(tradesOverLimit && trades.length) && !(calibrationsOverLimit && calibrations.length)) continue;
       if (trades.length) {
         const after = remainingTrades - trades.length;
         measuredBytes -= trades.reduce((sum, entry) => sum + entry.bytes, 0)
@@ -171,7 +175,8 @@
       calibrations: normalized.calibrations.filter((_, index) => !removedCalibrationIndexes.has(index))
     };
     measuredBytes = serializedStateBytes(compacted);
-    if (measuredBytes > budgetBytes) {
+    if (measuredBytes > budgetBytes
+      || remainingTrades > Tango.MAX_TRADES || remainingCalibrations > Tango.MAX_TRADES) {
       throw storageBudgetError('storageFull', measuredBytes, budgetBytes);
     }
     Tango.State.normalizeState(compacted, settings, { strict: true });
@@ -470,9 +475,20 @@
           0,
           Number(state.stateRevision || 0) - (migrationPending ? 1 : 0)
         );
+        if (['EXECUTE_BUY', 'EXECUTE_SELL', 'EXECUTE_CLOSE_ALL'].includes(command?.type)
+          && settings.enabled !== true) throw new Error('paperTradingDisabled');
         if (command?.type === 'INITIALIZE') {
-          const nextSettings = Tango.State.normalizeSettings({ ...settings, language: command.language });
           const balance = Number(command.defaultBalanceNative ?? 10);
+          if (!Number.isFinite(balance) || balance < Number.EPSILON || balance > 1e15) {
+            throw new Error('invalidResetPrincipal');
+          }
+          const nextSettings = Tango.State.normalizeSettings({
+            ...settings,
+            ...(command.language === undefined ? {} : { language: command.language }),
+            chains: Object.fromEntries(Tango.Chains.all().map((chain) => [chain.id, {
+              ...settings.chains[chain.id], initialBalanceNative: balance
+            }]))
+          }, { strict: true, requireAllChains: true });
           const initialBalances = Object.fromEntries(Tango.Chains.all().map((chain) => [chain.id, balance]));
           const initialized = Tango.State.createInitialState({ now: now(), initialBalances });
           initialized.initialized = true;
@@ -485,7 +501,7 @@
           return { state: prepared.state, settings: nextSettings };
         }
         if (command?.type === 'SAVE_SETTINGS') {
-          const nextSettings = Tango.State.normalizeSettings(command.settings);
+          const nextSettings = Tango.State.normalizeSettings(command.settings, { strict: true });
           const nextState = migrationPending ? prepareState(state, nextSettings).state : state;
           await writeStored({
             ...(migrationPending ? { [Tango.STORAGE_KEY]: nextState } : {}),
@@ -535,7 +551,8 @@
           });
           const importedState = Tango.State.normalizeState(payload.state, importedSettings, {
             strict: true,
-            migrationNow: payload.exportedAt
+            migrationNow: payload.exportedAt,
+            maximumTimestamp: payload.exportedAt
           });
           importedState.initialized = true;
           importedState.stateRevision = storedRevision + 1;

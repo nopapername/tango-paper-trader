@@ -1,0 +1,1122 @@
+TAP version 13
+# Subtest: chart child recovers a dropped startup READY from one exact probe without marker feedback
+ok 1 - chart child recovers a dropped startup READY from one exact probe without marker feedback
+  ---
+  duration_ms: 3.3275
+  type: 'test'
+  ...
+# Subtest: chart READY reports child URL identity instead of adopting parent marker identity
+ok 2 - chart READY reports child URL identity instead of adopting parent marker identity
+  ---
+  duration_ms: 0.9678
+  type: 'test'
+  ...
+# Subtest: chart READY recovers blob-frame identity from a same-origin GMGN detail referrer
+ok 3 - chart READY recovers blob-frame identity from a same-origin GMGN detail referrer
+  ---
+  duration_ms: 0.7812
+  type: 'test'
+  ...
+# Subtest: chart READY prefers same-origin top detail identity for a reused blob frame
+ok 4 - chart READY prefers same-origin top detail identity for a reused blob frame
+  ---
+  duration_ms: 0.5934
+  type: 'test'
+  ...
+# Subtest: chart READY fails closed when top detail identity is inaccessible
+ok 5 - chart READY fails closed when top detail identity is inaccessible
+  ---
+  duration_ms: 0.6342
+  type: 'test'
+  ...
+# Subtest: a non-parent marker sender cannot inject or clear chart state
+ok 6 - a non-parent marker sender cannot inject or clear chart state
+  ---
+  duration_ms: 3.1715
+  type: 'test'
+  ...
+# Subtest: malformed parent marker messages cannot crash or corrupt the current chart state
+ok 7 - malformed parent marker messages cannot crash or corrupt the current chart state
+  ---
+  duration_ms: 1.9356
+  type: 'test'
+  ...
+# Subtest: a trusted parent payload for another token cannot replace or clear current-token markers
+ok 8 - a trusted parent payload for another token cannot replace or clear current-token markers
+  ---
+  duration_ms: 1.6779
+  type: 'test'
+  ...
+# Subtest: the trusted parent can draw and clear markers for the independently derived current token
+ok 9 - the trusted parent can draw and clear markers for the independently derived current token
+  ---
+  duration_ms: 1.2763
+  type: 'test'
+  ...
+# Subtest: an identified payload is rejected when the chart child has no independent token identity
+ok 10 - an identified payload is rejected when the chart child has no independent token identity
+  ---
+  duration_ms: 1.3686
+  type: 'test'
+  ...
+# Subtest: invalid EVM and Solana child addresses cannot authorize matching identified payloads
+ok 11 - invalid EVM and Solana child addresses cannot authorize matching identified payloads
+  ---
+  duration_ms: 2.663
+  type: 'test'
+  ...
+# Subtest: valid Solana marker identity remains case-sensitive while exact draw and clear stay allowed
+ok 12 - valid Solana marker identity remains case-sensitive while exact draw and clear stay allowed
+  ---
+  duration_ms: 1.3955
+  type: 'test'
+  ...
+# Subtest: invalid producer marker records cannot replace or clear current chart state
+ok 13 - invalid producer marker records cannot replace or clear current chart state
+  ---
+  duration_ms: 2.7242
+  type: 'test'
+  ...
+# Subtest: returns the existing empty marker shape without a current token
+ok 14 - returns the existing empty marker shape without a current token
+  ---
+  duration_ms: 0.3464
+  type: 'test'
+  ...
+# Subtest: position entry wins and the first four matching sells keep trade order
+ok 15 - position entry wins and the first four matching sells keep trade order
+  ---
+  duration_ms: 0.9786
+  type: 'test'
+  ...
+# Subtest: synthetic market-cap prices stay off the price axis until a real ratio reference exists
+ok 16 - synthetic market-cap prices stay off the price axis until a real ratio reference exists
+  ---
+  duration_ms: 0.4411
+  type: 'test'
+  ...
+# Subtest: known execution supply maps fallback market-cap entries onto a factual price-only chart
+ok 17 - known execution supply maps fallback market-cap entries onto a factual price-only chart
+  ---
+  duration_ms: 0.1274
+  type: 'test'
+  ...
+# Subtest: mixed fresh price and stale market cap prefer same-token execution supply
+ok 18 - mixed fresh price and stale market cap prefer same-token execution supply
+  ---
+  duration_ms: 0.1267
+  type: 'test'
+  ...
+# Subtest: incoherent observed market cap has no payload fallback without known supply
+ok 19 - incoherent observed market cap has no payload fallback without known supply
+  ---
+  duration_ms: 0.1371
+  type: 'test'
+  ...
+# Subtest: untrusted execution supply cannot synthesize market-cap or marker price references
+ok 20 - untrusted execution supply cannot synthesize market-cap or marker price references
+  ---
+  duration_ms: 0.0819
+  type: 'test'
+  ...
+# Subtest: factual BUY and SELL execution prices survive zero execution market caps
+ok 21 - factual BUY and SELL execution prices survive zero execution market caps
+  ---
+  duration_ms: 0.1923
+  type: 'test'
+  ...
+# Subtest: factual zero-cap BUY price wins over an existing derived position price
+ok 22 - factual zero-cap BUY price wins over an existing derived position price
+  ---
+  duration_ms: 0.1149
+  type: 'test'
+  ...
+# Subtest: fallback position and first BUY cannot block the next factual BUY entry
+ok 23 - fallback position and first BUY cannot block the next factual BUY entry
+  ---
+  duration_ms: 0.1315
+  type: 'test'
+  ...
+# Subtest: fallback-only SELLs do not consume the first four usable SELL markers
+ok 24 - fallback-only SELLs do not consume the first four usable SELL markers
+  ---
+  duration_ms: 0.1532
+  type: 'test'
+  ...
+# Subtest: factual execution prices survive while canonical fallback market caps are removed
+ok 25 - factual execution prices survive while canonical fallback market caps are removed
+  ---
+  duration_ms: 0.196
+  type: 'test'
+  ...
+# Subtest: canonical durable fallback market caps cannot revive without paperFallback
+ok 26 - canonical durable fallback market caps cannot revive without paperFallback
+  ---
+  duration_ms: 0.2293
+  type: 'test'
+  ...
+# Subtest: source-only canonical fallback prices are rejected for BUY SELL and card records
+ok 27 - source-only canonical fallback prices are rejected for BUY SELL and card records
+  ---
+  duration_ms: 0.113
+  type: 'test'
+  ...
+# Subtest: explicit market-cap fallback signals are removed without suppressing factual prices
+ok 28 - explicit market-cap fallback signals are removed without suppressing factual prices
+  ---
+  duration_ms: 0.1669
+  type: 'test'
+  ...
+# Subtest: verified card market-cap fallback keeps only its observed market-cap coordinate
+ok 29 - verified card market-cap fallback keeps only its observed market-cap coordinate
+  ---
+  duration_ms: 0.1283
+  type: 'test'
+  ...
+# Subtest: every partial card market-cap fallback signature fails closed
+ok 30 - every partial card market-cap fallback signature fails closed
+  ---
+  duration_ms: 0.1225
+  type: 'test'
+  ...
+# Subtest: complete card market-cap fallback rejects contradictory explicit provenance
+ok 31 - complete card market-cap fallback rejects contradictory explicit provenance
+  ---
+  duration_ms: 0.1008
+  type: 'test'
+  ...
+# Subtest: complete card market-cap fallback accepts coherent explicit transient provenance
+ok 32 - complete card market-cap fallback accepts coherent explicit transient provenance
+  ---
+  duration_ms: 0.125
+  type: 'test'
+  ...
+# Subtest: incomplete or forged card market-cap fallback cannot produce a coordinate
+ok 33 - incomplete or forged card market-cap fallback cannot produce a coordinate
+  ---
+  duration_ms: 0.1659
+  type: 'test'
+  ...
+# Subtest: legacy unattested records without explicit fallback signatures remain compatible
+ok 34 - legacy unattested records without explicit fallback signatures remain compatible
+  ---
+  duration_ms: 0.0988
+  type: 'test'
+  ...
+# Subtest: factual market-cap coordinates remain when only their price is derived
+ok 35 - factual market-cap coordinates remain when only their price is derived
+  ---
+  duration_ms: 0.084
+  type: 'test'
+  ...
+# Subtest: chart cache identity includes chain as well as token address
+ok 36 - chart cache identity includes chain as well as token address
+  ---
+  duration_ms: 0.137
+  type: 'test'
+  ...
+# Subtest: chart bridge accepts the TradingView frame title but ignores unrelated titled frames
+ok 37 - chart bridge accepts the TradingView frame title but ignores unrelated titled frames
+  ---
+  duration_ms: 1.0833
+  type: 'test'
+  ...
+# Subtest: chart bridge accepts a dynamically titled frame only inside the TradingView container
+ok 38 - chart bridge accepts a dynamically titled frame only inside the TradingView container
+  ---
+  duration_ms: 1.1979
+  type: 'test'
+  ...
+# Subtest: actual engine fallback coordinates stay absent after a factual live ratio arrives
+ok 39 - actual engine fallback coordinates stay absent after a factual live ratio arrives
+  ---
+  duration_ms: 2.8903
+  type: 'test'
+  ...
+# Subtest: persisted coordinator BUY and SELL keep only independently factual marker dimensions
+ok 40 - persisted coordinator BUY and SELL keep only independently factual marker dimensions
+  ---
+  duration_ms: 13.3492
+  type: 'test'
+  ...
+# Subtest: an empty marker payload clears overlay and every cached chart placement
+ok 41 - an empty marker payload clears overlay and every cached chart placement
+  ---
+  duration_ms: 0.7717
+  type: 'test'
+  ...
+# Subtest: card market-cap entry uses the verified position average across buys and partial sells
+ok 42 - card market-cap entry uses the verified position average across buys and partial sells
+  ---
+  duration_ms: 1.093
+  type: 'test'
+  ...
+# Subtest: first identified marker reuses current axis labels captured after an unidentified clear
+ok 43 - first identified marker reuses current axis labels captured after an unidentified clear
+  ---
+  duration_ms: 1.1396
+  type: 'test'
+  ...
+# Subtest: latest axis generation remains eligible 1.5 seconds after labels precede the first marker
+ok 44 - latest axis generation remains eligible 1.5 seconds after labels precede the first marker
+  ---
+  duration_ms: 0.9169
+  type: 'test'
+  ...
+# Subtest: axis fitting unions latest-generation labels with fresh older-generation labels
+ok 45 - axis fitting unions latest-generation labels with fresh older-generation labels
+  ---
+  duration_ms: 0.9697
+  type: 'test'
+  ...
+# Subtest: same-token marker keeps its verified scale while the chart axis is idle
+ok 46 - same-token marker keeps its verified scale while the chart axis is idle
+  ---
+  duration_ms: 1.4754
+  type: 'test'
+  ...
+# Subtest: MARKET_CAP hint resolves an exact PRICE MCAP tie in favor of market cap
+ok 47 - MARKET_CAP hint resolves an exact PRICE MCAP tie in favor of market cap
+  ---
+  duration_ms: 1.0739
+  type: 'test'
+  ...
+# Subtest: PRICE hint resolves an exact PRICE MCAP tie in favor of price
+ok 48 - PRICE hint resolves an exact PRICE MCAP tie in favor of price
+  ---
+  duration_ms: 0.9312
+  type: 'test'
+  ...
+# Subtest: new frame context rejects old anchors and an older generation cannot restore them
+ok 49 - new frame context rejects old anchors and an older generation cannot restore them
+  ---
+  duration_ms: 1.2755
+  type: 'test'
+  ...
+# Subtest: same-generation axis hint change requires anchors observed after the change
+ok 50 - same-generation axis hint change requires anchors observed after the change
+  ---
+  duration_ms: 1.307
+  type: 'test'
+  ...
+# Subtest: malformed frame context cannot replace or clear current chart state
+ok 51 - malformed frame context cannot replace or clear current chart state
+  ---
+  duration_ms: 1.612
+  type: 'test'
+  ...
+# Subtest: an unissued high-generation marker context cannot poison a legal lower-generation clear
+ok 52 - an unissued high-generation marker context cannot poison a legal lower-generation clear
+  ---
+  duration_ms: 1.0427
+  type: 'test'
+  ...
+# Subtest: a delayed same-generation old-probe replay is inert after a newly observed probe
+ok 53 - a delayed same-generation old-probe replay is inert after a newly observed probe
+  ---
+  duration_ms: 1.421
+  type: 'test'
+  ...
+# Subtest: same marker id follows a changed economic value below the jitter deadband
+ok 54 - same marker id follows a changed economic value below the jitter deadband
+  ---
+  duration_ms: 1.1727
+  type: 'test'
+  ...
+# Subtest: unchanged economics and plot bounds retain the visual deadband for a two pixel fit jitter
+ok 55 - unchanged economics and plot bounds retain the visual deadband for a two pixel fit jitter
+  ---
+  duration_ms: 1.3887
+  type: 'test'
+  ...
+# Subtest: a one pixel anchor change removes a marker when the newest fit crosses the plot boundary
+ok 56 - a one pixel anchor change removes a marker when the newest fit crosses the plot boundary
+  ---
+  duration_ms: 1.2864
+  type: 'test'
+  ...
+# Subtest: economic cache prunes a removed marker before that id reappears
+ok 57 - economic cache prunes a removed marker before that id reappears
+  ---
+  duration_ms: 1.5542
+  type: 'test'
+  ...
+# Subtest: economic cache clears when the token identity changes
+ok 58 - economic cache clears when the token identity changes
+  ---
+  duration_ms: 1.2197
+  type: 'test'
+  ...
+# Subtest: economic cache clears across a resize before the same marker rerenders
+ok 59 - economic cache clears across a resize before the same marker rerenders
+  ---
+  duration_ms: 1.1473
+  type: 'test'
+  ...
+# Subtest: economic cache distinguishes price and market-cap axes with the same raw coordinate
+ok 60 - economic cache distinguishes price and market-cap axes with the same raw coordinate
+  ---
+  duration_ms: 1.2469
+  type: 'test'
+  ...
+# Subtest: economic cache distinguishes market-cap factors with the same raw coordinate
+ok 61 - economic cache distinguishes market-cap factors with the same raw coordinate
+  ---
+  duration_ms: 1.2502
+  type: 'test'
+  ...
+# Subtest: clearing an unrelated canvas preserves the active price-axis scale
+ok 62 - clearing an unrelated canvas preserves the active price-axis scale
+  ---
+  duration_ms: 1.7011
+  type: 'test'
+  ...
+# Subtest: positive marker values select an axis when both current references are zero
+ok 63 - positive marker values select an axis when both current references are zero
+  ---
+  duration_ms: 1.7591
+  type: 'test'
+  ...
+# Subtest: current right-axis labels place a $6.028K marker near the $6.02K scale
+ok 64 - current right-axis labels place a $6.028K marker near the $6.02K scale
+  ---
+  duration_ms: 1.1368
+  type: 'test'
+  ...
+# Subtest: a factual marker appears only while its projection is inside current plot bounds
+ok 65 - a factual marker appears only while its projection is inside current plot bounds
+  ---
+  duration_ms: 1.2314
+  type: 'test'
+  ...
+# Subtest: a PRICE marker missing its factual coordinate cannot be synthesized from the current ratio
+ok 66 - a PRICE marker missing its factual coordinate cannot be synthesized from the current ratio
+  ---
+  duration_ms: 1.0442
+  type: 'test'
+  ...
+# Subtest: line top left and right come from one transformed current source rectangle
+ok 67 - line top left and right come from one transformed current source rectangle
+  ---
+  duration_ms: 1.0364
+  type: 'test'
+  ...
+# Subtest: a moved source rectangle hides the old scale until fresh anchors arrive
+ok 68 - a moved source rectangle hides the old scale until fresh anchors arrive
+  ---
+  duration_ms: 0.9364
+  type: 'test'
+  ...
+# Subtest: a backing-store resize with an unchanged CSS rectangle requires fresh anchors
+ok 69 - a backing-store resize with an unchanged CSS rectangle requires fresh anchors
+  ---
+  duration_ms: 1.2842
+  type: 'test'
+  ...
+# Subtest: token switch rejects still-fresh axis labels captured for the previous token
+ok 70 - token switch rejects still-fresh axis labels captured for the previous token
+  ---
+  duration_ms: 1.2587
+  type: 'test'
+  ...
+# Subtest: identified token followed by an empty clear cannot lend its labels to the next token
+ok 71 - identified token followed by an empty clear cannot lend its labels to the next token
+  ---
+  duration_ms: 1.1156
+  type: 'test'
+  ...
+# Subtest: resize boundary cannot rebuild a scale from pre-resize labels plus two new labels
+ok 72 - resize boundary cannot rebuild a scale from pre-resize labels plus two new labels
+  ---
+  duration_ms: 1.0645
+  type: 'test'
+  ...
+# Subtest: full-canvas clear with no new labels cannot rebuild the old overlay
+ok 73 - full-canvas clear with no new labels cannot rebuild the old overlay
+  ---
+  duration_ms: 1.5891
+  type: 'test'
+  ...
+# Subtest: an active qualifying clear removes the overlay before the next repair tick
+ok 74 - an active qualifying clear removes the overlay before the next repair tick
+  ---
+  duration_ms: 1.7545
+  type: 'test'
+  ...
+# Subtest: newest complete axis snapshot after a narrow right-axis clear
+ok 75 - newest complete axis snapshot after a narrow right-axis clear
+  ---
+  duration_ms: 1.3889
+  type: 'test'
+  ...
+# Subtest: a tall clear entirely right of the canvas cannot invalidate the active axis snapshot
+ok 76 - a tall clear entirely right of the canvas cannot invalidate the active axis snapshot
+  ---
+  duration_ms: 1.1885
+  type: 'test'
+  ...
+# Subtest: a tall clear below the canvas cannot invalidate the active axis snapshot
+ok 77 - a tall clear below the canvas cannot invalidate the active axis snapshot
+  ---
+  duration_ms: 1.1636
+  type: 'test'
+  ...
+# Subtest: the right-axis boundary accepts exactly 70 percent clipped coverage at the 80 percent edge
+ok 78 - the right-axis boundary accepts exactly 70 percent clipped coverage at the 80 percent edge
+  ---
+  duration_ms: 3.5977
+  type: 'test'
+  ...
+# Subtest: a scaled raw qualifier that misses the backing right axis preserves the active overlay
+ok 79 - a scaled raw qualifier that misses the backing right axis preserves the active overlay
+  ---
+  duration_ms: 1.2301
+  type: 'test'
+  ...
+# Subtest: a scaled raw non-qualifier that covers the backing right axis starts a fresh snapshot
+ok 80 - a scaled raw non-qualifier that covers the backing right axis starts a fresh snapshot
+  ---
+  duration_ms: 1.2641
+  type: 'test'
+  ...
+# Subtest: a translated raw qualifier that misses the backing right axis preserves the active overlay
+ok 81 - a translated raw qualifier that misses the backing right axis preserves the active overlay
+  ---
+  duration_ms: 1.9071
+  type: 'test'
+  ...
+# Subtest: a translated raw non-qualifier that covers the backing right axis starts a fresh snapshot
+ok 82 - a translated raw non-qualifier that covers the backing right axis starts a fresh snapshot
+  ---
+  duration_ms: 1.3801
+  type: 'test'
+  ...
+# Subtest: a skewed right-axis clear is ignored conservatively by the narrow branch
+ok 83 - a skewed right-axis clear is ignored conservatively by the narrow branch
+  ---
+  duration_ms: 1.1999
+  type: 'test'
+  ...
+# Subtest: an axis-aligned reflected clear that covers the backing right axis starts a fresh snapshot
+ok 84 - an axis-aligned reflected clear that covers the backing right axis starts a fresh snapshot
+  ---
+  duration_ms: 1.2669
+  type: 'test'
+  ...
+# Subtest: a failed transform read cannot trigger the narrow right-axis branch
+ok 85 - a failed transform read cannot trigger the narrow right-axis branch
+  ---
+  duration_ms: 1.2267
+  type: 'test'
+  ...
+# Subtest: a malformed transform cannot trigger the narrow right-axis branch
+ok 86 - a malformed transform cannot trigger the narrow right-axis branch
+  ---
+  duration_ms: 1.3641
+  type: 'test'
+  ...
+# Subtest: failed or malformed transform conversion cannot contribute axis anchors
+ok 87 - failed or malformed transform conversion cannot contribute axis anchors
+  ---
+  duration_ms: 1.7208
+  type: 'test'
+  ...
+# Subtest: the legacy full-canvas clear remains effective when reading the transform fails
+ok 88 - the legacy full-canvas clear remains effective when reading the transform fails
+  ---
+  duration_ms: 1.2787
+  type: 'test'
+  ...
+# Subtest: replacing the active canvas without a full clear discards its old axis records
+ok 89 - replacing the active canvas without a full clear discards its old axis records
+  ---
+  duration_ms: 1.125
+  type: 'test'
+  ...
+# Subtest: MCAP hint with zero text anchors stays hidden with bounded diagnostics
+ok 90 - MCAP hint with zero text anchors stays hidden with bounded diagnostics
+  ---
+  duration_ms: 0.8142
+  type: 'test'
+  ...
+# Subtest: a dynamically observed worker handoff clears the current scale and never invents a coordinate
+ok 91 - a dynamically observed worker handoff clears the current scale and never invents a coordinate
+  ---
+  duration_ms: 1.4375
+  type: 'test'
+  ...
+# Subtest: out-of-plot source disconnect and viewport changes have distinct diagnostics
+    # Subtest: out of plot
+    ok 1 - out of plot
+      ---
+      duration_ms: 0.8097
+      type: 'test'
+      ...
+    # Subtest: source disconnected
+    ok 2 - source disconnected
+      ---
+      duration_ms: 0.8629
+      type: 'test'
+      ...
+    # Subtest: viewport changed
+    ok 3 - viewport changed
+      ---
+      duration_ms: 0.8676
+      type: 'test'
+      ...
+    1..3
+ok 92 - out-of-plot source disconnect and viewport changes have distinct diagnostics
+  ---
+  duration_ms: 2.8054
+  type: 'test'
+  ...
+# Subtest: scale diagnostics distinguish nonnumeric sparse stale fit and mode failures
+    # Subtest: nonnumeric text
+    ok 1 - nonnumeric text
+      ---
+      duration_ms: 0.5451
+      type: 'test'
+      ...
+    # Subtest: two unique anchors
+    ok 2 - two unique anchors
+      ---
+      duration_ms: 0.604
+      type: 'test'
+      ...
+    # Subtest: stale generation
+    ok 3 - stale generation
+      ---
+      duration_ms: 0.9922
+      type: 'test'
+      ...
+    # Subtest: positive-slope fit
+    ok 4 - positive-slope fit
+      ---
+      duration_ms: 0.7255
+      type: 'test'
+      ...
+    # Subtest: explicit dimension without factual value
+    ok 5 - explicit dimension without factual value
+      ---
+      duration_ms: 0.7573
+      type: 'test'
+      ...
+    1..5
+ok 93 - scale diagnostics distinguish nonnumeric sparse stale fit and mode failures
+  ---
+  duration_ms: 3.878
+  type: 'test'
+  ...
+# Subtest: markerless renders discard repeatedly disconnected canvas histories but retain connected records
+ok 94 - markerless renders discard repeatedly disconnected canvas histories but retain connected records
+  ---
+  duration_ms: 0.7866
+  type: 'test'
+  ...
+# Subtest: all-hidden markers discard a disconnected active canvas and its stable scale
+ok 95 - all-hidden markers discard a disconnected active canvas and its stable scale
+  ---
+  duration_ms: 0.9535
+  type: 'test'
+  ...
+# Subtest: Popup startup storage failure renders a retry that recovers
+ok 96 - Popup startup storage failure renders a retry that recovers
+  ---
+  duration_ms: 7.7436
+  type: 'test'
+  ...
+# Subtest: Popup routes an uninitialized account to onboarding without writing fixed defaults
+ok 97 - Popup routes an uninitialized account to onboarding without writing fixed defaults
+  ---
+  duration_ms: 1.7483
+  type: 'test'
+  ...
+# Subtest: Popup common-capital reset contains a rejected atomic write and restores authoritative UI
+ok 98 - Popup common-capital reset contains a rejected atomic write and restores authoritative UI
+  ---
+  duration_ms: 2.6989
+  type: 'test'
+  ...
+# Subtest: Popup clears rejected-write feedback after a successful retry
+ok 99 - Popup clears rejected-write feedback after a successful retry
+  ---
+  duration_ms: 2.0271
+  type: 'test'
+  ...
+# Subtest: Popup rolls back a selected chain when settings persistence fails
+ok 100 - Popup rolls back a selected chain when settings persistence fails
+  ---
+  duration_ms: 2.41
+  type: 'test'
+  ...
+# Subtest: Popup restores the enabled switch when settings persistence fails
+ok 101 - Popup restores the enabled switch when settings persistence fails
+  ---
+  duration_ms: 1.9782
+  type: 'test'
+  ...
+# Subtest: Popup preserves a pending chain selection when enabled changes concurrently
+ok 102 - Popup preserves a pending chain selection when enabled changes concurrently
+  ---
+  duration_ms: 3.167
+  type: 'test'
+  ...
+# Subtest: Popup account language persists only the owned language field
+ok 103 - Popup account language persists only the owned language field
+  ---
+  duration_ms: 1.9797
+  type: 'test'
+  ...
+# Subtest: Popup rolls back a failed latest chain selection to the last successful queued chain
+ok 104 - Popup rolls back a failed latest chain selection to the last successful queued chain
+  ---
+  duration_ms: 2.3483
+  type: 'test'
+  ...
+# Subtest: Popup waits for pending settings before atomically changing common capital
+ok 105 - Popup waits for pending settings before atomically changing common capital
+  ---
+  duration_ms: 3.3792
+  type: 'test'
+  ...
+# Subtest: Popup waits for a pending selection before opening the shared GMGN entry
+ok 106 - Popup waits for a pending selection before opening the shared GMGN entry
+  ---
+  duration_ms: 2.0831
+  type: 'test'
+  ...
+# Subtest: Popup cancels a queued GMGN navigation when another chain is selected while waiting
+ok 107 - Popup cancels a queued GMGN navigation when another chain is selected while waiting
+  ---
+  duration_ms: 2.6928
+  type: 'test'
+  ...
+# Subtest: Popup master switch follows an external shortcut storage change while open
+ok 108 - Popup master switch follows an external shortcut storage change while open
+  ---
+  duration_ms: 2.1136
+  type: 'test'
+  ...
+# Subtest: Popup uses the active GMGN tab chain until an explicit selector choice persists
+ok 109 - Popup uses the active GMGN tab chain until an explicit selector choice persists
+  ---
+  duration_ms: 2.8972
+  type: 'test'
+  ...
+# Subtest: Popup native refresh has independent timeout, periodic retry, and does not block initial controls
+ok 110 - Popup native refresh has independent timeout, periodic retry, and does not block initial controls
+  ---
+  duration_ms: 3.1242
+  type: 'test'
+  ...
+# Subtest: Popup auto theme follows system light mode and expired prices never reach its model
+ok 111 - Popup auto theme follows system light mode and expired prices never reach its model
+  ---
+  duration_ms: 2.0627
+  type: 'test'
+  ...
+# Subtest: Popup invalid common principal shows a validation message and performs no mutation
+ok 112 - Popup invalid common principal shows a validation message and performs no mutation
+  ---
+  duration_ms: 1.6651
+  type: 'test'
+  ...
+# Subtest: Popup rejected selection does not block a later common-capital reset
+ok 113 - Popup rejected selection does not block a later common-capital reset
+  ---
+  duration_ms: 1.9253
+  type: 'test'
+  ...
+# Subtest: Popup changes equal common capital through one confirmed all-chain reset
+ok 114 - Popup changes equal common capital through one confirmed all-chain reset
+  ---
+  duration_ms: 1.6171
+  type: 'test'
+  ...
+# Subtest: Popup repairs divergent legacy principals even when the displayed amount is unchanged
+ok 115 - Popup repairs divergent legacy principals even when the displayed amount is unchanged
+  ---
+  duration_ms: 2.1134
+  type: 'test'
+  ...
+# Subtest: Popup cancellation leaves divergent legacy principals untouched and performs no write
+ok 116 - Popup cancellation leaves divergent legacy principals untouched and performs no write
+  ---
+  duration_ms: 1.5033
+  type: 'test'
+  ...
+# Subtest: native quota failure becomes one storageFull failure without retry or state change
+ok 117 - native quota failure becomes one storageFull failure without retry or state change
+  ---
+  duration_ms: 3.4367
+  type: 'test'
+  ...
+# Subtest: count compaction preserves an open fallback origin and current buy before trimming history
+ok 118 - count compaction preserves an open fallback origin and current buy before trimming history
+  ---
+  duration_ms: 747.6507
+  type: 'test'
+  ...
+# Subtest: lossless import rejects count overflow after validating every trade and calibration without writes
+ok 119 - lossless import rejects count overflow after validating every trade and calibration without writes
+  ---
+  duration_ms: 81.0614
+  type: 'test'
+  ...
+# Subtest: future-skew quote refresh and calibration persist safe timestamps
+ok 120 - future-skew quote refresh and calibration persist safe timestamps
+  ---
+  duration_ms: 3.8894
+  type: 'test'
+  ...
+# Subtest: disabled trading rejects every execution against latest settings and queue recovers after enabling
+ok 121 - disabled trading rejects every execution against latest settings and queue recovers after enabling
+  ---
+  duration_ms: 1.5515
+  type: 'test'
+  ...
+# Subtest: initialize saves its principal in settings and reset all preserves it
+ok 122 - initialize saves its principal in settings and reset all preserves it
+  ---
+  duration_ms: 0.6145
+  type: 'test'
+  ...
+# Subtest: every settings write rejects full-rate fees and slippage without disabling executable settings
+ok 123 - every settings write rejects full-rate fees and slippage without disabling executable settings
+  ---
+  duration_ms: 0.6995
+  type: 'test'
+  ...
+# Subtest: legacy v1 lossless import validates tail records before rejecting count overflow
+ok 124 - legacy v1 lossless import validates tail records before rejecting count overflow
+  ---
+  duration_ms: 112.4427
+  type: 'test'
+  ...
+# Subtest: import rejects opening times beyond the backup timestamp even when position timestamps agree
+ok 125 - import rejects opening times beyond the backup timestamp even when position timestamps agree
+  ---
+  duration_ms: 0.8591
+  type: 'test'
+  ...
+# Subtest: a legacy future-opened position can still close without negative holding time
+ok 126 - a legacy future-opened position can still close without negative holding time
+  ---
+  duration_ms: 1.35
+  type: 'test'
+  ...
+# Subtest: legacy future-opened positions normalize timestamps without blocking partial sell, refresh, or another buy
+ok 127 - legacy future-opened positions normalize timestamps without blocking partial sell, refresh, or another buy
+  ---
+  duration_ms: 3.3881
+  type: 'test'
+  ...
+# Subtest: legacy clock rollback recovery preserves canonical fallback origin for later mutations
+ok 128 - legacy clock rollback recovery preserves canonical fallback origin for later mutations
+  ---
+  duration_ms: 6.5936
+  type: 'test'
+  ...
+# Subtest: storage compaction measures UTF-8 and uses the stable calibration-first removal key
+ok 129 - storage compaction measures UTF-8 and uses the stable calibration-first removal key
+  ---
+  duration_ms: 1.4344
+  type: 'test'
+  ...
+# Subtest: storage compaction removes a closed fallback unit atomically and retains an open unit closure
+ok 130 - storage compaction removes a closed fallback unit atomically and retains an open unit closure
+  ---
+  duration_ms: 2.3258
+  type: 'test'
+  ...
+# Subtest: coordinator preserves a coherent observed market cap on a structured-cloned unknown fallback
+ok 131 - coordinator preserves a coherent observed market cap on a structured-cloned unknown fallback
+  ---
+  duration_ms: 24.5525
+  type: 'test'
+  ...
+# Subtest: coordinator degrades a future factual-price narrowing to deterministic fallback
+ok 132 - coordinator degrades a future factual-price narrowing to deterministic fallback
+  ---
+  duration_ms: 2.5141
+  type: 'test'
+  ...
+# Subtest: coordinator persists BUY and SELL with safe provenance when caller originals are unusable
+ok 133 - coordinator persists BUY and SELL with safe provenance when caller originals are unusable
+  ---
+  duration_ms: 4.9905
+  type: 'test'
+  ...
+# Subtest: serializes buys from two contexts without losing either chain
+ok 134 - serializes buys from two contexts without losing either chain
+  ---
+  duration_ms: 2.4075
+  type: 'test'
+  ...
+# Subtest: serializes scoped settings patches from stale Popup, Dashboard, and content snapshots
+ok 135 - serializes scoped settings patches from stale Popup, Dashboard, and content snapshots
+  ---
+  duration_ms: 1.0249
+  type: 'test'
+  ...
+# Subtest: a rejected settings patch does not poison later queued settings mutations
+ok 136 - a rejected settings patch does not poison later queued settings mutations
+  ---
+  duration_ms: 2.522
+  type: 'test'
+  ...
+# Subtest: serializes periodic quote and metadata writes with a trade from another context
+ok 137 - serializes periodic quote and metadata writes with a trade from another context
+  ---
+  duration_ms: 3.8769
+  type: 'test'
+  ...
+# Subtest: quote calibration uses the coordinator clock and commits one revision
+ok 138 - quote calibration uses the coordinator clock and commits one revision
+  ---
+  duration_ms: 1.72
+  type: 'test'
+  ...
+# Subtest: quote refresh rejects stale observations against the coordinator clock without a write
+ok 139 - quote refresh rejects stale observations against the coordinator clock without a write
+  ---
+  duration_ms: 0.5565
+  type: 'test'
+  ...
+# Subtest: rejects a stale whole-state replacement by revision instead of erasing a newer mutation
+ok 140 - rejects a stale whole-state replacement by revision instead of erasing a newer mutation
+  ---
+  duration_ms: 0.9061
+  type: 'test'
+  ...
+# Subtest: a sell queued from another context executes against the latest committed buy
+ok 141 - a sell queued from another context executes against the latest committed buy
+  ---
+  duration_ms: 1.6226
+  type: 'test'
+  ...
+# Subtest: stale native observations cannot mutate buy, sell, or close-all state and the queue recovers
+ok 142 - stale native observations cannot mutate buy, sell, or close-all state and the queue recovers
+  ---
+  duration_ms: 3.5419
+  type: 'test'
+  ...
+# Subtest: close-all and reset commands mutate the latest queued state under the same coordinator
+ok 143 - close-all and reset commands mutate the latest queued state under the same coordinator
+  ---
+  duration_ms: 3.6921
+  type: 'test'
+  ...
+# Subtest: selected-chain reset atomically commits its custom principal to state and settings
+ok 144 - selected-chain reset atomically commits its custom principal to state and settings
+  ---
+  duration_ms: 0.628
+  type: 'test'
+  ...
+# Subtest: invalid selected-chain reset principals never write and do not poison the queue
+ok 145 - invalid selected-chain reset principals never write and do not poison the queue
+  ---
+  duration_ms: 2.0217
+  type: 'test'
+  ...
+# Subtest: common-capital reset atomically recreates all six paper accounts and preserves non-account settings
+ok 146 - common-capital reset atomically recreates all six paper accounts and preserves non-account settings
+  ---
+  duration_ms: 0.721
+  type: 'test'
+  ...
+# Subtest: invalid common-capital reset inputs write nothing and do not poison the coordinator queue
+ok 147 - invalid common-capital reset inputs write nothing and do not poison the coordinator queue
+  ---
+  duration_ms: 1.1303
+  type: 'test'
+  ...
+# Subtest: common-capital reset applies submitted settings in the same atomic write
+ok 148 - common-capital reset applies submitted settings in the same atomic write
+  ---
+  duration_ms: 0.4359
+  type: 'test'
+  ...
+# Subtest: imports normalize before one queued atomic state-and-settings write
+ok 149 - imports normalize before one queued atomic state-and-settings write
+  ---
+  duration_ms: 2.5292
+  type: 'test'
+  ...
+# Subtest: IMPORT rejects every malformed global setting without writes for v1 or v2 and the queue remains usable
+ok 150 - IMPORT rejects every malformed global setting without writes for v1 or v2 and the queue remains usable
+  ---
+  duration_ms: 8.6604
+  type: 'test'
+  ...
+# Subtest: malformed IMPORT never persists migration of the current raw v1 snapshot and a later valid import writes once
+ok 151 - malformed IMPORT never persists migration of the current raw v1 snapshot and a later valid import writes once
+  ---
+  duration_ms: 1.1981
+  type: 'test'
+  ...
+# Subtest: imports a structurally valid v1 backup and canonicalizes its Solana state
+ok 152 - imports a structurally valid v1 backup and canonicalizes its Solana state
+  ---
+  duration_ms: 0.2865
+  type: 'test'
+  ...
+# Subtest: reset validates a raw v1 snapshot before one atomic migration-and-reset write
+ok 153 - reset validates a raw v1 snapshot before one atomic migration-and-reset write
+  ---
+  duration_ms: 1.1533
+  type: 'test'
+  ...
+# Subtest: persists one raw v1 migration while holding the coordinator queue
+ok 154 - persists one raw v1 migration while holding the coordinator queue
+  ---
+  duration_ms: 0.4988
+  type: 'test'
+  ...
+# Subtest: ordinary raw v1 migration atomically freezes normalized legacy settings for every chain
+ok 155 - ordinary raw v1 migration atomically freezes normalized legacy settings for every chain
+  ---
+  duration_ms: 0.4945
+  type: 'test'
+  ...
+# Subtest: forged market-cap import writes nothing and does not poison later coordinator work
+ok 156 - forged market-cap import writes nothing and does not poison later coordinator work
+  ---
+  duration_ms: 0.6949
+  type: 'test'
+  ...
+# Subtest: forged trade market-cap provenance writes nothing and does not poison later coordinator work
+ok 157 - forged trade market-cap provenance writes nothing and does not poison later coordinator work
+  ---
+  duration_ms: 0.583
+  type: 'test'
+  ...
+# Subtest: a near-budget BUY retains the current trade, advances once, and drops only oldest history
+ok 158 - a near-budget BUY retains the current trade, advances once, and drops only oldest history
+  ---
+  duration_ms: 1.0294
+  type: 'test'
+  ...
+# Subtest: a near-budget BUY protects the newly prepended trade when its ID duplicates older history
+ok 159 - a near-budget BUY protects the newly prepended trade when its ID duplicates older history
+  ---
+  duration_ms: 0.917
+  type: 'test'
+  ...
+# Subtest: a near-budget quote update protects the newly prepended calibration when its ID duplicates older history
+ok 160 - a near-budget quote update protects the newly prepended calibration when its ID duplicates older history
+  ---
+  duration_ms: 2.3548
+  type: 'test'
+  ...
+# Subtest: a full trade history protects the prepended trade when tail truncation consumes its duplicate ID
+ok 161 - a full trade history protects the prepended trade when tail truncation consumes its duplicate ID
+  ---
+  duration_ms: 606.8699
+  type: 'test'
+  ...
+# Subtest: a full calibration history protects the prepended calibration when tail truncation consumes its duplicate ID
+ok 162 - a full calibration history protects the prepended calibration when tail truncation consumes its duplicate ID
+  ---
+  duration_ms: 186.722
+  type: 'test'
+  ...
+# Subtest: oversized IMPORT reports exact bytes and leaves current state and settings unchanged
+ok 163 - oversized IMPORT reports exact bytes and leaves current state and settings unchanged
+  ---
+  duration_ms: 0.5975
+  type: 'test'
+  ...
+# Subtest: essential-state overflow returns storageFull without a write or revision advance
+ok 164 - essential-state overflow returns storageFull without a write or revision advance
+  ---
+  duration_ms: 0.6203
+  type: 'test'
+  ...
+# Subtest: INITIALIZE applies the byte policy before its direct atomic write
+ok 165 - INITIALIZE applies the byte policy before its direct atomic write
+  ---
+  duration_ms: 0.3898
+  type: 'test'
+  ...
+# Subtest: RESET_ALL_WITH_BALANCE applies the byte policy before its direct atomic write
+ok 166 - RESET_ALL_WITH_BALANCE applies the byte policy before its direct atomic write
+  ---
+  duration_ms: 0.304
+  type: 'test'
+  ...
+# Subtest: raw v1 INITIALIZE folds migration and the requested result into one compacted write
+ok 167 - raw v1 INITIALIZE folds migration and the requested result into one compacted write
+  ---
+  duration_ms: 0.6578
+  type: 'test'
+  ...
+# Subtest: raw v1 INITIALIZE quota failure leaves migration and requested data wholly unpersisted
+ok 168 - raw v1 INITIALIZE quota failure leaves migration and requested data wholly unpersisted
+  ---
+  duration_ms: 0.4806
+  type: 'test'
+  ...
+# Subtest: raw v1 SAVE_SETTINGS folds migration and the requested result into one compacted write
+ok 169 - raw v1 SAVE_SETTINGS folds migration and the requested result into one compacted write
+  ---
+  duration_ms: 0.3475
+  type: 'test'
+  ...
+# Subtest: raw v1 SAVE_SETTINGS quota failure leaves migration and requested data wholly unpersisted
+ok 170 - raw v1 SAVE_SETTINGS quota failure leaves migration and requested data wholly unpersisted
+  ---
+  duration_ms: 0.5282
+  type: 'test'
+  ...
+# Subtest: raw v1 PATCH_SETTINGS folds migration and the requested result into one compacted write
+ok 171 - raw v1 PATCH_SETTINGS folds migration and the requested result into one compacted write
+  ---
+  duration_ms: 0.7412
+  type: 'test'
+  ...
+# Subtest: raw v1 PATCH_SETTINGS quota failure leaves migration and requested data wholly unpersisted
+ok 172 - raw v1 PATCH_SETTINGS quota failure leaves migration and requested data wholly unpersisted
+  ---
+  duration_ms: 0.4093
+  type: 'test'
+  ...
+# Subtest: raw v1 migration compacts before its one atomic migration write
+ok 173 - raw v1 migration compacts before its one atomic migration write
+  ---
+  duration_ms: 0.504
+  type: 'test'
+  ...
+# Subtest: raw v1 REPLACE_STATE budget overflow rejects before migration writes or revision advances
+ok 174 - raw v1 REPLACE_STATE budget overflow rejects before migration writes or revision advances
+  ---
+  duration_ms: 0.3635
+  type: 'test'
+  ...
+# Subtest: a successful generic mutation on raw v1 commits migration only in its final atomic write
+ok 175 - a successful generic mutation on raw v1 commits migration only in its final atomic write
+  ---
+  duration_ms: 0.2966
+  type: 'test'
+  ...
+# Subtest: RESET_CHAIN compacts retained history from other chains before its atomic state-and-settings write
+ok 176 - RESET_CHAIN compacts retained history from other chains before its atomic state-and-settings write
+  ---
+  duration_ms: 0.5444
+  type: 'test'
+  ...
+# Subtest: representative 10k trade plus 10k calibration state commits below 8 MiB under a 10 MiB quota
+ok 177 - representative 10k trade plus 10k calibration state commits below 8 MiB under a 10 MiB quota
+  ---
+  duration_ms: 677.0756
+  type: 'test'
+  ...
+1..177
+# tests 185
+# suites 0
+# pass 185
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2631.8235

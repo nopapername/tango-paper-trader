@@ -75,6 +75,23 @@
       || runtime.quickBuyAuthoritativelyDisabled
       || runtime.settings?.enabled !== true;
   }
+  function setContentClass(element, name, enabled) {
+    if (!element?.classList) return;
+    const present = element.classList.contains?.(name)
+      ?? String(element.className || '').split(/\s+/).includes(name);
+    if (enabled && !present) element.classList.add(name);
+    if (!enabled && present) element.classList.remove(name);
+  }
+  function applyContentTheme() {
+    const theme = Tango.I18n.resolveTheme?.(runtime.settings?.theme)
+      || (runtime.settings?.theme === 'light' ? 'light' : 'dark');
+    if (host.getAttribute?.('data-theme') !== theme) host.setAttribute?.('data-theme', theme);
+    const header = document.querySelector('#tango-header-account-summary');
+    if (header && header.getAttribute?.('data-theme') !== theme) header.setAttribute?.('data-theme', theme);
+  }
+  window.matchMedia?.('(prefers-color-scheme: light)')?.addEventListener?.('change', () => {
+    if (runtime.settings?.theme === 'auto') applyContentTheme();
+  });
   function currentRouteIdentity(url = location.href) {
     const chain = Tango.Chains.fromUrl(url);
     if (!chain) return `unsupported:${String(url)}`;
@@ -256,6 +273,14 @@
     clearShellMarkup();
   }
 
+  function isPageObservationRecord(value) {
+    // The bridge sends flat scalar records. Reject objects in scalar fields
+    // before Number/String conversion so one malformed item cannot break a batch.
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+      && Object.values(value).every((field) => field == null
+        || ['string', 'number', 'boolean'].includes(typeof field)));
+  }
+
   function handlePageMessage(event) {
     if (event.data?.source === 'TANGO_PAPER_CHART' && event.data?.type === 'READY') {
       const frame = [...chartFrames()].find((candidate) => candidate.contentWindow === event.source);
@@ -311,7 +336,9 @@
     }
     if (event.source === window && event.data?.source === 'TANGO_GMGN_PAGE'
       && event.data?.type === 'NATIVE_PRICES') {
-      for (const price of event.data.prices || []) {
+      if (!Array.isArray(event.data.prices)) return;
+      for (const price of event.data.prices.slice(0, 16)) {
+        if (!isPageObservationRecord(price)) continue;
         Tango.Chains.all().filter((chain) => chain.nativeSymbol === price.symbol)
           .forEach((chain) => rememberNativePrice(
             chain.id, price.priceUsd, price.observedAt, false
@@ -321,6 +348,7 @@
       return;
     }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
+    if (!Array.isArray(event.data.quotes)) return;
     const chain = activeChain();
     if (!chain) {
       clearChainContext();
@@ -328,7 +356,8 @@
     }
     const routeToken = detailRouteToken();
     let currentQuoteChanged = false;
-    (event.data.quotes || []).forEach((quote) => {
+    event.data.quotes.slice(0, 500).forEach((quote) => {
+      if (!isPageObservationRecord(quote)) return;
       if (quote?.chain !== chain.id || !Tango.Chains.validateAddress(chain.id, quote?.address)) return;
       const address = Tango.Chains.normalizeAddress(chain.id, quote.address);
       const maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000);
@@ -395,7 +424,8 @@
       return Tango.Format.native(value, chain.nativeSymbol, language(), signed);
     }
     const numeric = Number(value || 0); const sign = signed && numeric > 0 ? '+' : numeric < 0 ? '-' : '';
-    return `${sign}${Tango.Format.usd(Math.abs(numeric) * reference, language())}`;
+    const usdValue = Math.abs(numeric) * reference;
+    return Number.isFinite(usdValue) ? `${sign}${Tango.Format.usd(usdValue, language())}` : '--';
   }
   function currentNativePriceUsd() {
     const chain = activeChain();
@@ -408,7 +438,12 @@
     const chain = activeChain();
     if (!chain || runtime.settings?.displayCurrency !== 'USD') return null;
     const price = currentNativePriceUsd();
-    return price > 0 ? Tango.Engine.chainUsdSummary(runtime.state, chain.id, price) : null;
+    if (!Number.isFinite(price) || price <= 0) return null;
+    try { return Tango.Engine.chainUsdSummary(runtime.state, chain.id, price); }
+    catch (error) {
+      if (['invalidArithmetic', 'invalidNativePrice'].includes(error?.message)) return null;
+      throw error;
+    }
   }
   function usdMoney(value, signed = false) {
     const numeric = Number(value || 0); const sign = signed && numeric > 0 ? '+' : numeric < 0 ? '-' : '';
@@ -491,7 +526,7 @@
     const quickBuyShouldBeActive = Boolean(chain && currentChainSettings
       && runtime.settings.enabled && runtime.state.initialized && runtime.settings.showListQuickBuy);
     if (quickBuyShouldBeActive) {
-      document.documentElement?.classList?.add('tango-paper-quick-buy-active');
+      setContentClass(document.documentElement, 'tango-paper-quick-buy-active', true);
       if (quickBuyConfigChanged || becameReady || runtime.quickBuyMode !== 'active') {
         syncQuickBuyButtons();
       }
@@ -637,8 +672,8 @@
     const chain = activeChain();
     const settings = chainSettings();
     if (chain && settings && runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) {
-      document.documentElement?.classList?.remove('tango-paper-native-quick-buy-allowed');
-      document.documentElement?.classList?.add('tango-paper-quick-buy-active');
+      setContentClass(document.documentElement, 'tango-paper-native-quick-buy-allowed', false);
+      setContentClass(document.documentElement, 'tango-paper-quick-buy-active', true);
       Tango.GMGN.discoverTokenCards(handleQuickBuy, settings.buyPresets?.[0] || 0.1, t('paper'), roots, {
         fast, addedRoots, removedRoots, hrefMutations, policyKey
       });
@@ -649,13 +684,13 @@
   }
 
   function clearQuickBuyButtons() {
-    document.documentElement?.classList?.remove('tango-paper-quick-buy-active');
+    setContentClass(document.documentElement, 'tango-paper-quick-buy-active', false);
     const nativeAllowed = !runtime.quickBuySettingsPending
       && runtime.settings?.enabled === false;
     if (nativeAllowed) {
-      document.documentElement?.classList?.add('tango-paper-native-quick-buy-allowed');
+      setContentClass(document.documentElement, 'tango-paper-native-quick-buy-allowed', true);
     } else {
-      document.documentElement?.classList?.remove('tango-paper-native-quick-buy-allowed');
+      setContentClass(document.documentElement, 'tango-paper-native-quick-buy-allowed', false);
     }
     const nextMode = nativeAllowed ? 'cleared' : 'guarded';
     if (runtime.quickBuyMode === nextMode) return;
@@ -1775,6 +1810,7 @@
   }
 
   async function sell(percent, context = runtime.current, routeCapture = captureRoute()) {
+    if (paperExecutionDisabled()) return;
     primeTradeAudio();
     if (!routeCaptureIsCurrent(routeCapture)) return;
     const order = { token: context?.token, quote: null, percent: Number(percent), sourceUrl: location.href };
@@ -1811,6 +1847,7 @@
   }
 
   async function sellPosition(position, percent) {
+    if (paperExecutionDisabled()) return;
     if (activeChain()?.id !== position.chain) return showToast(t('unsupportedChain'), 'error');
     const routeCapture = captureRoute();
     const token = { chain: position.chain, address: position.tokenAddress, symbol: position.symbol };
@@ -1821,7 +1858,7 @@
   }
 
   async function commitSell(order, routeCapture = captureRoute()) {
-    if (!routeCaptureIsCurrent(routeCapture)) return;
+    if (paperExecutionDisabled() || !routeCaptureIsCurrent(routeCapture)) return;
     if (runtime.tradePending) return;
     runtime.tradePending = true;
     try {
@@ -1842,6 +1879,7 @@
   }
 
   function requestCloseAll() {
+    if (paperExecutionDisabled()) return;
     const routeCapture = captureRoute();
     const chain = activeChain();
     if (!chain) return showToast(t('unsupportedChain'), 'error');
@@ -1861,7 +1899,7 @@
   }
 
   async function commitCloseAll(routeCapture = captureRoute()) {
-    if (!routeCaptureIsCurrent(routeCapture)) return;
+    if (paperExecutionDisabled() || !routeCaptureIsCurrent(routeCapture)) return;
     if (runtime.tradePending) return;
     runtime.tradePending = true;
     try {
@@ -1919,6 +1957,7 @@
   }
 
   async function sellBreakeven() {
+    if (paperExecutionDisabled()) return;
     const routeCapture = captureRoute();
     const position = currentPosition();
     if (!position) return showToast(t('noPosition'), 'error');
@@ -2089,6 +2128,12 @@
       #tango-header-account-summary i { background: rgba(255,255,255,.12); height: 13px; width: 1px; }
       #tango-header-account-summary .tango-header-paper-badge { color: #c9bcff; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
       #tango-header-account-summary .tango-header-calendar-link { color: #d8d0ff; font-size: 11px; font-weight: 800; }
+      #tango-header-account-summary[data-theme="light"] { background: rgba(255,255,255,.98); color: #1b2030; border-color: rgba(26,31,48,.18); }
+      #tango-header-account-summary[data-theme="light"]:hover { background: #f0f2f8; }
+      #tango-header-account-summary[data-theme="light"] strong { color: #08794e; }
+      #tango-header-account-summary[data-theme="light"] i { background: rgba(26,31,48,.18); }
+      #tango-header-account-summary[data-theme="light"] .tango-header-paper-badge,
+      #tango-header-account-summary[data-theme="light"] .tango-header-calendar-link { color: #5936a2; }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -2129,7 +2174,8 @@
       node.parentElement?.classList.remove('tango-header-summary-anchor', 'tango-wallet-summary-anchor');
       anchor.appendChild(node);
     }
-    anchor.classList.add('tango-header-summary-anchor');
+    setContentClass(anchor, 'tango-header-summary-anchor', true);
+    applyContentTheme();
     const cash = Tango.Format.native(account.cashBalanceNative, chain.nativeSymbol, language());
     const markup = `<span class="tango-header-paper-badge">${esc(t('paper'))}</span><span>${esc(t('paperBalance'))} <strong>${esc(cash)}</strong></span><i></i><span class="tango-header-calendar-link">▦ ${esc(t('pnlCalendar'))}</span>`;
     if (node.innerHTML !== markup) node.innerHTML = markup;
@@ -2475,6 +2521,7 @@
       return;
     }
     if (!runtime.state || !runtime.settings) return;
+    applyContentTheme();
     if (!runtime.settings.enabled || !runtime.state.initialized) {
       if (runtime.latestMarkerPayload?.chain || runtime.latestMarkerPayload?.markers?.length) clearChartMarkers();
       clearQuickBuyButtons();
@@ -2553,6 +2600,7 @@
       if (action === 'save-presets') await savePresetEdits();
       if (action === 'cancel-modal') { runtime.modal = null; render(); }
       if (action === 'confirm-modal') {
+        if (paperExecutionDisabled()) return;
         const sessionSuppressInput = shadow.querySelector('#tango-skip-session-confirm');
         const suppressForSession = Boolean(
           runtime.modal?.allowSessionSuppress
@@ -2671,6 +2719,8 @@
       for (const record of records) {
         const target = record.target?.nodeType === 3 ? record.target.parentElement : record.target;
         if (record.type === 'attributes') {
+          if (record.attributeName !== 'href' && typeof record.oldValue === 'string'
+            && target?.getAttribute?.(record.attributeName) === record.oldValue) continue;
           const roots = quickBuyMutationRoots(target);
           if (roots.length) {
             roots.forEach((root) => runtime.pendingMutationRoots.add(root));

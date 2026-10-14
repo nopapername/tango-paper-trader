@@ -1,0 +1,407 @@
+{
+  "runtime": {
+    "node": "v22.18.0",
+    "platform": "win32"
+  },
+  "source": {
+    "files": 26,
+    "bytes": 632976,
+    "lines": 12260
+  },
+  "javascript": {
+    "files": 22,
+    "bytes": 595883,
+    "lines": 11657
+  },
+  "styles": {
+    "files": 4,
+    "bytes": 37093,
+    "lines": 603
+  },
+  "tests": {
+    "files": 22,
+    "bytes": 1181489,
+    "lines": 26970
+  },
+  "specs": {
+    "files": 18,
+    "bytes": 191093,
+    "lines": 2775
+  },
+  "plans": {
+    "files": 25,
+    "bytes": 701639,
+    "lines": 16014
+  },
+  "largestSource": [
+    {
+      "file": "src/content/content.js",
+      "files": 1,
+      "bytes": 146559,
+      "lines": 2766
+    },
+    {
+      "file": "src/adapters/gmgn.js",
+      "files": 1,
+      "bytes": 109751,
+      "lines": 2311
+    },
+    {
+      "file": "src/core/engine.js",
+      "files": 1,
+      "bytes": 72900,
+      "lines": 1312
+    },
+    {
+      "file": "src/content/chart-main.js",
+      "files": 1,
+      "bytes": 39586,
+      "lines": 907
+    },
+    {
+      "file": "src/core/state.js",
+      "files": 1,
+      "bytes": 43684,
+      "lines": 791
+    },
+    {
+      "file": "src/core/state-coordinator.js",
+      "files": 1,
+      "bytes": 31145,
+      "lines": 688
+    },
+    {
+      "file": "src/dashboard/dashboard.js",
+      "files": 1,
+      "bytes": 40007,
+      "lines": 620
+    },
+    {
+      "file": "src/adapters/gmgn-quotes.js",
+      "files": 1,
+      "bytes": 22646,
+      "lines": 465
+    }
+  ],
+  "planChecklist": [
+    {
+      "file": "docs/superpowers/plans/2026-07-17-conservative-structure-performance.md",
+      "checked": 0,
+      "unchecked": 22
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-18-gmgn-multichain-paper-trading.md",
+      "checked": 0,
+      "unchecked": 86
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-20-guaranteed-paper-fill.md",
+      "checked": 0,
+      "unchecked": 0
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-20-instant-paper-fill-performance.md",
+      "checked": 0,
+      "unchecked": 67
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-21-gmgn-route-supply-detail-resilience.md",
+      "checked": 0,
+      "unchecked": 0
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-21-paper-quantity-enable-button-resilience.md",
+      "checked": 0,
+      "unchecked": 35
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-22-gmgn-paper-ui-quote-onboarding-resilience.md",
+      "checked": 0,
+      "unchecked": 49
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-23-gmgn-ui-safety-shortcut-marker.md",
+      "checked": 0,
+      "unchecked": 25
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-23-robinhood-market-cap-marker-recovery.md",
+      "checked": 0,
+      "unchecked": 16
+    },
+    {
+      "file": "docs/superpowers/plans/2026-07-24-gmgn-tab-chain-bankr-button-consistency.md",
+      "checked": 0,
+      "unchecked": 32
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-01-gmgn-always-clickable-paper-quick-buy.md",
+      "checked": 5,
+      "unchecked": 50
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-01-gmgn-quick-buy-integrity-regressions.md",
+      "checked": 18,
+      "unchecked": 0
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-02-gmgn-accurate-first-frame-quick-buy.md",
+      "checked": 7,
+      "unchecked": 38
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-04-gmgn-chart-marker-stability.md",
+      "checked": 0,
+      "unchecked": 14
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-04-gmgn-click-time-detail-quote.md",
+      "checked": 0,
+      "unchecked": 21
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-04-gmgn-quick-buy-live-size-sync.md",
+      "checked": 0,
+      "unchecked": 23
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-04-gmgn-quick-buy-maximum-safe-typography.md",
+      "checked": 0,
+      "unchecked": 9
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-04-gmgn-quick-buy-translucent-background.md",
+      "checked": 0,
+      "unchecked": 11
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-04-gmgn-quick-buy-two-line-typography.md",
+      "checked": 0,
+      "unchecked": 9
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-11-dashboard-csv-export-safety.md",
+      "checked": 0,
+      "unchecked": 6
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-11-gmgn-chart-axis-marker-correctness.md",
+      "checked": 0,
+      "unchecked": 38
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-11-gmgn-paper-trade-integration-verification.md",
+      "checked": 0,
+      "unchecked": 22
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-11-gmgn-trusted-quick-buy-and-locked-giant.md",
+      "checked": 0,
+      "unchecked": 36
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-11-storage-byte-budget.md",
+      "checked": 0,
+      "unchecked": 38
+    },
+    {
+      "file": "docs/superpowers/plans/2026-08-12-gmgn-locked-giant-full-fill.md",
+      "checked": 0,
+      "unchecked": 19
+    }
+  ],
+  "parity": [
+    {
+      "file": "manifest.json",
+      "sourceHash": "b482ffff9ab8ed91edc00d8061015e796041bde502923d7be5d089b379b6560e",
+      "packageHash": "b482ffff9ab8ed91edc00d8061015e796041bde502923d7be5d089b379b6560e",
+      "equal": true
+    },
+    {
+      "file": "popup.html",
+      "sourceHash": "55b2cd57ca9803340b18844a83aa5156bfccded8a8ab53e2de996baa3417bec2",
+      "packageHash": "55b2cd57ca9803340b18844a83aa5156bfccded8a8ab53e2de996baa3417bec2",
+      "equal": true
+    },
+    {
+      "file": "dashboard.html",
+      "sourceHash": "54e0ecd94d2542ff52f39dce83bc0ded5f01741684d5813b782b45cc768b94e7",
+      "packageHash": "54e0ecd94d2542ff52f39dce83bc0ded5f01741684d5813b782b45cc768b94e7",
+      "equal": true
+    },
+    {
+      "file": "README.md",
+      "sourceHash": "787fa279f0fa75e7abb649a8179a3786cc1522209e584b46d63b6f8ce3ad956a",
+      "packageHash": "787fa279f0fa75e7abb649a8179a3786cc1522209e584b46d63b6f8ce3ad956a",
+      "equal": true
+    },
+    {
+      "file": "PRIVACY.md",
+      "sourceHash": "fc7304b31d8cee644ff3313a523d7b9a0a871bb2aae1870cafd4833eb329da30",
+      "packageHash": "fc7304b31d8cee644ff3313a523d7b9a0a871bb2aae1870cafd4833eb329da30",
+      "equal": true
+    },
+    {
+      "file": "docs/multichain-smoke-test.md",
+      "sourceHash": "a02ec59fbd5675c882ed85514543d4ccc399ab32effe76df0567ac2a0990b161",
+      "packageHash": "a02ec59fbd5675c882ed85514543d4ccc399ab32effe76df0567ac2a0990b161",
+      "equal": true
+    },
+    {
+      "file": "src/adapters/gmgn-quotes.js",
+      "sourceHash": "38188519826ba706b3e67506d48478926077f130ba0a90f9fed6d610735f7842",
+      "packageHash": "38188519826ba706b3e67506d48478926077f130ba0a90f9fed6d610735f7842",
+      "equal": true
+    },
+    {
+      "file": "src/adapters/gmgn.js",
+      "sourceHash": "9d6f1b12e1d9694e9c0f440d0489af7b962b304b02701aed9a73ef2f76b4ac95",
+      "packageHash": "9d6f1b12e1d9694e9c0f440d0489af7b962b304b02701aed9a73ef2f76b4ac95",
+      "equal": true
+    },
+    {
+      "file": "src/background.js",
+      "sourceHash": "293a27d0e4d73c87097bfaa40a448b37b9842dcd2d1c713432bec3c4beabc026",
+      "packageHash": "293a27d0e4d73c87097bfaa40a448b37b9842dcd2d1c713432bec3c4beabc026",
+      "equal": true
+    },
+    {
+      "file": "src/content/chain-view.js",
+      "sourceHash": "010818f13a369e84c4375dc41c9a6b19f0606e58cb30e389bc2d888e17c6f5da",
+      "packageHash": "010818f13a369e84c4375dc41c9a6b19f0606e58cb30e389bc2d888e17c6f5da",
+      "equal": true
+    },
+    {
+      "file": "src/content/chart-main.js",
+      "sourceHash": "d806c3e92de66cce1f653fe2219ed2dfd5bc410dc692ef303c5d2b144cb8c4e6",
+      "packageHash": "d806c3e92de66cce1f653fe2219ed2dfd5bc410dc692ef303c5d2b144cb8c4e6",
+      "equal": true
+    },
+    {
+      "file": "src/content/content.css",
+      "sourceHash": "f8ffddc0a21ed43910ec59d1987bc8389a8b479812f710a21741a49d8b1c260b",
+      "packageHash": "f8ffddc0a21ed43910ec59d1987bc8389a8b479812f710a21741a49d8b1c260b",
+      "equal": true
+    },
+    {
+      "file": "src/content/content.js",
+      "sourceHash": "58bc80a0658402bb9cdf7e5c721abc1f02c76b81ebe74423d9ba8c10ffe64a95",
+      "packageHash": "58bc80a0658402bb9cdf7e5c721abc1f02c76b81ebe74423d9ba8c10ffe64a95",
+      "equal": true
+    },
+    {
+      "file": "src/content/markers.js",
+      "sourceHash": "e3a2cf64a92f701c08275a148f4e87944af3a535aec19858d17e4f2d078f30ca",
+      "packageHash": "e3a2cf64a92f701c08275a148f4e87944af3a535aec19858d17e4f2d078f30ca",
+      "equal": true
+    },
+    {
+      "file": "src/content/native-quick-buy-guard.js",
+      "sourceHash": "af6a065c70864d89132fea4d4d36262668acd183c3fd8c90002beba19cd0ced6",
+      "packageHash": "af6a065c70864d89132fea4d4d36262668acd183c3fd8c90002beba19cd0ced6",
+      "equal": true
+    },
+    {
+      "file": "src/content/page-main.js",
+      "sourceHash": "0a91156638b0716fdf2f02862d3ef3406979001d28dfd550a70aed096fe4f4e4",
+      "packageHash": "0a91156638b0716fdf2f02862d3ef3406979001d28dfd550a70aed096fe4f4e4",
+      "equal": true
+    },
+    {
+      "file": "src/content/quick-buy-safety.css",
+      "sourceHash": "c3116f162de808d477429884d1fd89ff5a73e7e019835a315a29c782ca6e532f",
+      "packageHash": "c3116f162de808d477429884d1fd89ff5a73e7e019835a315a29c782ca6e532f",
+      "equal": true
+    },
+    {
+      "file": "src/core/chains.js",
+      "sourceHash": "fa63d17930cf3194838b9a5605991865e940cc172715381ff920e11fd77146a4",
+      "packageHash": "fa63d17930cf3194838b9a5605991865e940cc172715381ff920e11fd77146a4",
+      "equal": true
+    },
+    {
+      "file": "src/core/engine.js",
+      "sourceHash": "b7c787be4dcb06d1872204a3a8a16713b0577210966c05213ede05c4c6a4045f",
+      "packageHash": "b7c787be4dcb06d1872204a3a8a16713b0577210966c05213ede05c4c6a4045f",
+      "equal": true
+    },
+    {
+      "file": "src/core/state-coordinator.js",
+      "sourceHash": "8ac55e9edf35122ab3e43ffefb6d1d65cf2b54ed83bfa5960ec172cfa7889ab7",
+      "packageHash": "8ac55e9edf35122ab3e43ffefb6d1d65cf2b54ed83bfa5960ec172cfa7889ab7",
+      "equal": true
+    },
+    {
+      "file": "src/core/state.js",
+      "sourceHash": "808012d75987f4ea7e8ed7f7da92de4d019b50940d5a94b95f0ae33b0f0ca1b9",
+      "packageHash": "808012d75987f4ea7e8ed7f7da92de4d019b50940d5a94b95f0ae33b0f0ca1b9",
+      "equal": true
+    },
+    {
+      "file": "src/core/storage.js",
+      "sourceHash": "44f26b66abfb2c5fbac21882ac8eeca98a3ba9ccaf565df825546f84f0c1eabb",
+      "packageHash": "44f26b66abfb2c5fbac21882ac8eeca98a3ba9ccaf565df825546f84f0c1eabb",
+      "equal": true
+    },
+    {
+      "file": "src/core/supply.js",
+      "sourceHash": "2f947c2cbef384626e29b95528e9a1d37488abe184998a3cfe160815162c6d73",
+      "packageHash": "2f947c2cbef384626e29b95528e9a1d37488abe184998a3cfe160815162c6d73",
+      "equal": true
+    },
+    {
+      "file": "src/dashboard/dashboard.css",
+      "sourceHash": "14332836f5a39e9e17ad17103d23fcf4a69c511d9cc2174760ae2a570d8c5ac2",
+      "packageHash": "14332836f5a39e9e17ad17103d23fcf4a69c511d9cc2174760ae2a570d8c5ac2",
+      "equal": true
+    },
+    {
+      "file": "src/dashboard/dashboard.js",
+      "sourceHash": "3a2d0f449af27c84b2b635c3eb6a2c41c919daeff480813e3aa91e0c6e95615f",
+      "packageHash": "3a2d0f449af27c84b2b635c3eb6a2c41c919daeff480813e3aa91e0c6e95615f",
+      "equal": true
+    },
+    {
+      "file": "src/dashboard/model.js",
+      "sourceHash": "abea5d74f41f36902241f9b8d29203e841c9e1c6b5657217971198f36af60893",
+      "packageHash": "abea5d74f41f36902241f9b8d29203e841c9e1c6b5657217971198f36af60893",
+      "equal": true
+    },
+    {
+      "file": "src/popup/model.js",
+      "sourceHash": "3e2c27a2d04c0bce8a959f7b218f83ad480fe35fbd23cc95c6dcafae2c85ebb0",
+      "packageHash": "3e2c27a2d04c0bce8a959f7b218f83ad480fe35fbd23cc95c6dcafae2c85ebb0",
+      "equal": true
+    },
+    {
+      "file": "src/popup/popup.css",
+      "sourceHash": "596d43609fe2cb57bc002e234fcaac522248560fd1865d428d5db067791a0505",
+      "packageHash": "596d43609fe2cb57bc002e234fcaac522248560fd1865d428d5db067791a0505",
+      "equal": true
+    },
+    {
+      "file": "src/popup/popup.js",
+      "sourceHash": "f80ebe5fb6ea75ef65b0b7587492928fcd873562391ffa506bd0279c9f67b8fe",
+      "packageHash": "f80ebe5fb6ea75ef65b0b7587492928fcd873562391ffa506bd0279c9f67b8fe",
+      "equal": true
+    },
+    {
+      "file": "src/shared/constants.js",
+      "sourceHash": "6b6019e7c98b25c0c2413c8378b9d04937928265f99c9ff6406a03a168dd5b46",
+      "packageHash": "6b6019e7c98b25c0c2413c8378b9d04937928265f99c9ff6406a03a168dd5b46",
+      "equal": true
+    },
+    {
+      "file": "src/shared/format.js",
+      "sourceHash": "84a1f8149fc16124253152918b89ffb8f838cf6c8c87172aa30653eccce23079",
+      "packageHash": "84a1f8149fc16124253152918b89ffb8f838cf6c8c87172aa30653eccce23079",
+      "equal": true
+    },
+    {
+      "file": "src/shared/i18n.js",
+      "sourceHash": "54ada8b3fb19b8680d06a660a707957e78fdd71acfdec3a4a23c4b2fafae4936",
+      "packageHash": "54ada8b3fb19b8680d06a660a707957e78fdd71acfdec3a4a23c4b2fafae4936",
+      "equal": true
+    }
+  ]
+}

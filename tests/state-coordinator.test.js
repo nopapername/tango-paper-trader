@@ -211,6 +211,219 @@ function openFallbackPosition(tokenAddress, openedAt, updatedAt) {
   };
 }
 
+test('count compaction preserves an open fallback origin and current buy before trimming history', async () => {
+  const settings = State.normalizeSettings({ slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } } });
+  const state = storageStateFixture();
+  state.positions[`eth:${EVM_OPEN_ADDRESS}`] = openFallbackPosition(EVM_OPEN_ADDRESS, 1000, 1000);
+  const origin = fallbackTradeFixture({ id: 'open-origin', tokenAddress: EVM_OPEN_ADDRESS, side: 'BUY', executedAt: 1000 });
+  state.trades = [...Array.from({ length: Tango.MAX_TRADES - 1 }, (_, index) => storageTradeFixture({ id: `history-${index}`, executedAt: 1001 + index })), origin];
+  const persistence = memoryPersistence(state, settings);
+  const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 20000 });
+  const result = await coordinator.mutate({ type: 'EXECUTE_BUY', order: {
+    token: { chain: 'eth', address: EVM_HISTORY_ADDRESS }, amountNative: 1,
+    quote: { priceUsd: 2, nativePriceUsd: 2000, observedAt: 20000, nativePriceObservedAt: 20000 }
+  } });
+  assert.equal(result.state.trades.length, Tango.MAX_TRADES);
+  assert.ok(result.state.trades.some((trade) => trade.id === origin.id));
+  assert.ok(result.state.trades.some((trade) => trade.id === result.trade.id));
+  assert.equal(result.state.trades.some((trade) => trade.id === 'history-0'), false);
+  assert.equal(persistence.writes.length, 1);
+  const sold = await coordinator.mutate({ type: 'EXECUTE_SELL', order: {
+    token: { chain: 'eth', address: EVM_OPEN_ADDRESS }, percent: 100,
+    quote: { priceUsd: 0.0000032, marketCapUsd: 3200, nativePriceUsd: 2000, observedAt: 20000,
+      nativePriceObservedAt: 20000, valuationMode: 'PRICE', source: 'GMGN_NETWORK' }
+  } });
+  assert.equal(sold.position, null);
+  assert.equal(persistence.writes.length, 2);
+});
+
+test('lossless import rejects count overflow after validating every trade and calibration without writes', async () => {
+  const settings = State.normalizeSettings({});
+  const persistence = memoryPersistence(storageStateFixture(), settings);
+  const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 20000 });
+  for (const collection of ['trades', 'calibrations']) {
+    const state = storageStateFixture();
+    state[collection] = Array.from({ length: Tango.MAX_TRADES + 1 }, (_, index) => collection === 'trades'
+      ? storageTradeFixture({ id: `trade-${index}`, executedAt: index })
+      : storageCalibrationFixture({ id: `cal-${index}`, createdAt: index }));
+    const payload = { product: 'Tango Paper Trader', version: Tango.VERSION, exportedAt: 20000, settings, state };
+    await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload }), /importTooManyRecords/);
+    state[collection].at(-1).chain = 'unsupported';
+    await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload }), collection === 'trades' ? /invalidTrade/ : /invalidCalibration/);
+  }
+  assert.equal(persistence.writes.length, 0);
+});
+
+test('future-skew quote refresh and calibration persist safe timestamps', async () => {
+  const settings = State.normalizeSettings({ slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } } });
+  for (const provisional of [false, true]) {
+    const quote = { priceUsd: 2, nativePriceUsd: provisional ? 1 : 2000, observedAt: 1000, nativePriceObservedAt: 1000,
+      ...(provisional ? { provisional: true, syntheticNativePrice: true } : {}) };
+    const bought = Engine.executeBuy(storageStateFixture(), { token: { chain: 'eth', address: EVM_HISTORY_ADDRESS }, quote, amountNative: 1 }, settings, 1000);
+    const persistence = memoryPersistence(bought.state, settings);
+    const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 2000 });
+    const result = await coordinator.mutate({ type: 'UPDATE_POSITION_QUOTE', token: { chain: 'eth', address: EVM_HISTORY_ADDRESS },
+      quote: { priceUsd: 2, nativePriceUsd: 2000, observedAt: 2001, nativePriceObservedAt: 2001 } });
+    const position = result.state.positions[`eth:${EVM_HISTORY_ADDRESS}`];
+    assert.ok(position.quoteObservedAt == null || position.quoteObservedAt <= position.updatedAt);
+    assert.equal(position.updatedAt, 2000);
+    assert.equal(position.lastNativePriceUsd, 2000);
+    assert.equal(persistence.writes.length, 1);
+    State.normalizeState(result.state, settings, { strict: true });
+  }
+});
+
+test('disabled trading rejects every execution against latest settings and queue recovers after enabling', async () => {
+  const settings = State.normalizeSettings({ enabled: false, slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } } });
+  const quote = { priceUsd: 2, nativePriceUsd: 2000, observedAt: 2000, nativePriceObservedAt: 2000 };
+  const token = { chain: 'eth', address: EVM_HISTORY_ADDRESS };
+  const bought = Engine.executeBuy(storageStateFixture(), { token, quote, amountNative: 1 }, settings, 2000);
+  const persistence = memoryPersistence(bought.state, settings);
+  const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 2000 });
+  for (const command of [
+    { type: 'EXECUTE_BUY', order: { token, quote, amountNative: 1 } },
+    { type: 'EXECUTE_SELL', order: { token, quote, percent: 50 } },
+    { type: 'EXECUTE_CLOSE_ALL', chain: 'eth', orders: [{ token, quote }] }
+  ]) await assert.rejects(coordinator.mutate(command), /paperTradingDisabled/);
+  assert.equal(persistence.writes.length, 0);
+  await coordinator.mutate({ type: 'PATCH_SETTINGS', patch: { enabled: true } });
+  const sold = await coordinator.mutate({ type: 'EXECUTE_SELL', order: { token, quote, percent: 100 } });
+  assert.equal(sold.position, null);
+});
+
+test('initialize saves its principal in settings and reset all preserves it', async () => {
+  const persistence = memoryPersistence(storageStateFixture(), State.normalizeSettings({}));
+  const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 2000 });
+  const initialized = await coordinator.mutate({ type: 'INITIALIZE', defaultBalanceNative: 30, language: 'en' });
+  assert.equal(initialized.settings.chains.eth.initialBalanceNative, 30);
+  const reset = await coordinator.mutate({ type: 'RESET_ALL' });
+  assert.equal(reset.state.accounts.eth.initialBalanceNative, 30);
+});
+
+test('every settings write rejects full-rate fees and slippage without disabling executable settings', async () => {
+  const settings = State.normalizeSettings({});
+  const persistence = memoryPersistence(storageStateFixture(), settings);
+  const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 2000 });
+  for (const field of ['slippageBps', 'platformFeeBps']) {
+    await assert.rejects(coordinator.mutate({ type: 'PATCH_SETTINGS', patch: { [field]: 10000 } }), /invalidSettings/);
+    await assert.rejects(coordinator.mutate({ type: 'SAVE_SETTINGS', settings: { ...settings, [field]: 10000 } }), /invalidSettings/);
+  }
+  assert.equal(persistence.writes.length, 0);
+  assert.deepEqual(persistence.values[Tango.SETTINGS_KEY], settings);
+});
+
+test('legacy v1 lossless import validates tail records before rejecting count overflow', async () => {
+  const settings = State.normalizeSettings({});
+  const state = { schemaVersion: 1, initialized: true, account: {
+    initialBalanceSol: 10, cashBalanceSol: 10, realizedPnlSol: 0, createdAt: 1, updatedAt: 1
+  }, positions: {}, dailyRealized: {}, trades: Array.from({ length: Tango.MAX_TRADES + 1 }, (_, index) => ({
+    ...storageTradeFixture({ id: `legacy-${index}`, executedAt: index }), chain: 'sol',
+    tokenAddress: '11111111111111111111111111111112', amountSol: 1, solPriceUsd: 100,
+    platformFeeSol: 0, networkFeeSol: 0, realizedPnlSol: 0, nativeSymbol: 'SOL'
+  })) };
+  const persistence = memoryPersistence(storageStateFixture(), settings);
+  const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 20000 });
+  const payload = { product: 'Tango Paper Trader', exportedAt: 20000, settings, state };
+  await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload }), /importTooManyRecords/);
+  state.trades.at(-1).quantity = -1;
+  await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload }), /invalidTrade/);
+  assert.equal(persistence.writes.length, 0);
+});
+
+test('import rejects opening times beyond the backup timestamp even when position timestamps agree', async () => {
+  const settings = State.normalizeSettings({});
+  const token = { chain: 'eth', address: EVM_HISTORY_ADDRESS };
+  const quote = { priceUsd: 2, nativePriceUsd: 2000, observedAt: 1000, nativePriceObservedAt: 1000 };
+  const bought = Engine.executeBuy(storageStateFixture(), { token, quote, amountNative: 1 }, settings, 1000);
+  bought.position.openedAt = 3000;
+  bought.position.updatedAt = 3000;
+  const persistence = memoryPersistence(storageStateFixture(), settings);
+  const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 2000 });
+  await assert.rejects(coordinator.mutate({ type: 'IMPORT', payload: {
+    product: 'Tango Paper Trader', exportedAt: 2000, state: bought.state, settings
+  } }), /invalidPosition/);
+  assert.equal(persistence.writes.length, 0);
+});
+
+test('a legacy future-opened position can still close without negative holding time', async () => {
+  const settings = State.normalizeSettings({});
+  const token = { chain: 'eth', address: EVM_HISTORY_ADDRESS };
+  const quote = { priceUsd: 2, nativePriceUsd: 2000, observedAt: 2000, nativePriceObservedAt: 2000 };
+  const bought = Engine.executeBuy(storageStateFixture(), { token, quote, amountNative: 1 }, settings, 2000);
+  bought.position.openedAt = Number.MAX_SAFE_INTEGER;
+  const persistence = memoryPersistence(bought.state, settings);
+  const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 2000 });
+  const result = await coordinator.mutate({ type: 'EXECUTE_SELL', order: { token, quote, percent: 100 } });
+  assert.equal(result.position, null);
+  assert.equal(result.trade.heldMs, 0);
+  assert.equal(persistence.writes.length, 1);
+});
+
+test('legacy future-opened positions normalize timestamps without blocking partial sell, refresh, or another buy', async () => {
+  const settings = State.normalizeSettings({ slippageBps: 0, platformFeeBps: 0, chains: { eth: { networkFeeNative: 0 } } });
+  const token = { chain: 'eth', address: EVM_HISTORY_ADDRESS };
+  const quote = { priceUsd: 2, nativePriceUsd: 2000, observedAt: 2000, nativePriceObservedAt: 2000 };
+  const commands = [
+    { type: 'EXECUTE_SELL', order: { token, quote, percent: 50 } },
+    { type: 'UPDATE_POSITION_QUOTE', token, quote },
+    { type: 'EXECUTE_BUY', order: { token: { chain: 'eth', address: EVM_OPEN_ADDRESS }, quote, amountNative: 1 } }
+  ];
+  for (const command of commands) {
+    const bought = Engine.executeBuy(storageStateFixture(), { token, quote, amountNative: 1 }, settings, 2000);
+    bought.position.openedAt = Number.MAX_SAFE_INTEGER;
+    const original = structuredClone(bought.position);
+    const persistence = memoryPersistence(bought.state, settings);
+    const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 2000 });
+    const result = await coordinator.mutate(command);
+    const position = result.state.positions[`eth:${EVM_HISTORY_ADDRESS}`];
+    assert.equal(position.openedAt, 2000);
+    assert.equal(persistence.writes.length, 1);
+    for (const field of ['valuationMode', 'supplySource', 'totalSupply', 'quoteSource', 'priceProvenance']) {
+      assert.equal(position[field], original[field]);
+    }
+    if (command.type !== 'EXECUTE_SELL') {
+      assert.equal(position.quantity, original.quantity);
+      assert.equal(position.costBasisNative, original.costBasisNative);
+    } else {
+      assert.equal(position.quantity, original.quantity / 2);
+      assert.equal(position.costBasisNative, original.costBasisNative / 2);
+    }
+    assert.equal(bought.position.openedAt, Number.MAX_SAFE_INTEGER, 'normalization must not mutate caller state');
+  }
+});
+
+test('legacy clock rollback recovery preserves canonical fallback origin for later mutations', async () => {
+  const settings = State.normalizeSettings({ slippageBps: 0, platformFeeBps: 0,
+    chains: { eth: { networkFeeNative: 0 } } });
+  const token = { chain: 'eth', address: EVM_OPEN_ADDRESS };
+  const quote = { ...global.Tango.Supply.fallbackValuation(token), chain: 'eth', address: token.address,
+    marketCapDivisor: 1_000_000_000, provisionalSupply: 1_000_000_000,
+    nativePriceUsd: 2000, observedAt: 2000, nativePriceObservedAt: 2000,
+    source: 'TANGO_FALLBACK', valuationMode: 'MARKET_CAP', priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+    syntheticTokenPrice: true, provisional: true, paperFallback: true };
+  const bought = Engine.executeBuy(storageStateFixture(), { token, quote, amountNative: 1 }, settings, 2000);
+  bought.position.updatedAt = 1000;
+  bought.position.quoteObservedAt = 1000;
+  const liveQuote = { ...quote, observedAt: 3000, nativePriceObservedAt: 3000 };
+  for (const command of [
+    { type: 'EXECUTE_BUY', order: { token: { chain: 'eth', address: EVM_HISTORY_ADDRESS }, amountNative: 1,
+      quote: { priceUsd: 2, nativePriceUsd: 2000, observedAt: 3000, nativePriceObservedAt: 3000 } } },
+    { type: 'EXECUTE_SELL', order: { token, quote: liveQuote, percent: 50 } },
+    { type: 'UPDATE_POSITION_QUOTE', token, quote: liveQuote }
+  ]) {
+    const persistence = memoryPersistence(bought.state, settings);
+    const coordinator = StateCoordinator.create({ readRaw: persistence.readRaw, writeRaw: persistence.writeRaw, now: () => 3000 });
+    const result = await coordinator.mutate(command);
+    const position = result.state.positions[`eth:${EVM_OPEN_ADDRESS}`];
+    assert.equal(position.openedAt, 2000);
+    assert.ok(position.updatedAt >= position.openedAt);
+    assert.equal(result.state.trades.find(trade => trade.id === bought.trade.id).executedAt, 2000);
+    assert.equal(persistence.writes.length, 1);
+    assert.doesNotThrow(() => State.normalizeState(result.state, settings, { strict: true }));
+    assert.equal(bought.position.updatedAt, 1000, 'read normalization cannot mutate caller data');
+  }
+});
+
 test('storage compaction measures UTF-8 and uses the stable calibration-first removal key', () => {
   const settings = State.normalizeSettings({});
   const state = storageStateFixture();
@@ -1945,7 +2158,8 @@ test('a full calibration history protects the prepended calibration when tail tr
   assert.equal(result.state.calibrations.some((calibration) => (
     calibration.id === duplicateId && calibration.toPriceUsd === 2
   )), true);
-  assert.equal(result.state.calibrations.some(({ id }) => id === 'z-old-calibration-00000'), false);
+  assert.equal(result.state.calibrations.filter(({ id }) => id === duplicateId).length, 1);
+  assert.ok(result.state.calibrations.length <= Tango.MAX_TRADES);
   assert.ok(stateBytes(result.state) <= budgetBytes);
 });
 

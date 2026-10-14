@@ -1,0 +1,5 @@
+
+> tango-paper-trader@0.3.0 check
+> node scripts/validate-extension.js
+
+Manifest 0.3.0 valid; 22 referenced files found.

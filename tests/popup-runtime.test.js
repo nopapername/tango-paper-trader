@@ -48,7 +48,7 @@ function mergeSettingsPatch(settings, patch) {
 
 async function loadPopup({
   failFirstGetAll = false, failAction = '', initialized = true,
-  accountBalances = {}, settingBalances = {}, confirmResult = true, activeTabUrl = ''
+  accountBalances = {}, settingBalances = {}, confirmResult = true, activeTabUrl = '', nativeResponder = null, theme = 'dark', systemLight = false
 } = {}) {
   const elements = new Map();
   let document;
@@ -86,18 +86,21 @@ async function loadPopup({
   let persistedState = stateFixture(accountBalances);
   persistedState.initialized = initialized;
   let persistedSettings = settingsFixture(settingBalances);
+  persistedSettings.theme = theme;
   let getAllCalls = 0;
   const confirmations = [];
   const openedTabs = [];
   const runtimeMessages = [];
   const storageListeners = [];
+  const timers = [];
   const calls = {
     saves: [], fullSaves: [], initialize: 0,
-    resetChain: 0, resetChainArgs: [], resetAll: 0, resetAllWithBalance: [], tabQueries: []
+    resetChain: 0, resetChainArgs: [], resetAll: 0, resetAllWithBalance: [], tabQueries: [], modelNativePrices: []
   };
   const Tango = {
     Chains,
-    I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key },
+    I18n: { resolveLanguage: (value) => value || 'en', t: (key) => key,
+      resolveTheme: (setting) => setting === 'light' || setting === 'dark' ? setting : systemLight ? 'light' : 'dark' },
     Format: {
       native: (value, symbol) => `${value} ${symbol}`, usd: (value) => `$${value}`
     },
@@ -107,7 +110,8 @@ async function loadPopup({
       globalUsdSummary: () => ({ assetsUsd: 0, pnlUsd: 0, complete: true })
     },
     PopupModel: {
-      build(state, settings, selectedChain) {
+      build(state, settings, selectedChain, nativePrices) {
+        calls.modelNativePrices.push({ ...nativePrices });
         const chain = Chains.get(selectedChain) || Chains.get('sol');
         return {
           chain, account: state.accounts[chain.id], summary: Tango.Engine.portfolioSummary(),
@@ -173,20 +177,23 @@ async function loadPopup({
     }
   };
   document = {
-    documentElement: { lang: '' },
+    documentElement: { lang: '', dataset: {} },
     querySelector: element
   };
   const context = {
     Promise, Object, Number, String, Array, Map, Set, Math, Date, JSON, console, Tango, document,
-    setTimeout: () => 0,
+    setTimeout: (fn, delay) => { const timer = { fn, delay, cancelled: false }; timers.push(timer); return timer; },
+    clearTimeout: (timer) => { if (timer) timer.cancelled = true; },
+    matchMedia: () => ({ matches: systemLight, addEventListener() {} }),
     confirm: (message) => { confirmations.push(message); return confirmResult; },
     chrome: {
       runtime: {
         getURL(value) { return `chrome-extension://test/${value}`; },
         async sendMessage(message) {
           runtimeMessages.push(message);
+          if (message?.type === 'TANGO_GET_NATIVE_PRICE' && nativeResponder) return nativeResponder(message);
           return message?.type === 'TANGO_OPEN_GMGN'
-            ? { ok: true } : { ok: true, price: 100, observedAt: 1 };
+            ? { ok: true } : { ok: true, price: 100, observedAt: Date.now() };
         },
         openOptionsPage() {}
       },
@@ -205,7 +212,7 @@ async function loadPopup({
   try { await startup; } catch (error) { startupError = error; }
   await new Promise((resolve) => setImmediate(resolve));
   return {
-    app, calls, confirmations, element, openedTabs, runtimeMessages, storageListeners, startupError,
+    app, calls, confirmations, element, openedTabs, runtimeMessages, storageListeners, startupError, timers, document, context,
     async applyExternalSettings(patch) {
       persistedSettings = mergeSettingsPatch(persistedSettings, patch);
       for (const listener of storageListeners) listener({}, 'local');
@@ -387,6 +394,25 @@ test('Popup waits for a pending selection before opening the shared GMGN entry',
   assert.equal(popup.runtimeMessages.at(-1).type, 'TANGO_OPEN_GMGN');
 });
 
+test('Popup cancels a queued GMGN navigation when another chain is selected while waiting', async () => {
+  const popup = await loadPopup();
+  popup.element('#popup-chain').value = 'bsc';
+  const firstChange = popup.element('#popup-chain').emit('change');
+  const opening = popup.element('#gmgn').click();
+  await new Promise(resolve => setImmediate(resolve));
+  popup.element('#popup-chain').value = 'base';
+  const secondChange = popup.element('#popup-chain').emit('change');
+  popup.calls.saves[0].gate.resolve();
+  await Promise.all([firstChange, opening]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(popup.runtimeMessages.filter(message => message.type === 'TANGO_OPEN_GMGN').length, 0);
+  popup.calls.saves[1].gate.resolve();
+  await secondChange;
+  await popup.element('#gmgn').click();
+  assert.equal(popup.runtimeMessages.filter(message => message.type === 'TANGO_OPEN_GMGN').length, 1);
+  assert.equal(popup.persistedSettings.selectedChain, 'base');
+});
+
 test('Popup master switch follows an external shortcut storage change while open', async () => {
   const popup = await loadPopup();
   assert.equal(popup.storageListeners.length, 1);
@@ -403,6 +429,9 @@ test('Popup uses the active GMGN tab chain until an explicit selector choice per
   assert.equal(popup.element('#popup-chain').value, 'robinhood');
   assert.deepEqual(popup.calls.saves, []);
   assert.deepEqual(JSON.parse(JSON.stringify(popup.calls.tabQueries)), [{ active: true, currentWindow: true }]);
+  await popup.element('#gmgn').click();
+  assert.equal(popup.runtimeMessages.filter(message => message.type === 'TANGO_OPEN_GMGN').length, 1);
+  assert.equal(popup.persistedSettings.selectedChain, 'eth');
 
   await popup.applyExternalSettings({ enabled: false });
   assert.equal(popup.element('#popup-chain').value, 'robinhood');
@@ -417,6 +446,39 @@ test('Popup uses the active GMGN tab chain until an explicit selector choice per
 
   assert.equal(popup.persistedSettings.selectedChain, 'bsc');
   assert.equal(popup.element('#popup-chain').value, 'bsc');
+});
+
+test('Popup native refresh has independent timeout, periodic retry, and does not block initial controls', async () => {
+  let hung = true;
+  const popup = await loadPopup({ nativeResponder: message => message.chain === 'sol' && hung
+    ? new Promise(() => {}) : { ok: true, price: 100, observedAt: Date.now() } });
+  assert.ok(popup.element('#master-enabled'));
+  assert.ok(popup.element('#refresh-native-prices'));
+  assert.equal(popup.calls.modelNativePrices.at(-1).eth, 100);
+  assert.equal(popup.calls.modelNativePrices.at(-1).sol, 0);
+  const timeout = popup.timers.find(timer => timer.delay === 8000 && !timer.cancelled); timeout.fn();
+  await new Promise(resolve => setImmediate(resolve));
+  hung = false;
+  const before = popup.runtimeMessages.length;
+  const poll = popup.timers.find(timer => timer.delay === 30000 && !timer.cancelled); poll.fn();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(popup.runtimeMessages.length > before);
+  assert.equal(popup.calls.modelNativePrices.at(-1).sol, 100);
+});
+
+test('Popup auto theme follows system light mode and expired prices never reach its model', async () => {
+  const popup = await loadPopup({ theme: 'auto', systemLight: true, nativeResponder: () => ({ ok: true, price: 999, observedAt: 1 }) });
+  assert.equal(popup.document.documentElement.dataset.theme, 'light');
+  assert.ok(Object.values(popup.calls.modelNativePrices.at(-1)).every(value => value === 0));
+});
+
+test('Popup invalid common principal shows a validation message and performs no mutation', async () => {
+  const popup = await loadPopup();
+  popup.element('#common-capital-balance').value = '';
+  await popup.element('#save-common-capital').click();
+  assert.deepEqual(popup.calls.resetAllWithBalance, []);
+  assert.match(popup.app.innerHTML, /invalidCommonCapital/);
+  assert.equal(popup.element('#common-capital-balance').value, '', 'invalid input must remain editable');
 });
 
 test('Popup rejected selection does not block a later common-capital reset', async () => {

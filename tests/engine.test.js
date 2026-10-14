@@ -2659,6 +2659,74 @@ test('breakeven sell computes a native percentage needed to recover remaining co
   assert.equal(Engine.breakevenSellPercent(bought.position, { ...higherQuote, priceUsd: 0.5 }, settings), null);
 });
 
+test('a positive dust remainder retains its cost and keeps portfolio accounting consistent', () => {
+  const now = 2000;
+  const highQuote = { priceUsd: 1e15, nativePriceUsd: 2000, observedAt: now, nativePriceObservedAt: now };
+  const bought = Engine.executeBuy(state(), { token: ethToken, quote: highQuote, amountNative: 1 }, paperSettings, now);
+  const sold = Engine.executeSell(bought.state, { token: ethToken, quote: highQuote, quantity: 1e-12 }, paperSettings, now);
+  assert.equal(sold.position.quantity, 1e-12);
+  assert.equal(sold.position.costBasisNative, 0.5);
+  const summary = Engine.portfolioSummary(sold.state, 'eth', 2000);
+  assert.equal(summary.totalPnlNative, summary.realizedPnlNative + summary.unrealizedPnlNative);
+});
+
+test('close all always uses the full current position even when an order carries a quantity', () => {
+  const bought = Engine.executeBuy(state(), { token: ethToken, quote, amountNative: 1 }, paperSettings, 1000);
+  const result = Engine.executeCloseAll(bought.state, 'eth', [{ token: ethToken, quote, quantity: 1 }], paperSettings, 1000);
+  assert.equal(result.failures.length, 0);
+  assert.equal(result.trades[0].quantity, bought.position.quantity);
+  assert.equal(result.state.positions[Engine.positionKey('eth', ethToken.address)], undefined);
+});
+
+test('USD summaries reject non-finite native prices and do not mark missing chains complete', () => {
+  for (const value of [Infinity, -Infinity, NaN]) assert.throws(() => Engine.chainUsdSummary(state(), 'eth', value), /invalidNativePrice/);
+  const summary = Engine.globalUsdSummary(state(), { sol: 100, eth: Infinity, bsc: 500, base: 2000, robinhood: 2000, xlayer: 50 });
+  assert.equal(summary.complete, false);
+  assert.deepEqual(summary.missingChains, ['eth']);
+  assert.ok(Number.isFinite(summary.assetsUsd));
+  assert.ok(Number.isFinite(summary.pnlUsd));
+});
+
+test('USD summaries reject finite native inputs whose valuation overflows', () => {
+  const next = State.createInitialState({ now: 1, initialBalances: { eth: 1e15 } });
+  assert.throws(() => Engine.chainUsdSummary(next, 'eth', 1e308), /invalidArithmetic/);
+  const prices = Object.fromEntries(global.Tango.Chains.all().map((chain) => [chain.id, 1]));
+  const summary = Engine.globalUsdSummary(next, { ...prices, eth: 1e308 });
+  assert.equal(summary.complete, false);
+  assert.deepEqual(summary.missingChains, ['eth']);
+  assert.equal(summary.assetsUsd, 50);
+  assert.equal(summary.pnlUsd, 0);
+});
+
+test('chain USD summary rejects position multiplication and total asset overflow', () => {
+  const next = State.createInitialState({ now: 1 });
+  next.positions[`eth:${EVM_ADDRESS}`] = {
+    chain: 'eth', tokenAddress: EVM_ADDRESS,
+    quantity: 1e308, costBasisNative: 1, lastPriceUsd: 2, lastNativePriceUsd: 1
+  };
+  assert.throws(() => Engine.chainUsdSummary(next, 'eth', 1), /invalidArithmetic/);
+  next.positions[`eth:${EVM_ADDRESS}`].lastPriceUsd = 1;
+  next.accounts.eth.cashBalanceNative = 1e308;
+  assert.throws(() => Engine.chainUsdSummary(next, 'eth', 1), /invalidArithmetic/);
+});
+
+test('global USD summary excludes chains that overflow aggregate assets or pnl atomically', () => {
+  for (const overflow of ['assets', 'pnl']) {
+    const next = State.createInitialState({ now: 1 });
+    for (const chain of ['sol', 'eth']) {
+      next.accounts[chain].cashBalanceNative = overflow === 'assets' ? 1e308 : 0;
+      next.accounts[chain].initialBalanceNative = 1e308;
+      assert.ok(Object.values(Engine.chainUsdSummary(next, chain, 1)).every(Number.isFinite));
+    }
+    const summary = Engine.globalUsdSummary(next, { sol: 1, eth: 1, bsc: 1, base: 1, robinhood: 1, xlayer: 1 });
+    assert.equal(summary.complete, false, overflow);
+    assert.deepEqual(summary.missingChains, ['eth'], overflow);
+    assert.equal(summary.assetsUsd, overflow === 'assets' ? 1e308 : 40, overflow);
+    assert.equal(summary.pnlUsd, overflow === 'assets' ? 0 : -1e308, overflow);
+    assert.ok(Number.isFinite(summary.assetsUsd) && Number.isFinite(summary.pnlUsd), overflow);
+  }
+});
+
 test('close all settles every valid position and keeps chain daily pnl consistent', () => {
   const otherToken = { ...token, address: '11111111111111111111111111111113', symbol: 'OTHER' };
   const first = Engine.executeBuy(state(), { token, quote, amountNative: 5 }, settings, 1_000);

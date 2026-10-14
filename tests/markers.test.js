@@ -9,6 +9,7 @@ require('../src/core/supply.js');
 require('../src/shared/constants.js');
 const State = require('../src/core/state.js');
 const Engine = require('../src/core/engine.js');
+const StateCoordinator = require('../src/core/state-coordinator.js');
 const { buildPayload } = require('../src/content/markers.js');
 const chartSource = fs.readFileSync(path.resolve(__dirname, '../src/content/chart-main.js'), 'utf8');
 
@@ -16,6 +17,20 @@ const ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 const BSC_ADDRESS = '0x1111111111111111111111111111111111111111';
 const BSC_OTHER_ADDRESS = '0x2222222222222222222222222222222222222222';
 const labels = { entry: 'Paper Buy', exit: 'Paper Sell', hide: 'Hide line' };
+
+function durableUnknownFallback(overrides = {}) {
+  return {
+    chain: 'base', tokenAddress: BSC_ADDRESS, side: 'BUY', id: 'fallback',
+    marketCapUsd: 3_200, observedPriceUsd: 0.0000032,
+    quoteSource: 'TANGO_FALLBACK', paperFallback: true, provisional: true,
+    syntheticTokenPrice: true, valuationMode: 'MARKET_CAP',
+    priceProvenance: 'SYNTHETIC_PRICE', totalSupply: 1_000_000_000,
+    marketCapDivisor: 1_000_000_000, provisionalSupply: 1_000_000_000,
+    provisionalSupplyProvenance: 'TANGO_INTERNAL_UNKNOWN_FALLBACK_V1',
+    supplySource: 'UNKNOWN_FALLBACK', executedAt: 1_000,
+    ...overrides
+  };
+}
 
 function loadChartBridge({
   frameTitle = 'Financial Chart',
@@ -807,6 +822,334 @@ test('factual zero-cap BUY price wins over an existing derived position price', 
   }]);
 });
 
+test('fallback position and first BUY cannot block the next factual BUY entry', () => {
+  const position = durableUnknownFallback({
+    chain: 'base', tokenAddress: BSC_ADDRESS,
+    averageEntryMarketCap: 3_200, averageEntryPriceUsd: 0.0000032,
+    averageEntryPriceProvenance: 'SYNTHETIC_PRICE',
+    lastPriceProvenance: 'SYNTHETIC_PRICE'
+  });
+  const factualBuy = {
+    id: 'factual-buy', chain: 'base', tokenAddress: BSC_ADDRESS, side: 'BUY',
+    marketCapUsd: 8_000, observedPriceUsd: 0.000008,
+    priceProvenance: 'OBSERVED_PRICE', quoteSource: 'GMGN_NETWORK'
+  };
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address: BSC_ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position,
+    trades: [durableUnknownFallback({ id: 'fallback-first-buy' }), factualBuy],
+    labels
+  });
+
+  assert.deepEqual(payload.markers[0], {
+    id: `entry:base:${BSC_ADDRESS}`, side: 'BUY', marketCap: 8_000,
+    price: 0.000008, label: 'Paper Buy', closeLabel: 'Hide line'
+  });
+});
+
+test('fallback-only SELLs do not consume the first four usable SELL markers', () => {
+  const fallbackSells = [1, 2].map((index) => durableUnknownFallback({
+    id: `fallback-sell-${index}`, side: 'SELL', executedAt: 1_000 + index
+  }));
+  const factualSells = [1, 2, 3, 4, 5].map((index) => ({
+    id: `factual-sell-${index}`, chain: 'base', tokenAddress: BSC_ADDRESS,
+    side: 'SELL', marketCapUsd: 10_000 + index,
+    observedPriceUsd: 0.00001 + index * 0.000001,
+    priceProvenance: 'OBSERVED_PRICE', quoteSource: 'GMGN_NETWORK'
+  }));
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address: BSC_ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position: null, trades: [...fallbackSells, ...factualSells], labels
+  });
+
+  assert.deepEqual(payload.markers.map((marker) => marker.id), [
+    `sell:base:${BSC_ADDRESS}:factual-sell-1`,
+    `sell:base:${BSC_ADDRESS}:factual-sell-2`,
+    `sell:base:${BSC_ADDRESS}:factual-sell-3`,
+    `sell:base:${BSC_ADDRESS}:factual-sell-4`
+  ]);
+});
+
+test('factual execution prices survive while canonical fallback market caps are removed', () => {
+  const buy = durableUnknownFallback({
+    id: 'price-buy', quoteSource: 'GMGN_NETWORK', valuationMode: 'PRICE',
+    priceProvenance: 'OBSERVED_PRICE', observedPriceUsd: 0.000004,
+    syntheticTokenPrice: false, provisional: false,
+    quoteObservedAtOriginal: 900
+  });
+  const sell = { ...buy, id: 'price-sell', side: 'SELL', observedPriceUsd: 0.000005 };
+  const trades = [buy, sell];
+  const before = structuredClone(trades);
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address: BSC_ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position: null, trades, labels
+  });
+
+  assert.deepEqual(payload.markers.map(({ side, marketCap, price }) => (
+    { side, marketCap, price }
+  )), [
+    { side: 'BUY', marketCap: 0, price: 0.000004 },
+    { side: 'SELL', marketCap: 0, price: 0.000005 }
+  ]);
+  assert.deepEqual(trades, before);
+});
+
+test('canonical durable fallback market caps cannot revive without paperFallback', () => {
+  for (const side of ['BUY', 'SELL']) {
+    for (const [label, paperFallback] of [['missing', undefined], ['false', false]]) {
+      const trade = durableUnknownFallback({
+        id: `${side.toLowerCase()}-${label}-paper-fallback`, side,
+        quoteSource: '', paperFallback
+      });
+      if (paperFallback === undefined) delete trade.paperFallback;
+      const payload = buildPayload({
+        current: {
+          token: { chain: 'base', address: BSC_ADDRESS },
+          quote: {
+            priceUsd: 0.002, marketCapUsd: 200_000_000,
+            totalSupply: 100_000_000_000, supplySource: 'GMGN_EXACT',
+            priceProvenance: 'OBSERVED_PRICE', source: 'GMGN_NETWORK',
+            observationId: 'gmgn-live-1', priceObservationId: 'gmgn-live-1',
+            marketCapObservationId: 'gmgn-live-1', observedAt: 2_000
+          }
+        },
+        position: null, trades: [trade], labels
+      });
+
+      assert.deepEqual(payload.markers, [], `${side}:${label}`);
+    }
+  }
+});
+
+test('source-only canonical fallback prices are rejected for BUY SELL and card records', () => {
+  const cases = [
+    ['BUY fallback', {
+      id: 'source-only-buy', side: 'BUY', quoteSource: 'TANGO_FALLBACK'
+    }],
+    ['SELL fallback', {
+      id: 'source-only-sell', side: 'SELL', source: 'TANGO_FALLBACK'
+    }],
+    ['BUY card', {
+      id: 'source-only-card', side: 'BUY', quoteSource: 'TANGO_FALLBACK_CARD_MARKET_CAP'
+    }]
+  ];
+
+  for (const [name, source] of cases) {
+    const trade = {
+      chain: 'base', tokenAddress: BSC_ADDRESS,
+      marketCapUsd: 0, observedPriceUsd: 0.000005,
+      ...source
+    };
+    const payload = buildPayload({
+      current: {
+        token: { chain: 'base', address: BSC_ADDRESS },
+        quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+      },
+      position: null, trades: [trade], labels
+    });
+
+    assert.deepEqual(payload.markers, [], name);
+  }
+});
+
+test('explicit market-cap fallback signals are removed without suppressing factual prices', () => {
+  const base = {
+    id: 'mixed-buy', chain: 'base', tokenAddress: BSC_ADDRESS, side: 'BUY',
+    marketCapUsd: 5_000, observedPriceUsd: 0.000005,
+    priceProvenance: 'OBSERVED_PRICE', quoteSource: 'GMGN_NETWORK'
+  };
+  const cases = [
+    ['market-cap source', { marketCapSource: 'TANGO_FALLBACK' }],
+    ['unknown initial valuation', { valuationSource: 'UNKNOWN_INITIAL_MARKET_CAP' }],
+    ['launchpad initial valuation', { valuationSource: 'LAUNCHPAD_INITIAL_MARKET_CAP' }],
+    ['quote source', { quoteSource: 'TANGO_FALLBACK' }],
+    ['generic source', { source: 'TANGO_FALLBACK' }],
+    ['coherent synthetic shape', durableUnknownFallback({
+      quoteSource: '', marketCapUsd: 5_000, observedPriceUsd: 0.000005
+    })]
+  ];
+
+  for (const [name, patch] of cases) {
+    const trade = { ...base, ...patch };
+    if (name === 'coherent synthetic shape') {
+      trade.priceProvenance = 'SYNTHETIC_PRICE';
+    }
+    const payload = buildPayload({
+      current: {
+        token: { chain: 'base', address: BSC_ADDRESS },
+        quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+      },
+      position: null, trades: [trade], labels
+    });
+    if (name === 'coherent synthetic shape' || name === 'quote source') {
+      assert.deepEqual(payload.markers, [], name);
+    } else {
+      assert.equal(payload.markers[0].marketCap, 0, name);
+      assert.equal(payload.markers[0].price, 0.000005, name);
+    }
+  }
+});
+
+test('verified card market-cap fallback keeps only its observed market-cap coordinate', () => {
+  const card = durableUnknownFallback({
+    id: 'verified-card', quoteSource: 'TANGO_FALLBACK_CARD_MARKET_CAP',
+    marketCapUsd: 5_000, observedPriceUsd: 0.000005,
+    quoteObservedAtOriginal: 900, executedAt: 1_000
+  });
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address: BSC_ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position: null, trades: [card], labels
+  });
+
+  assert.deepEqual(payload.markers, [{
+    id: `entry:base:${BSC_ADDRESS}`, side: 'BUY', marketCap: 5_000, price: 0,
+    label: 'Paper Buy', closeLabel: 'Hide line'
+  }]);
+});
+
+test('every partial card market-cap fallback signature fails closed', () => {
+  const base = {
+    id: 'partial-card', chain: 'base', tokenAddress: BSC_ADDRESS, side: 'BUY',
+    marketCapUsd: 5_000, observedPriceUsd: 0.000005,
+    priceProvenance: 'OBSERVED_PRICE', quoteSource: 'GMGN_NETWORK'
+  };
+  const partial = [
+    ['quote source', { quoteSource: 'TANGO_FALLBACK_CARD_MARKET_CAP' }],
+    ['generic source', { source: 'TANGO_FALLBACK_CARD_MARKET_CAP' }],
+    ['market-cap source', { marketCapSource: 'TANGO_FALLBACK_CARD_MARKET_CAP' }],
+    ['valuation source', { valuationSource: 'CARD_MARKET_CAP_FALLBACK_SUPPLY' }]
+  ];
+
+  for (const [name, signature] of partial) {
+    const payload = buildPayload({
+      current: {
+        token: { chain: 'base', address: BSC_ADDRESS },
+        quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+      },
+      position: null, trades: [{ ...base, ...signature }], labels
+    });
+    assert.equal(payload.markers[0]?.marketCap || 0, 0, name);
+  }
+});
+
+test('complete card market-cap fallback rejects contradictory explicit provenance', () => {
+  const valid = durableUnknownFallback({
+    quoteSource: 'TANGO_FALLBACK_CARD_MARKET_CAP', marketCapUsd: 5_000,
+    observedPriceUsd: 0.000005, quoteObservedAtOriginal: 900, executedAt: 1_000
+  });
+  const contradictory = [
+    ['generic source', { source: 'TANGO_FALLBACK' }],
+    ['market-cap source', { marketCapSource: 'TANGO_FALLBACK' }],
+    ['valuation source', { valuationSource: 'UNKNOWN_INITIAL_MARKET_CAP' }]
+  ];
+
+  for (const [name, provenance] of contradictory) {
+    const payload = buildPayload({
+      current: {
+        token: { chain: 'base', address: BSC_ADDRESS },
+        quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+      },
+      position: null, trades: [{ ...valid, ...provenance }], labels
+    });
+    assert.deepEqual(payload.markers, [], name);
+  }
+});
+
+test('complete card market-cap fallback accepts coherent explicit transient provenance', () => {
+  const card = durableUnknownFallback({
+    quoteSource: 'TANGO_FALLBACK_CARD_MARKET_CAP',
+    source: 'TANGO_FALLBACK_CARD_MARKET_CAP',
+    marketCapSource: 'GMGN_NETWORK',
+    valuationSource: 'CARD_MARKET_CAP_FALLBACK_SUPPLY',
+    marketCapUsd: 5_000, observedPriceUsd: 0.000005,
+    quoteObservedAtOriginal: 900, executedAt: 1_000
+  });
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address: BSC_ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+    },
+    position: null, trades: [card], labels
+  });
+
+  assert.equal(payload.markers[0].marketCap, 5_000);
+  assert.equal(payload.markers[0].price, 0);
+});
+
+test('incomplete or forged card market-cap fallback cannot produce a coordinate', () => {
+  const valid = durableUnknownFallback({
+    quoteSource: 'TANGO_FALLBACK_CARD_MARKET_CAP', marketCapUsd: 5_000,
+    observedPriceUsd: 0.000005, quoteObservedAtOriginal: 900, executedAt: 1_000
+  });
+  const invalid = [
+    { ...valid, quoteObservedAtOriginal: 0 },
+    { ...valid, quoteObservedAtOriginal: 1_001 },
+    { ...valid, observedPriceUsd: 0.01 },
+    { ...valid, provisionalSupplyProvenance: '' },
+    { ...valid, syntheticTokenPrice: false },
+    { ...valid, valuationMode: 'PRICE' }
+  ];
+
+  for (const trade of invalid) {
+    const payload = buildPayload({
+      current: {
+        token: { chain: 'base', address: BSC_ADDRESS },
+        quote: { priceUsd: 0, marketCapUsd: 0, priceProvenance: 'OBSERVED_PRICE' }
+      },
+      position: null, trades: [trade], labels
+    });
+    assert.deepEqual(payload.markers, []);
+  }
+});
+
+test('legacy unattested records without explicit fallback signatures remain compatible', () => {
+  const legacy = {
+    id: 'legacy-buy', chain: 'base', tokenAddress: BSC_ADDRESS, side: 'BUY',
+    marketCapUsd: 7_000, observedPriceUsd: 0.000007
+  };
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address: BSC_ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0 }
+    },
+    position: null, trades: [legacy], labels
+  });
+  assert.equal(payload.markers[0].marketCap, 7_000);
+  assert.equal(payload.markers[0].price, 0.000007);
+});
+
+test('factual market-cap coordinates remain when only their price is derived', () => {
+  const derivedPrice = {
+    id: 'market-cap-buy', chain: 'base', tokenAddress: BSC_ADDRESS, side: 'BUY',
+    marketCapUsd: 9_000, observedPriceUsd: 0.000123,
+    priceProvenance: 'MARKET_CAP_DERIVED', quoteSource: 'GMGN_NETWORK',
+    paperFallback: true, provisional: true, syntheticNativePrice: true,
+    syntheticTokenPrice: false, totalSupply: 1_000_000_000,
+    supplySource: 'GMGN_EXACT'
+  };
+  const payload = buildPayload({
+    current: {
+      token: { chain: 'base', address: BSC_ADDRESS },
+      quote: { priceUsd: 0, marketCapUsd: 0 }
+    },
+    position: null, trades: [derivedPrice], labels
+  });
+  assert.equal(payload.markers[0].marketCap, 9_000);
+  assert.equal(payload.markers[0].price, 0.000009);
+});
+
 test('chart cache identity includes chain as well as token address', () => {
   assert.match(chartSource, /markerState\?\.chain !== nextState\?\.chain/);
   assert.match(chartSource, /markerState\?\.tokenAddress !== nextState\?\.tokenAddress/);
@@ -826,7 +1169,7 @@ test('chart bridge accepts a dynamically titled frame only inside the TradingVie
   }).bridgeInitialized, false);
 });
 
-test('actual engine fallback provenance reprices markers from a factual live ratio with verified 100B supply', () => {
+test('actual engine fallback coordinates stay absent after a factual live ratio arrives', () => {
   const baseAddress = '0x1111111111111111111111111111111111111111';
   const token = {
     chain: 'base', address: baseAddress, symbol: 'FALLBACK',
@@ -867,12 +1210,98 @@ test('actual engine fallback provenance reprices markers from a factual live rat
   const payload = buildPayload({
     current: factual, position: bought.position, trades: bought.state.trades, labels
   });
-  const factualPriceAtEntryMarketCap = 0.002 * bought.position.averageEntryMarketCap / 200_000_000;
-
   assert.equal(payload.currentPrice, 0.002);
-  assert.equal(payload.markers[0].marketCap, 3_200);
-  assert.equal(payload.markers[0].price, factualPriceAtEntryMarketCap);
-  assert.notEqual(payload.markers[0].price, bought.position.averageEntryPriceUsd);
+  assert.equal(payload.currentMarketCap, 200_000_000);
+  assert.deepEqual(payload.markers, []);
+});
+
+test('persisted coordinator BUY and SELL keep only independently factual marker dimensions', async () => {
+  const scenarios = [
+    { name: 'unknown initial valuation', launchpad: '', expected: [] },
+    { name: 'verified launchpad initial valuation', launchpad: 'Bankr', expected: [] },
+    {
+      name: 'observed card market cap', launchpad: '',
+      quotePatch: {
+        marketCapUsd: 5_000, priceUsd: 0.000005,
+        valuationSource: 'CARD_MARKET_CAP_FALLBACK_SUPPLY',
+        marketCapSource: 'GMGN_TRENCH', marketCapObservedAt: 19_900,
+        originalObservedAt: 19_900
+      },
+      expected: [
+        { side: 'BUY', marketCap: 5_000, price: 0 },
+        { side: 'SELL', marketCap: 5_000, price: 0 }
+      ]
+    },
+    {
+      name: 'observed price with initial market cap', launchpad: '',
+      quotePatch: {
+        priceUsd: 0.000005, source: 'GMGN_NETWORK', priceSource: 'GMGN_NETWORK',
+        priceObservedAt: 19_900, originalObservedAt: 19_900,
+        marketCapSource: 'TANGO_FALLBACK', marketCapObservedAt: 0,
+        marketCapObservationId: '', valuationMode: 'PRICE',
+        valuationSource: 'OBSERVED_PRICE', priceProvenance: 'OBSERVED_PRICE',
+        syntheticTokenPrice: false, provisional: false
+      },
+      expected: [
+        { side: 'BUY', marketCap: 0, price: 0.000005 },
+        { side: 'SELL', marketCap: 0, price: 0.000005 }
+      ]
+    }
+  ];
+
+  for (const scenario of scenarios) {
+    const settings = State.normalizeSettings({
+      enabled: true, slippageBps: 0, platformFeeBps: 0,
+      chains: { base: { networkFeeNative: 0 } }
+    });
+    const initial = State.createInitialState({ now: 1, initialBalances: { base: 10 } });
+    initial.initialized = true;
+    const values = {
+      [global.Tango.STORAGE_KEY]: structuredClone(initial),
+      [global.Tango.SETTINGS_KEY]: structuredClone(settings)
+    };
+    let executionNow = 20_000;
+    const coordinator = StateCoordinator.create({
+      async readRaw(keys) {
+        return Object.fromEntries(keys.filter((key) => key in values)
+          .map((key) => [key, structuredClone(values[key])]));
+      },
+      async writeRaw(next) { Object.assign(values, structuredClone(next)); },
+      now: () => executionNow
+    });
+    const token = {
+      chain: 'base', address: BSC_ADDRESS, symbol: 'MARKER_TEST',
+      launchpad: scenario.launchpad, metadataVerified: true, metadataSource: 'GMGN_TRENCH'
+    };
+    const fallback = global.Tango.Supply.fallbackValuation(token);
+    const quote = {
+      ...fallback, chain: 'base', address: BSC_ADDRESS,
+      marketCapDivisor: fallback.totalSupply,
+      provisionalSupply: fallback.supplySource === 'UNKNOWN_FALLBACK' ? fallback.totalSupply : 0,
+      nativePriceUsd: 2_000, nativePriceObservedAt: 20_000, observedAt: 20_000,
+      source: 'TANGO_FALLBACK', valuationMode: 'MARKET_CAP',
+      priceProvenance: 'FALLBACK_INITIAL_MARKET_CAP',
+      syntheticTokenPrice: true, provisional: true, paperFallback: true,
+      ...scenario.quotePatch
+    };
+    await coordinator.mutate(structuredClone({
+      type: 'EXECUTE_BUY', order: { token, quote, amountNative: 1 }
+    }));
+    executionNow += 1;
+    await coordinator.mutate(structuredClone({
+      type: 'EXECUTE_SELL', order: { token, quote, percent: 50 }
+    }));
+    const persisted = await coordinator.getAll();
+    const roundTrip = State.normalizeState(structuredClone(persisted.state), settings, { strict: true });
+    const payload = buildPayload({
+      current: { token, quote: { priceUsd: 0, marketCapUsd: 0 } },
+      position: roundTrip.positions[Engine.positionKey('base', BSC_ADDRESS)],
+      trades: roundTrip.trades, labels
+    });
+    assert.deepEqual(payload.markers.map(({ side, marketCap, price }) => ({
+      side, marketCap, price
+    })), scenario.expected, scenario.name);
+  }
 });
 
 test('an empty marker payload clears overlay and every cached chart placement', () => {
@@ -897,6 +1326,56 @@ test('an empty marker payload clears overlay and every cached chart placement', 
     overlayStyles: [],
     diagnostic: { reason: 'IDLE', axisHint: 'UNKNOWN', frameGeneration: 0 }
   });
+});
+
+test('card market-cap entry uses the verified position average across buys and partial sells', () => {
+  const token = { chain: 'base', address: BSC_ADDRESS, symbol: 'CARD', metadataVerified: true,
+    metadataSource: 'GMGN_TRENCH' };
+  const settings = State.normalizeSettings({ slippageBps: 0, platformFeeBps: 0,
+    chains: { base: { networkFeeNative: 0 } } });
+  const quote = (marketCapUsd, now) => ({ ...global.Tango.Supply.fallbackValuation(token),
+    chain: 'base', address: token.address, marketCapUsd, priceUsd: marketCapUsd / 1e9,
+    marketCapDivisor: 1e9, provisionalSupply: 1e9, nativePriceUsd: 2000,
+    nativePriceObservedAt: now, observedAt: now, originalObservedAt: now - 1,
+    source: 'TANGO_FALLBACK_CARD_MARKET_CAP', valuationSource: 'CARD_MARKET_CAP_FALLBACK_SUPPLY',
+    marketCapSource: 'GMGN_TRENCH', marketCapObservedAt: now - 1,
+    valuationMode: 'MARKET_CAP', priceProvenance: 'SYNTHETIC_PRICE',
+    syntheticTokenPrice: true, provisional: true, paperFallback: true });
+  const initial = State.createInitialState({ now: 1, initialBalances: { base: 10 } });
+  initial.initialized = true;
+  const first = Engine.executeBuy(initial, { token, quote: quote(5000, 10000), amountNative: 1 }, settings, 10000);
+  const second = Engine.executeBuy(first.state, { token, quote: quote(10000, 11000), amountNative: 1 }, settings, 11000);
+  const sold = Engine.executeSell(second.state, { token, quote: quote(12000, 12000), percent: 50 }, settings, 12000);
+  for (const result of [second, sold]) {
+    const state = State.normalizeState(result.state, settings, { strict: true });
+    const position = state.positions[Engine.positionKey('base', BSC_ADDRESS)];
+    const payload = buildPayload({ current: { token, quote: {} }, position, trades: state.trades, labels });
+    assert.equal(payload.markers.find(marker => marker.side === 'BUY').marketCap, 7500);
+    assert.equal(payload.markers.find(marker => marker.side === 'BUY').price, 0);
+  }
+  const incomplete = buildPayload({ current: { token, quote: {} }, position: second.position,
+    trades: [second.trade], labels });
+  assert.equal(incomplete.markers.filter(marker => marker.side === 'BUY').length, 0,
+    'a missing origin must not substitute the most recent fill for the average');
+  for (const field of ['quantity', 'costBasisNative', 'averageEntryMarketCap']) {
+    const altered = buildPayload({ current: { token, quote: {} },
+      position: { ...second.position, [field]: second.position[field] * 1.1 }, trades: second.state.trades, labels });
+    assert.equal(altered.markers.filter(marker => marker.side === 'BUY').length, 0, field);
+  }
+  for (const times of [[10000, 11000, 12000], [10000, 10000, 10000]]) {
+    const opened = Engine.executeBuy(initial, { token, quote: quote(5000, times[0]), amountNative: 1 }, settings, times[0]);
+    const partial = Engine.executeSell(opened.state, { token, quote: quote(8000, times[1]), percent: 50 }, settings, times[1]);
+    const added = Engine.executeBuy(partial.state, { token, quote: quote(10000, times[2]), amountNative: 1 }, settings, times[2]);
+    const payload = buildPayload({ current: { token, quote: {} }, position: added.position, trades: added.state.trades, labels });
+    assert.ok(Math.abs(payload.markers.find(marker => marker.side === 'BUY').marketCap - 8333.333333333333) < 1e-7);
+    const missingSell = buildPayload({ current: { token, quote: {} }, position: added.position,
+      trades: added.state.trades.filter(trade => trade.side !== 'SELL'), labels });
+    assert.equal(missingSell.markers.filter(marker => marker.side === 'BUY').length, 0);
+    const mixed = buildPayload({ current: { token, quote: {} }, position: added.position,
+      trades: added.state.trades.map(trade => trade.id === opened.trade.id
+        ? { ...trade, quoteSource: 'TANGO_FALLBACK', marketCapUsd: 3200 } : trade), labels });
+    assert.equal(mixed.markers.filter(marker => marker.side === 'BUY').length, 0);
+  }
 });
 
 test('first identified marker reuses current axis labels captured after an unidentified clear', () => {

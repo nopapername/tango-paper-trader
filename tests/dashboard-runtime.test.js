@@ -7,6 +7,9 @@ const vm = require('node:vm');
 global.Tango = {};
 const Chains = require('../src/core/chains.js');
 const dashboardSource = fs.readFileSync(path.resolve(__dirname, '../src/dashboard/dashboard.js'), 'utf8');
+require('../src/dashboard/model.js');
+const DashboardModel = global.Tango.DashboardModel;
+global.Tango.ChainView = { trades: (state, chain) => state.trades.filter((trade) => trade.chain === chain) };
 
 function deferred() {
   let resolve;
@@ -57,7 +60,7 @@ async function loadDashboard({
   closeSucceeds = true, corruptResetReadback = false,
   emitStorageDuringReset = false, failOpenGmgn = false, openGmgnFailures = 0,
   deferResetAllWithBalance = false, deferOpenGmgn = false,
-  initialState = null, initialSettings = null, importFailure = null
+  initialState = null, initialSettings = null, importFailure = null, nativeResponder = null, systemLight = false
 } = {}) {
   const appElements = new Map();
   let document;
@@ -115,11 +118,14 @@ async function loadDashboard({
   let storageSubscriber = null;
   const calls = { getAll: 0, saves: [], fullSaves: [], resetChain: [], resetAll: 0, resetAllWithBalance: [], exportData: 0, downloads: [], nativeMessages: [], confirms: [], tabs: [], close: 0, sequence: [] };
   const anchors = [];
+  const canvasCalls = [];
+  let nullCanvasBlob = false;
+  const timers = [];
   const urls = new Map();
   let urlId = 0;
   const source = dashboardSource.replace(
     /  Tango\.Store\.subscribe\(load\);load\(\);\r?\n\}\)\(globalThis\);\s*$/,
-    '  Tango.Store.subscribe(load);\n  global.__dashboardTest = { runtime, load, render, saveSelectedChain, refreshNativePrices, action, tradesCsv };\n})(globalThis);'
+    '  Tango.Store.subscribe(load);\n  global.__dashboardTest = { runtime, load, render, saveSelectedChain, refreshNativePrices, freshNativePrices, renderPriceUpdate, historyResults, shareTrade, action, tradesCsv };\n})(globalThis);'
   );
   assert.notEqual(source, dashboardSource, 'dashboard test harness must replace startup');
   const Tango = {
@@ -130,7 +136,8 @@ async function loadDashboard({
         ? `${key}:${vars?.amount}`
         : key === 'importTooLarge'
           ? `${key}:${vars?.measured}/${vars?.budget}`
-          : key
+          : key === 'showingTrades' ? `${key}:${vars.from}-${vars.to}/${vars.count}` : key,
+      resolveTheme: (setting) => setting === 'light' || setting === 'dark' ? setting : systemLight ? 'light' : 'dark'
     },
     Format: { native: (value, symbol) => `${value} ${symbol}`, usd: (value) => `$${value}`, percent: String, number: String, duration: String },
     Engine: {
@@ -139,6 +146,7 @@ async function loadDashboard({
       globalUsdSummary: () => ({ assetsUsd: 0, pnlUsd: 0, complete: true })
     },
     DashboardModel: {
+      CSV_FIELDS: DashboardModel.CSV_FIELDS,
       build(state, settings, selectedChain, nativePrices, filters) {
         const chain = Chains.get(selectedChain) || Chains.get('sol');
         return {
@@ -168,7 +176,7 @@ async function loadDashboard({
           || trade?.priceProvenance === 'MIXED_DERIVED'
           || trade?.valuationMode === 'MARKET_CAP';
       },
-      tradesCsvRows(state, chain) { return state.trades.filter((trade) => trade.chain === chain); },
+      tradesCsvRows: DashboardModel.tradesCsvRows,
       calendar() { return { days: {}, trades: [], totalNative: 0, winRate: 0, bestNative: 0, worstNative: 0 }; }
     },
     Store: {
@@ -248,6 +256,13 @@ async function loadDashboard({
     documentElement: { lang: '', dataset: {} },
     querySelector(selector) { return selector === '#app' ? app : selector === '#import-file' ? fileInput : element(selector); },
     createElement(tag) {
+      if (tag === 'canvas') {
+        const context = { font: '', createLinearGradient: () => ({ addColorStop() {} }), fillRect() {}, beginPath() {}, arc() {}, fill() {},
+          measureText(value) { return { width: String(value).length * Number(this.font.match(/([\d.]+)px/)?.[1] || 12) * 0.6 }; },
+          fillText(...args) { canvasCalls.push({ args, font: this.font }); }
+        };
+        return { getContext: () => context, toBlob(callback) { callback(nullCanvasBlob ? null : new Blob(['png'], { type: 'image/png' })); } };
+      }
       if (tag !== 'a') return createElement(tag);
       const anchor = { href: '', download: '', click() { anchors.push(this); } };
       return anchor;
@@ -261,7 +276,9 @@ async function loadDashboard({
       createObjectURL(blob) { const key = `blob:${++urlId}`; urls.set(key, blob); return key; },
       revokeObjectURL() {}
     },
-    setTimeout: (fn, delay) => { if (Number(delay) < 1_000) fn(); return 0; },
+    setTimeout: (fn, delay) => { if (Number(delay) < 1_000) fn(); const timer = { fn, delay, cancelled: false }; timers.push(timer); return timer; },
+    clearTimeout: (timer) => { if (timer) timer.cancelled = true; },
+    matchMedia: () => ({ matches: systemLight, addEventListener() {} }),
     closed: false,
     close() { calls.close += 1; calls.sequence.push('close'); if (closeSucceeds) context.closed = true; },
     confirm(message) { calls.confirms.push(message); return confirmImpl(message); },
@@ -276,7 +293,8 @@ async function loadDashboard({
             if (deferOpenGmgn) await openGmgnGate.promise;
             return { ok: !failOpenGmgn && openGmgnAttempts > openGmgnFailures };
           }
-          return { ok: true, price: message.chain === 'eth' ? 2_000 : 100, observedAt: message.chain === 'eth' ? 111 : 222 };
+          if (nativeResponder) return nativeResponder(message);
+          return { ok: true, price: message.chain === 'eth' ? 2_000 : 100, observedAt: Date.now() };
         }
       },
       tabs: { create(details) { calls.tabs.push(details); } }
@@ -287,10 +305,11 @@ async function loadDashboard({
   let initialLoadError = null;
   try { await context.__dashboardTest.load(); } catch (error) { initialLoadError = error; }
   return {
-    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings,
+    api: context.__dashboardTest, calls, app, element, anchors, urls, refreshedSettings, canvasCalls, timers,
     resetAllWithBalanceGate, openGmgnGate, document, context, initialLoadError, fileInput,
     async emitStorage() { return storageSubscriber?.(); },
     setConfirm(callback) { confirmImpl = callback; },
+    setNullCanvasBlob(value) { nullCanvasBlob = value; },
     get persistedState() { return persistedState; },
     set persistedState(value) { persistedState = value; },
     get persistedSettings() { return persistedSettings; },
@@ -906,11 +925,185 @@ test('CSV download neutralizes spreadsheet formulas without changing numbers, es
 });
 
 test('Dashboard preserves native price observation timestamps from the background', async () => {
-  const dashboard = await loadDashboard();
+  const observedAt = Date.now() - 100;
+  const dashboard = await loadDashboard({ nativeResponder: () => ({ ok: true, price: 2_000, observedAt }) });
   await dashboard.api.refreshNativePrices();
   assert.equal(dashboard.api.runtime.nativePrices.eth, 2_000);
-  assert.equal(dashboard.api.runtime.nativePriceObservedAt.eth, 111);
+  assert.equal(dashboard.api.runtime.nativePriceObservedAt.eth, observedAt);
   assert.equal(dashboard.calls.nativeMessages.every((message) => message.type === 'TANGO_GET_NATIVE_PRICE'), true);
+});
+
+test('downloaded CSV shares all 29 model fields and retains safe quote provenance', async () => {
+  const state = stateFixture();
+  Object.assign(state.trades[0], { quoteSource: '=formula', paperFallback: true, provisional: true,
+    syntheticTokenPrice: true, syntheticNativePrice: false, totalSupply: 1e9, supplySource: 'UNKNOWN_FALLBACK', launchpad: 'unknown', launchMode: 'standard' });
+  const dashboard = await loadDashboard({ initialState: state });
+  await dashboard.api.action('export-csv');
+  const blob = dashboard.urls.get(dashboard.anchors.at(-1).href);
+  const text = await blob.text();
+  assert.deepEqual(text.split('\n')[0].split(','), [...DashboardModel.CSV_FIELDS]);
+  assert.ok(text.includes('"\'=formula"'));
+  assert.ok(text.includes('"1000000000"'));
+  assert.deepEqual([...new Uint8Array(await blob.arrayBuffer()).slice(0, 3)], [239, 187, 191]);
+});
+
+test('Dashboard applies successful native prices before another chain times out and retries on the next refresh', async () => {
+  let hung = true;
+  const now = Date.now();
+  const dashboard = await loadDashboard({ nativeResponder: (message) => message.chain === 'sol' && hung
+    ? new Promise(() => {}) : { ok: true, price: message.chain === 'eth' ? 456 : 100, observedAt: now } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(dashboard.api.runtime.nativePrices.eth, 456);
+  assert.match(dashboard.app.innerHTML, /nativePriceStale/);
+  assert.ok(dashboard.app.innerHTML.includes('Selected chain'));
+  const timeout = dashboard.timers.find(timer => timer.delay === 8_000 && !timer.cancelled);
+  timeout.fn();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(dashboard.api.runtime.nativePriceRequests.sol, undefined);
+  hung = false;
+  await dashboard.api.refreshNativePrices();
+  assert.equal(dashboard.api.runtime.nativePrices.sol, 100);
+  assert.equal(dashboard.api.freshNativePrices().eth, 456);
+  dashboard.api.runtime.nativePriceObservedAt.eth = now - 60_001;
+  assert.equal(dashboard.api.freshNativePrices().eth, 0);
+  const poll = dashboard.timers.find(timer => timer.delay === 30_000 && !timer.cancelled);
+  const before = dashboard.calls.nativeMessages.length;
+  poll.fn();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(dashboard.calls.nativeMessages.length > before);
+});
+
+test('Dashboard rejects expired and nonfinite provider prices without poisoning existing fresh observations', async () => {
+  const dashboard = await loadDashboard();
+  await dashboard.api.refreshNativePrices();
+  dashboard.context.chrome.runtime.sendMessage = async () => ({ ok: true, price: Infinity, observedAt: Date.now() });
+  await dashboard.api.refreshNativePrices();
+  assert.equal(dashboard.api.runtime.nativePrices.eth, 2000);
+  dashboard.context.chrome.runtime.sendMessage = async () => ({ ok: true, price: 999, observedAt: 1 });
+  await dashboard.api.refreshNativePrices();
+  assert.equal(dashboard.api.runtime.nativePrices.eth, 2000);
+});
+
+test('Dashboard renders partial USD data and remains navigable when the real model rejects one overflowed chain conversion', async () => {
+  const dashboard = await loadDashboard({ nativeResponder: message => ({ ok: true, price: message.chain === 'eth' ? 1e308 : 1, observedAt: Date.now() }) });
+  const realContext = { console };
+  for (const file of ['src/core/chains.js', 'src/core/supply.js', 'src/shared/constants.js',
+    'src/core/state.js', 'src/core/engine.js', 'src/content/chain-view.js', 'src/dashboard/model.js']) {
+    vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8'), realContext, { filename: file });
+  }
+  dashboard.context.Tango.Engine = realContext.Tango.Engine;
+  dashboard.context.Tango.DashboardModel = realContext.Tango.DashboardModel;
+  await dashboard.api.refreshNativePrices();
+  assert.doesNotThrow(() => dashboard.api.render());
+  const view = realContext.Tango.DashboardModel.build(dashboard.api.runtime.state, dashboard.api.runtime.settings, 'eth', dashboard.api.freshNativePrices());
+  assert.equal(view.accounts.find(card => card.chain.id === 'eth').usdSummary, null);
+  assert.equal(view.globalUsd.assetsUsd, 50);
+  assert.equal(view.globalUsd.pnlUsd, 0);
+  assert.deepEqual([...view.globalUsd.missingChains], ['eth']);
+  assert.equal(dashboard.api.runtime.loadError, '');
+  assert.match(dashboard.app.innerHTML, /partialUsdData/);
+  assert.doesNotMatch(dashboard.app.innerHTML, /storageLoadFailed|Infinity|NaN/);
+  dashboard.api.runtime.tab = 'settings';
+  assert.doesNotThrow(() => dashboard.api.render());
+  assert.ok(dashboard.element('#setting-theme'));
+});
+
+test('Dashboard rejects blank numeric fields and invalid presets without saving any settings', async () => {
+  const invalid = [['#setting-slippage', ''], ['#setting-network-fee', ''], ['#setting-slippage', '10000'],
+    ['#setting-platform-fee', '-1'], ['#setting-buy-presets', '1, Infinity'], ['#setting-buy-presets', '1,,2'], ['#setting-sell-presets', '101']];
+  for (const [field, value] of invalid) {
+    const dashboard = await loadDashboard();
+    dashboard.api.runtime.tab = 'settings'; dashboard.api.render(); fillSettingsForm(dashboard);
+    dashboard.element('#setting-common-balance').value = '10';
+    dashboard.element(field).value = value;
+    await dashboard.api.action('save-settings');
+    assert.equal(dashboard.calls.saves.length, 0, field + ':' + value);
+    assert.match(dashboard.app.innerHTML, /invalidSettingsField/);
+  }
+});
+
+test('Dashboard accepts the shared 9999bps boundary while preserving other edits', async () => {
+  const dashboard = await loadDashboard(); dashboard.api.runtime.tab = 'settings'; dashboard.api.render(); fillSettingsForm(dashboard);
+  dashboard.element('#setting-common-balance').value = '10'; dashboard.element('#setting-slippage').value = '9999';
+  dashboard.element('#setting-platform-fee').value = '9999';
+  const save = dashboard.api.action('save-settings'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(dashboard.calls.saves[0].patch.slippageBps, 9999);
+  assert.equal(dashboard.calls.saves[0].patch.platformFeeBps, 9999);
+  dashboard.calls.saves[0].gate.resolve(); await save;
+});
+
+test('Dashboard history renders every retained page and resets pagination when a filter changes', async () => {
+  const state = stateFixture();
+  state.trades = Array.from({ length: 601 }, (_, index) => ({ ...state.trades[0], id: `row-${index}`, symbol: `SYMBOL${index}` }));
+  const dashboard = await loadDashboard({ initialState: state, dashboardLocation: { hash: '#history', search: '' } });
+  assert.match(dashboard.app.innerHTML, /showingTrades:1-100\/601/);
+  assert.equal(dashboard.app.innerHTML.includes('SYMBOL600'), false);
+  dashboard.api.runtime.historyPage = 6; dashboard.api.render();
+  assert.match(dashboard.app.innerHTML, /SYMBOL600/);
+  assert.match(dashboard.app.innerHTML, /showingTrades:601-601\/601/);
+  const search = dashboard.element('#trade-search'); search.value = 'SYMBOL1'; search.emit('input');
+  assert.equal(dashboard.api.runtime.historyPage, 0);
+  assert.match(dashboard.element('#history-results').innerHTML, /showingTrades:1-100\/111/);
+});
+
+test('PNG export measures long text, constrains every draw, sanitizes filename, and reports null blobs', async () => {
+  const state = stateFixture(); state.trades[0].symbol = 'LONG/'.repeat(100);
+  const dashboard = await loadDashboard({ initialState: state });
+  await dashboard.api.shareTrade('eth');
+  const symbol = dashboard.canvasCalls.find(call => call.args[0] === state.trades[0].symbol);
+  assert.equal(symbol.args[3], 1060);
+  assert.ok(Number(symbol.font.match(/([\d.]+)px/)[1]) < 72);
+  assert.ok(dashboard.canvasCalls.every(call => call.args.length === 4));
+  assert.equal(dashboard.anchors.at(-1).download.includes('/'), false);
+  dashboard.setNullCanvasBlob(true);
+  const before = dashboard.anchors.length;
+  await dashboard.api.shareTrade('eth');
+  assert.equal(dashboard.anchors.length, before);
+  assert.match(dashboard.app.innerHTML, /imageExportFailed/);
+});
+
+test('Dashboard auto theme follows the system and exposes an explicit auto setting', async () => {
+  const settings = settingsFixture(); settings.theme = 'auto';
+  const dashboard = await loadDashboard({ initialSettings: settings, systemLight: true });
+  assert.equal(dashboard.document.documentElement.dataset.theme, 'light');
+  dashboard.api.runtime.tab = 'settings'; dashboard.api.render();
+  assert.match(dashboard.app.innerHTML, /value="auto" selected/);
+  assert.match(dashboard.app.innerHTML, /lightTheme/);
+});
+
+test('theme semantic surfaces resolve to readable light contrast and bilingual UI keys exist', () => {
+  const filename = path.resolve(__dirname, '../src/shared/i18n.js');
+  const context = { Tango: {}, navigator: { language: 'zh-CN' }, matchMedia: () => ({ matches: true }) };
+  vm.runInNewContext(fs.readFileSync(filename, 'utf8'), context);
+  const i18n = context.Tango.I18n;
+  assert.equal(i18n.resolveTheme('auto'), 'light'); assert.equal(i18n.resolveTheme('dark'), 'dark');
+  for (const key of ['importTooManyRecords', 'paperTradingDisabled', 'invalidSettingsField', 'nativePriceStale', 'theme', 'retainedHistoryStats', 'showingTrades', 'bestWorst', 'data']) {
+    assert.notEqual(i18n.t(key, 'en'), key); assert.notEqual(i18n.t(key, 'zh-CN'), key);
+  }
+  const luminance = hex => {
+    const channels = hex.match(/[\da-f]{2}/gi).map(value => parseInt(value, 16) / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  };
+  for (const file of ['../src/dashboard/dashboard.css', '../src/popup/popup.css']) {
+    const css = fs.readFileSync(path.resolve(__dirname, file), 'utf8');
+    const light = css.match(/:root\[data-theme="light"\]\s*\{([^}]+)\}/)[1];
+    const color = light.match(/--text:\s*(#[\da-f]{6})/i)[1];
+    const background = light.match(/--panel:\s*(#[\da-f]{3,6})/i)[1];
+    const expanded = background.length === 4 ? '#' + [...background.slice(1)].map(char => char + char).join('') : background;
+    assert.ok((luminance(expanded) + 0.05) / (luminance(color) + 0.05) >= 4.5);
+    assert.match(css, /background:\s*var\(--input\)/);
+    if (file.includes('dashboard')) {
+      assert.match(css, /\.card\s*\{[^}]*background:\s*var\(--card\)/);
+      assert.match(css, /\.calendar-day\s*\{[^}]*background:\s*var\(--day\)/);
+    }
+  }
+});
+
+test('Dashboard shows the specific over-count import error without changing state', async () => {
+  const dashboard = await loadDashboard({ importFailure: new Error('importTooManyRecords') });
+  dashboard.fileInput.files = [{ text: async () => '{}' }];
+  await dashboard.fileInput.emit('change');
+  assert.match(dashboard.app.innerHTML, /importTooManyRecords/);
 });
 
 test('Dashboard reports oversized import bytes and keeps authoritative data unchanged', async () => {

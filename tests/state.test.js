@@ -777,7 +777,7 @@ test('strict imports reject unsafe provenance while non-strict normalization str
   assert.equal(normalized.trades[0].launchpad, undefined);
 });
 
-test('calibrations normalize addresses, reject malformed events, and remain bounded', () => {
+test('calibrations normalize addresses and strict imports reject overflow without truncation', () => {
   const state = State.createInitialState({ now: 1 });
   const valid = {
     id: 'c1', chain: 'eth', tokenAddress: `0x${EVM_ADDRESS.slice(2).toUpperCase()}`, reason: 'PRICE',
@@ -785,8 +785,9 @@ test('calibrations normalize addresses, reject malformed events, and remain boun
     fromSupply: 0, toSupply: 0, quantityBefore: 1, quantityAfter: 1, costBasisNative: 1, createdAt: 2
   };
   state.calibrations = Array.from({ length: Tango.MAX_TRADES + 1 }, (_, index) => ({ ...valid, id: `c${index}` }));
-  const normalized = State.normalizeState(state, State.normalizeSettings({}), { strict: true });
-  assert.equal(normalized.calibrations.length, Tango.MAX_TRADES);
+  assert.throws(() => State.normalizeState(state, State.normalizeSettings({}), { strict: true }), /importTooManyRecords/);
+  const normalized = State.normalizeState(state, State.normalizeSettings({}));
+  assert.equal(normalized.calibrations.length, Tango.MAX_TRADES + 1);
   assert.equal(normalized.calibrations[0].tokenAddress, EVM_ADDRESS);
   state.calibrations = [{ ...valid, reason: 'FORGED' }];
   assert.throws(
@@ -1101,6 +1102,21 @@ test('strict normalization rejects an invalid imported position', () => {
   const state = State.createInitialState({ now: 1000 });
   state.positions['eth:invalid'] = { chain: 'eth', tokenAddress: 'invalid', quantity: 1 };
   assert.throws(() => State.normalizeState(state, State.normalizeSettings({}), { strict: true }), /invalidPosition/);
+});
+
+test('strict state rejects a position opened after its latest update', () => {
+  const initial = State.createInitialState({ now: 1 });
+  const bought = Engine.executeBuy(initial, { token: { chain: 'eth', address: '0x1111111111111111111111111111111111111111' },
+    quote: { priceUsd: 2, nativePriceUsd: 2000, observedAt: 1000, nativePriceObservedAt: 1000 }, amountNative: 1 }, State.normalizeSettings({}), 1000);
+  bought.position.openedAt = Number.MAX_SAFE_INTEGER;
+  assert.throws(() => State.normalizeState(bought.state, State.normalizeSettings({}), { strict: true }), /invalidPosition/);
+});
+
+test('strict settings use the executable upper boundary for slippage and platform fees', () => {
+  for (const field of ['slippageBps', 'platformFeeBps']) {
+    assert.doesNotThrow(() => State.normalizeSettings({ [field]: 9999 }, { strict: true }));
+    assert.throws(() => State.normalizeSettings({ [field]: 10000 }, { strict: true }), /invalidSettings/);
+  }
 });
 
 test('strict import rejects a Base58 Solana identity that does not decode to 32 bytes', () => {

@@ -301,7 +301,7 @@ function loadContent({
   chartFrameVariant = 'financial-title',
   markChartFrameReady,
   requestAnimationFrame = () => 0, timer = setTimeout, logger = console,
-  MutationObserver = class { observe() {} }
+  MutationObserver = class { observe() {} }, matchMedia
 } = {}) {
   global.Tango.Supply = Supply;
   assert.notEqual(instrumentedSource, contentSource, 'content test harness must replace startup with runtime exports');
@@ -338,7 +338,12 @@ function loadContent({
     querySelectorAll(selector) { return shadowLists.get(selector) || []; },
     querySelector(selector) { return shadowSingles.get(selector) || null; }
   };
-  const host = { id: '', attachShadow: () => shadow };
+  const hostAttributes = new Map();
+  const host = {
+    id: '', attachShadow: () => shadow,
+    getAttribute: (name) => hostAttributes.get(name) ?? null,
+    setAttribute: (name, value) => hostAttributes.set(name, String(value))
+  };
   const documentSingles = new Map();
   const genericElement = () => {
     const classes = new Set();
@@ -415,6 +420,7 @@ function loadContent({
     addEventListener(type, listener) { windowListeners.set(type, listener); },
     removeEventListener(type, listener) { if (windowListeners.get(type) === listener) windowListeners.delete(type); },
     MutationObserver,
+    matchMedia,
     chrome: {
       runtime: {
         getURL: (value) => `chrome-extension://test/${value}`,
@@ -557,7 +563,7 @@ function loadContent({
   api.runtime.settings = defaultSettings();
   api.runtime.activeChainId = Chains.fromUrl(href)?.id || null;
   return {
-    api, calls, clock, context, createDomNode: genericElement, documentSingles, messages, pageMessages,
+    api, calls, clock, context, host, createDomNode: genericElement, documentSingles, messages, pageMessages,
     shadowLists, shadowSingles, shell, shellLists, shellListeners, windowListeners,
     dispatchStorageChange(changes, areaName = 'local') {
       storageChangeListeners.forEach((listener) => listener(changes, areaName));
@@ -3606,6 +3612,111 @@ test('local master OFF prevents an already-open paper buy confirmation from comm
 
   assert.equal(loaded.calls.buy, 0);
   assert.equal(loaded.api.runtime.tradePending, false);
+});
+
+test('pending settings and master OFF block every sell and close confirmation path', async (t) => {
+  for (const enabled of [false, true]) {
+    for (const kind of ['sell', 'drawer', 'breakeven', 'close']) {
+      await t.test(`${kind}: settings update enabled=${enabled}`, async () => {
+        const loaded = loadContent();
+        const position = {
+          chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 2,
+          costBasisNative: 1, lastPriceUsd: 2, lastMarketCapUsd: 2_000, lastNativePriceUsd: 3_000,
+          quoteObservedAt: loaded.clock.now
+        };
+        loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = position;
+        loaded.api.runtime.current = quoteContext();
+        loaded.api.rememberNativePrice('eth', 3_000, loaded.clock.now);
+        loaded.context.Tango.Engine.breakevenSellPercent = () => 50;
+        const invoke = kind === 'sell' ? () => loaded.api.sell(50)
+          : kind === 'drawer' ? () => loaded.api.sellPosition(position, 50)
+          : kind === 'breakeven' ? () => loaded.api.sellBreakeven()
+          : () => loaded.api.requestCloseAll();
+        await invoke();
+        const oldModal = loaded.api.runtime.modal;
+        assert.equal(oldModal?.type, 'confirm');
+        const confirm = eventElement({ dataset: { action: 'confirm-modal' } });
+        loaded.shellLists.set('[data-action]', [confirm]);
+        loaded.api.bindEvents();
+        loaded.dispatchStorageChange({
+          [global.Tango.SETTINGS_KEY]: { newValue: { ...defaultSettings(), enabled } }
+        });
+        assert.equal(loaded.api.runtime.quickBuySettingsPending, true);
+        await oldModal.action();
+        await confirm.emit('click', { isTrusted: true, stopPropagation() {} });
+        await invoke();
+        assert.equal(loaded.calls.sell, 0);
+        assert.equal(loaded.calls.closeAll, 0);
+        assert.equal(loaded.api.runtime.tradePending, false);
+        assert.equal(loaded.api.runtime.modal, oldModal);
+      });
+    }
+  }
+});
+
+test('malformed page-message batches are ignored and subsequent valid observations still work', () => {
+  const loaded = loadContent();
+  const before = loaded.api.runtime.gmgnQuotes.size;
+  const badScalar = structuredClone({ toString: null, valueOf: null });
+  for (const prices of [{}, 'bad', null, [null, [], 123, 'bad']]) {
+    assert.doesNotThrow(() => loaded.api.dispatchPageMessage({ source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES', prices }));
+  }
+  for (const quotes of [{}, 'bad', null, [null, [], 123, 'bad']]) {
+    assert.doesNotThrow(() => loaded.api.dispatchPageMessage({ source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes }));
+  }
+  assert.equal(loaded.api.runtime.gmgnQuotes.size, before);
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'NATIVE_PRICES',
+    prices: [null, { symbol: 'ETH', priceUsd: badScalar, observedAt: loaded.clock.now },
+      { symbol: 'ETH', priceUsd: 2_500, observedAt: loaded.clock.now }]
+  });
+  assert.equal(loaded.api.freshNativePrice('eth'), 2_500);
+  loaded.api.dispatchPageMessage({
+    source: 'TANGO_GMGN_PAGE', type: 'TOKEN_QUOTES', quotes: [null,
+      { ...detailQuote(8_000, loaded.clock.now), priceUsd: badScalar },
+      detailQuote(8_000, loaded.clock.now)]
+  });
+  assert.equal(loaded.api.runtime.gmgnQuotes.size, before + 1);
+  assert.equal(loaded.calls.updatePositionQuotes.length, 0);
+});
+
+test('content theme follows explicit light/dark settings and auto system changes', () => {
+  let systemLight = true;
+  let listener;
+  const loaded = loadContent({ matchMedia: () => ({
+    get matches() { return systemLight; }, addEventListener(_type, callback) { listener = callback; }
+  }) });
+  loaded.context.Tango.I18n.resolveTheme = (setting) => setting === 'auto'
+    ? (systemLight ? 'light' : 'dark') : setting;
+  const headerAttributes = new Map();
+  loaded.documentSingles.set('#tango-header-account-summary', {
+    getAttribute: (name) => headerAttributes.get(name),
+    setAttribute: (name, value) => headerAttributes.set(name, value), remove() {}
+  });
+  loaded.api.runtime.settings.theme = 'light';
+  loaded.api.render();
+  assert.equal(loaded.host.getAttribute('data-theme'), 'light');
+  assert.equal(headerAttributes.get('data-theme'), 'light');
+  loaded.api.runtime.settings.theme = 'dark';
+  loaded.api.render();
+  assert.equal(loaded.host.getAttribute('data-theme'), 'dark');
+  loaded.api.runtime.settings.theme = 'auto';
+  loaded.api.render();
+  assert.equal(loaded.host.getAttribute('data-theme'), 'light');
+  systemLight = false; listener();
+  assert.equal(loaded.host.getAttribute('data-theme'), 'dark');
+  assert.equal(headerAttributes.get('data-theme'), 'dark');
+});
+
+test('USD arithmetic overflow degrades the overlay without hiding local account rendering', () => {
+  const loaded = loadContent();
+  loaded.api.runtime.settings.displayCurrency = 'USD';
+  loaded.api.runtime.state.accounts.eth.initialBalanceNative = 1e15;
+  loaded.api.runtime.state.accounts.eth.cashBalanceNative = 1e15;
+  loaded.api.rememberNativePrice('eth', 1e308, loaded.clock.now);
+  assert.doesNotThrow(() => loaded.api.render());
+  assert.match(loaded.shell.innerHTML, /tango-bar/);
+  assert.doesNotMatch(loaded.shell.innerHTML, /Infinity|NaN/);
 });
 
 test('startup immediately installs a clickable resolving-identity paper shell for a staged first trench card', async () => {

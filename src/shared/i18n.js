@@ -3,6 +3,20 @@
 
   const messages = {
     en: {
+      importTooManyRecords: 'Backup exceeds the 10,000 trade or calibration record limit. Import was rejected; nothing was changed.',
+      paperTradingDisabled: 'Tango is off. Enable it before paper trading.',
+      invalidSettingsField: '{field}: {reason}', invalidPresetList: 'Enter 1–12 comma-separated finite values greater than zero{limit}.',
+      invalidNumericValue: 'Enter a finite number from {min} to {max}; the field cannot be empty.',
+      nativePriceStale: 'Native/USD prices are missing or expired; USD totals are incomplete.',
+      nativePriceRefresh: 'Refresh USD prices', nativePricesUpdated: 'Prices as of {time}',
+      retainedHistoryStats: 'Trade count, win rate, and best/worst use retained SELL records. Monthly PnL includes all daily totals.',
+      retainedOverviewStats: 'Trade count, win rate, and profit factor use retained history.',
+      historyCount: '{count} retained trades match these filters.', showingTrades: 'Showing {from}–{to} of {count}',
+      previousPage: 'Previous', nextPage: 'Next', exportChainCsv: 'Export all chain trades (CSV)',
+      theme: 'Theme', darkTheme: 'Dark', lightTheme: 'Light', nativeCurrency: 'Native', chain: 'Chain',
+      bestWorst: 'Best / Worst', allSides: 'All sides', allResults: 'All results', win: 'Win', loss: 'Loss', data: 'Data',
+      pnlBar: 'PnL Bar', top: 'Top', bottom: 'Bottom', buyPresets: 'Buy presets', sellPresets: 'Sell presets',
+      imageExportFailed: 'Could not create the result image. Please try again.', imageCopyFallback: 'Image copying failed; the PNG was downloaded.',
       provisionalQuote: 'Temporary paper valuation; it will be neutrally calibrated when verified market data arrives.',
       unsupportedChain: 'This GMGN chain is not supported', invalidAddress: 'The token address is invalid',
       nativePriceUnavailable: 'The native asset price is unavailable', partialUsdData: 'Some USD values are unavailable',
@@ -67,10 +81,24 @@
       currentChainTrades: 'Current-chain trades',
       lastKnownPrice: 'The displayed value uses the latest exact-token paper quote available.',
       pnlCalendar: 'PnL Calendar', positionTotal: 'Position Total', closeAll: 'Close All',
-      closeAllConfirm: 'Close all paper positions?', closeAllHint: 'Paper quotes are refreshed first; exact-token last-known prices are used if needed.',
+      closeAllConfirm: 'Close all paper positions?', closeAllHint: 'Each position uses its latest exact-token local quote or a clearly marked temporary paper valuation.',
       closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
+      importTooManyRecords: '备份的成交或校准记录超过 10,000 条上限，已拒绝导入，现有数据未更改。',
+      paperTradingDisabled: 'Tango 已关闭，请先启用后再进行模拟交易。',
+      invalidSettingsField: '{field}：{reason}', invalidPresetList: '请输入 1–12 个逗号分隔、大于零的有限数值{limit}。',
+      invalidNumericValue: '请输入 {min} 到 {max} 之间的有限数值，不能留空。',
+      nativePriceStale: '原生币美元报价缺失或已过期，美元汇总不完整。',
+      nativePriceRefresh: '刷新美元报价', nativePricesUpdated: '报价截至 {time}',
+      retainedHistoryStats: '交易次数、胜率及最佳/最差按保留的卖出记录统计；月盈亏包含全部日汇总。',
+      retainedOverviewStats: '交易次数、胜率和盈亏比按保留的历史记录统计。',
+      historyCount: '当前筛选匹配 {count} 条保留交易。', showingTrades: '显示第 {from}–{to} 条，共 {count} 条',
+      previousPage: '上一页', nextPage: '下一页', exportChainCsv: '导出本链全部交易（CSV）',
+      theme: '主题', darkTheme: '深色', lightTheme: '浅色', nativeCurrency: '原生币', chain: '链',
+      bestWorst: '最佳 / 最差', allSides: '全部方向', allResults: '全部盈亏', win: '盈利', loss: '亏损', data: '数据',
+      pnlBar: '盈亏栏', top: '顶部', bottom: '底部', buyPresets: '买入预设', sellPresets: '卖出预设',
+      imageExportFailed: '无法生成结果图片，请重试。', imageCopyFallback: '图片复制失败，已下载 PNG。',
       provisionalQuote: '正在使用临时模拟估值；验证行情到达后会进行中性校准。',
       storageLoadFailed: '无法加载本地模拟交易数据',
       storageLoadFailedHint: '请检查扩展存储后重试。现有数据未被更改。',
@@ -135,7 +163,7 @@
       currentChainTrades: '当前链交易记录',
       lastKnownPrice: '当前显示值使用该链该代币最近可用的模拟行情。',
       pnlCalendar: '盈亏日历', positionTotal: '持仓总额', closeAll: '一键清仓',
-      closeAllConfirm: '确认清仓全部虚拟持仓？', closeAllHint: '会先刷新模拟行情，必要时使用同链同代币的最近价格。',
+      closeAllConfirm: '确认清仓全部虚拟持仓？', closeAllHint: '逐个使用同链同代币的最近本地报价，缺失时使用明确标注的临时模拟估值。',
       closeAllSuccess: '全部虚拟持仓已清仓', calendarClearedOnReset: '重置本金会同时清空盈亏日历'
     }
   };
@@ -149,6 +177,10 @@
   Tango.I18n = {
     messages,
     resolveLanguage,
+    resolveTheme(setting) {
+      if (setting === 'light' || setting === 'dark') return setting;
+      return global.matchMedia?.('(prefers-color-scheme: light)')?.matches ? 'light' : 'dark';
+    },
     t(key, setting, vars) {
       const language = resolveLanguage(setting);
       let text = messages[language][key] || messages.en[key] || key;

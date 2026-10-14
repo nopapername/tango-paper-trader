@@ -65,10 +65,24 @@ function jsonResponse(body, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => body };
 }
 
+function controlledTimers() {
+  let next = 0;
+  const pending = new Map();
+  return {
+    timer(callback, delay) { const id = ++next; pending.set(id, { callback, delay }); return id; },
+    clearTimer(id) { pending.delete(id); },
+    fire() {
+      const jobs = [...pending.values()]; pending.clear();
+      for (const job of jobs) { assert.equal(job.delay, 6_000); job.callback(); }
+    },
+    get size() { return pending.size; }
+  };
+}
+
 function loadBackground(
   fetchImpl,
   clock = { now: 1_000_000 },
-  { storageSet } = {}
+  { storageSet, timer = setTimeout, clearTimer = clearTimeout } = {}
 ) {
   const listeners = [];
   const installListeners = [];
@@ -83,6 +97,7 @@ function loadBackground(
       return fetchImpl(...args);
     },
     Date: FakeDate,
+    setTimeout: timer, clearTimeout: clearTimer, AbortController,
     URL,
     encodeURIComponent,
     console,
@@ -527,4 +542,73 @@ test('expired token cache entries are removed while fresh entries remain', async
   await loaded.context.getTokenQuote('sol', ADDRESS);
   assert.equal(loaded.api._tokenQuoteCache.has('expired'), false);
   assert.equal(loaded.api._tokenQuoteCache.has('fresh'), true);
+});
+
+test('native fetch timeout aborts coalesced requests and allows a fresh retry', async () => {
+  const timers = controlledTimers();
+  let attempts = 0;
+  let firstSignal;
+  const loaded = loadBackground(async (_url, options) => {
+    attempts += 1;
+    if (attempts === 1) { firstSignal = options.signal; return new Promise(() => {}); }
+    return jsonResponse({ ethereum: { usd: 2_500 } });
+  }, { now: 1_000_000 }, timers);
+  const first = assert.rejects(loaded.context.getNativePrice('eth'), /unavailable/);
+  const shared = assert.rejects(loaded.context.getNativePrice('base'), /unavailable/);
+  assert.equal(attempts, 1);
+  assert.equal(timers.size, 1);
+  timers.fire();
+  await Promise.all([first, shared]);
+  assert.equal(firstSignal.aborted, true);
+  assert.equal(timers.size, 0);
+  assert.equal(await loaded.context.getNativePrice('base'), 2_500);
+  assert.equal(attempts, 2);
+  assert.equal(timers.size, 0);
+});
+
+test('stalled response JSON times out without caching a late quote or locking retry', async () => {
+  const timers = controlledTimers();
+  const body = deferred();
+  let attempts = 0;
+  let firstSignal;
+  const loaded = loadBackground(async (_url, options) => {
+    attempts += 1;
+    if (attempts === 1) { firstSignal = options.signal; return { ok: true, json: () => body.promise }; }
+    return jsonResponse([{ baseToken: { address: ADDRESS }, priceUsd: '3' }]);
+  }, { now: 1_000_000 }, timers);
+  const failed = assert.rejects(loaded.context.getTokenQuote('sol', ADDRESS), /timed out/);
+  await new Promise((resolve) => setImmediate(resolve));
+  timers.fire();
+  await failed;
+  assert.equal(firstSignal.aborted, true);
+  assert.equal(loaded.api._tokenQuoteCache.size, 0);
+  assert.equal((await loaded.context.getTokenQuote('sol', ADDRESS)).priceUsd, 3);
+  body.resolve([{ baseToken: { address: ADDRESS }, priceUsd: '999' }]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await loaded.context.getTokenQuote('sol', ADDRESS)).priceUsd, 3);
+  assert.equal(attempts, 2);
+  assert.equal(timers.size, 0);
+});
+
+test('SOL fallback has a bounded timeout and releases both pending provider requests', async () => {
+  const timers = controlledTimers();
+  const signals = [];
+  let recover = false;
+  const loaded = loadBackground(async (url, options) => {
+    signals.push(options.signal);
+    if (!recover) return new Promise(() => {});
+    return jsonResponse({ solana: { usd: 150 } });
+  }, { now: 1_000_000 }, timers);
+  const failed = assert.rejects(loaded.context.getNativePrice('sol'), /timed out/);
+  timers.fire();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(signals.length, 2);
+  assert.equal(timers.size, 1);
+  timers.fire();
+  await failed;
+  assert.ok(signals.every((signal) => signal.aborted));
+  assert.equal(timers.size, 0);
+  recover = true;
+  assert.equal(await loaded.context.getNativePrice('sol'), 150);
+  assert.equal(signals.length, 3);
 });

@@ -1,0 +1,30 @@
+{
+  "case": "calendar_summary_disagrees_with_preserved_daily_aggregate_after_compaction",
+  "before": {
+    "trades": 2,
+    "monthTotal": 1,
+    "days": {
+      "2026-07-18": {
+        "native": 1,
+        "usdAtExecution": 2000
+      }
+    }
+  },
+  "after": {
+    "trades": 0,
+    "monthTotal": 0,
+    "daySum": 1,
+    "days": {
+      "2026-07-18": {
+        "native": 1,
+        "usdAtExecution": 2000
+      }
+    },
+    "accountRealized": 1,
+    "winRate": 0,
+    "removedTradeIds": [
+      "1784347200000-e7e07a4e-d922-499d-8d08-13c132093be3",
+      "1784347201000-0ef79e6f-4d88-49bd-99b8-0ce5e89d0654"
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+UI-1 CONFIRMED: {"visibleChain":"robinhood","persistedChain":"eth","gmgnOpenMessages":0}
+UI-2 CONFIRMED: CSV drops provenance columns: quoteSource, paperFallback, provisional, syntheticTokenPrice, syntheticNativePrice, totalSupply, supplySource, launchpad, launchMode
+UI-3 CONFIRMED: {"repeatedLoadsFetchAgain":false,"acceptedEthPrice":123,"acceptedObservedAt":1}
+UI-4 CONFIRMED: {"oneHungChain":"sol","ethResponse":456,"displayedEthPrice":123,"refreshSettled":false}
+UI-5 CONFIRMED: blank numeric settings become zero: {"slippageBps":0,"networkFeeNative":0}
+UI-6 CONFIRMED: PNG symbol is drawn without maxWidth or text measurement: {"symbolLength":200,"fillTextArguments":3}
