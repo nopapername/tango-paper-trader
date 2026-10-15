@@ -19,9 +19,21 @@
 
   const usesExtensionCoordinator = Boolean(global.chrome?.storage?.local && global.chrome?.runtime?.sendMessage);
   const coordinator = usesExtensionCoordinator ? null : Tango.StateCoordinator.create({ readRaw, writeRaw });
+  let extensionInvalidated = false;
 
   async function sendCoordinatorMessage(message) {
-    const response = await global.chrome.runtime.sendMessage(message);
+    if (extensionInvalidated) throw new Error('extensionReloadRequired');
+    let response;
+    try {
+      response = await global.chrome.runtime.sendMessage(message);
+    } catch (error) {
+      if (/extension context invalidated/i.test(String(error?.message || ''))) {
+        extensionInvalidated = true;
+        throw new Error('extensionReloadRequired');
+      }
+      // Never retry a mutation: its response may have been lost after commit.
+      throw error;
+    }
     if (!response?.ok) {
       const error = new Error(response?.error || 'storageFailed');
       const details = response?.errorDetails;

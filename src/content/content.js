@@ -2046,16 +2046,6 @@
   function primeTradeAudio() {
     if (!runtime.settings?.soundEnabled) return;
     try {
-      if (!runtime.tradeSounds && global.Audio) {
-        runtime.tradeSounds = {
-          BUY: new global.Audio('https://gmgn.ai/static/sounds/Handgun.mp3'),
-          SELL: new global.Audio('https://gmgn.ai/static/sounds/Kaching.mp3')
-        };
-        Object.values(runtime.tradeSounds).forEach((audio) => {
-          audio.preload = 'auto';
-          audio.volume = 0.55;
-        });
-      }
       const AudioContext = global.AudioContext || global.webkitAudioContext;
       if (!AudioContext) return null;
       if (!runtime.audioContext || runtime.audioContext.state === 'closed') runtime.audioContext = new AudioContext();
@@ -2065,15 +2055,45 @@
   }
 
   function playTradeSound(side) {
+    if (!runtime.settings?.soundEnabled) return;
     const context = primeTradeAudio();
-    const sound = runtime.tradeSounds?.[side];
-    if (sound) {
+    if (!runtime.tradeSounds && global.Audio) {
       try {
+        runtime.tradeSounds = {
+          BUY: new global.Audio('https://gmgn.ai/static/sounds/Handgun.mp3'),
+          SELL: new global.Audio('https://gmgn.ai/static/sounds/Kaching.mp3')
+        };
+        Object.values(runtime.tradeSounds).forEach((audio) => { audio.volume = 0.55; });
+      } catch { return; }
+    }
+    const template = runtime.tradeSounds?.[side];
+    const sound = template?.cloneNode?.(true) || template;
+    if (sound) {
+      let settled = false;
+      let watchdog;
+      const fallback = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        sound.pause?.();
+        if (runtime.settings?.soundEnabled) playFallbackTradeSound(side, context);
+      };
+      try {
+        sound.volume = 0.55;
         sound.currentTime = 0;
+        // play() may remain pending on a stalled remote resource, without rejecting.
+        watchdog = setTimeout(fallback, 800);
         const playback = sound.play();
-        if (playback?.catch) playback.catch(() => playFallbackTradeSound(side, context));
+        const started = () => {
+          if (settled) { sound.pause?.(); return; }
+          settled = true;
+          clearTimeout(watchdog);
+          if (!runtime.settings?.soundEnabled) sound.pause?.();
+        };
+        if (playback?.then) playback.then(started, fallback);
+        else started();
         return;
-      } catch { /* Fall through to a short locally generated cue. */ }
+      } catch { fallback(); return; }
     }
     playFallbackTradeSound(side, context);
   }
@@ -2703,6 +2723,7 @@
       if (action === 'cancel-modal') { runtime.modal = null; render(); }
       if (action === 'confirm-modal') {
         if (paperExecutionDisabled()) return;
+        primeTradeAudio();
         const sessionSuppressInput = shadow.querySelector('#tango-skip-session-confirm');
         const suppressForSession = Boolean(
           runtime.modal?.allowSessionSuppress

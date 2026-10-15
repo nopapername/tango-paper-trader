@@ -3,6 +3,7 @@
 
   const messages = {
     en: {
+      extensionReloadRequired: 'Tango was reloaded or updated. Refresh this GMGN page before paper trading again.',
       importTooManyRecords: 'Backup exceeds the 10,000 trade or calibration record limit. Import was rejected; nothing was changed.',
       paperTradingDisabled: 'Tango is off. Enable it before paper trading.',
       invalidSettingsField: '{field}: {reason}', invalidPresetList: 'Enter 1–12 comma-separated finite values greater than zero{limit}.',
@@ -85,6 +86,7 @@
       closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
+      extensionReloadRequired: 'Tango 已重新加载或更新，请刷新当前 GMGN 页面后再进行模拟交易。',
       importTooManyRecords: '备份的成交或校准记录超过 10,000 条上限，已拒绝导入，现有数据未更改。',
       paperTradingDisabled: 'Tango 已关闭，请先启用后再进行模拟交易。',
       invalidSettingsField: '{field}：{reason}', invalidPresetList: '请输入 1–12 个逗号分隔、大于零的有限数值{limit}。',
