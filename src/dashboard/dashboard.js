@@ -14,6 +14,8 @@
     startupChainApplied: false,
     selectedChainRevision: 0,
     settingsWrite: Promise.resolve(),
+    settingsFormBaseline: null,
+    settingsFormRevision: 0,
     selectionPending: null,
     nativePrices: {},
     nativePriceObservedAt: {},
@@ -150,11 +152,12 @@
       <button class="button" data-action="refresh-native-prices">${t('nativePriceRefresh')}</button></div>`;
   }
 
-  function queueSettingsMutation(patch, selectionRevision = 0) {
+  function queueSettingsMutation(patch, selectionRevision = 0, submittedForm = null) {
     const write = runtime.settingsWrite.then(async () => {
       if (selectionRevision && selectionRevision !== runtime.selectedChainRevision) return runtime.settings;
       const saved = await Tango.Store.patchSettings(patch);
       runtime.settings = saved;
+      acknowledgeSettingsSubmission(submittedForm);
       const currentSelection = !selectionRevision || selectionRevision === runtime.selectedChainRevision;
       if (currentSelection && saved.selectedChain === runtime.selectedChain) {
         render();
@@ -197,7 +200,61 @@
     return view.chain.id === chainId ? view : null;
   }
 
+  const SETTINGS_FORM_FIELDS = [
+    'language', 'currency', 'theme', 'buy-presets', 'network-fee', 'common-balance',
+    'sell-presets', 'slippage', 'platform-fee', 'bar-position', 'fast', 'confirm', 'sound', 'list-buy'
+  ];
+  const SETTINGS_CHECKBOX_FIELDS = new Set(['fast', 'confirm', 'sound', 'list-buy']);
+
+  function settingsFormSnapshot() {
+    if (runtime.tab !== 'settings') return null;
+    const fields = {};
+    SETTINGS_FORM_FIELDS.forEach((field) => {
+      const input = app.querySelector(`#setting-${field}`);
+      if (input) fields[field] = SETTINGS_CHECKBOX_FIELDS.has(field)
+        ? { checked: Boolean(input.checked) } : { value: String(input.value ?? '') };
+    });
+    return Object.keys(fields).length ? { chain: runtime.selectedChain, selectionRevision: runtime.selectedChainRevision, formRevision: runtime.settingsFormRevision, fields } : null;
+  }
+
+  function acknowledgeSettingsSubmission(submittedForm) {
+    const baseline = runtime.settingsFormBaseline;
+    if (!submittedForm || !baseline || baseline.chain !== submittedForm.chain
+      || runtime.selectedChain !== submittedForm.chain
+      || runtime.selectedChainRevision !== submittedForm.selectionRevision
+      || runtime.settingsFormRevision !== submittedForm.formRevision) return;
+    baseline.fields = { ...baseline.fields, ...submittedForm.fields };
+  }
+
+  function settingsFormDraft() {
+    const baseline = runtime.settingsFormBaseline;
+    const current = settingsFormSnapshot();
+    if (!baseline || !current || baseline.chain !== current.chain) return null;
+    const fields = Object.fromEntries(Object.entries(current.fields).filter(([field, value]) =>
+      JSON.stringify(value) !== JSON.stringify(baseline.fields[field])));
+    const focused = document.activeElement;
+    return { chain: current.chain, fields, focusId: focused?.id,
+      selectionStart: focused?.selectionStart, selectionEnd: focused?.selectionEnd };
+  }
+
+  function restoreSettingsDraft(draft) {
+    if (!draft || runtime.tab !== 'settings' || runtime.selectedChain !== draft.chain) return;
+    Object.entries(draft.fields).forEach(([field, value]) => {
+      const input = app.querySelector(`#setting-${field}`);
+      if (input) Object.assign(input, value);
+    });
+    if (!String(draft.focusId || '').startsWith('setting-')) return;
+    const focused = app.querySelector(`#${draft.focusId}`);
+    focused?.focus();
+    if (focused && Number.isInteger(draft.selectionStart) && Number.isInteger(draft.selectionEnd)) {
+      focused.setSelectionRange?.(draft.selectionStart, draft.selectionEnd);
+    }
+  }
+
   function render() {
+    if (runtime.tab === 'settings' && (!runtime.settingsFormBaseline
+      || runtime.settingsFormBaseline.chain !== runtime.selectedChain)) runtime.settingsFormRevision += 1;
+    const settingsDraft = settingsFormDraft();
     document.documentElement.lang = lang();
     document.documentElement.dataset.theme = Tango.I18n.resolveTheme?.(runtime.settings?.theme)
       || (runtime.settings?.theme === 'light' ? 'light' : 'dark');
@@ -222,6 +279,8 @@
       ${nativePriceStatus()}${renderTab(view)}
     </main></div>${runtime.toast ? `<div class="toast">${esc(runtime.toast)}</div>` : ''}`;
     bind();
+    runtime.settingsFormBaseline = settingsFormSnapshot();
+    restoreSettingsDraft(settingsDraft);
   }
 
   function renderStorageError() {
@@ -553,6 +612,7 @@
       const commonCapitalChanged = Tango.Chains.all().some((chain) => (
         Number(runtime.settings.chains?.[chain.id]?.initialBalanceNative) !== form.commonBalanceNative
       ));
+      const submittedForm = settingsFormSnapshot();
       const settingsPatch = {
         language: form.language,
         displayCurrency: form.displayCurrency,
@@ -579,8 +639,10 @@
           const reset = await Tango.Store.resetAllWithBalance(form.commonBalanceNative, form.language, settingsPatch);
           runtime.state = reset.state;
           runtime.settings = reset.settings;
+          acknowledgeSettingsSubmission(submittedForm);
           showToast(t('confirm'));
         } catch {
+          if (runtime.selectedChain === chainId) runtime.settingsFormBaseline = null;
           try { await load(); } catch { /* keep the last rendered snapshot */ }
           showToast(t('settingsSaveFailed'));
           return;
@@ -589,8 +651,9 @@
       }
       let saved;
       try {
-        saved = await queueSettingsMutation(settingsPatch);
+        saved = await queueSettingsMutation(settingsPatch, 0, submittedForm);
       } catch {
+        if (runtime.selectedChain === chainId) runtime.settingsFormBaseline = null;
         showToast(t('settingsSaveFailed'));
         return;
       }
@@ -703,6 +766,7 @@
     try {
       const payload = JSON.parse(await fileInput.files[0].text());
       const data = await Tango.Store.importData(payload);
+      runtime.settingsFormBaseline = null;
       runtime.state = data.state; runtime.settings = data.settings;
       runtime.selectedChain = Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
       showToast(t('dataImported'));
