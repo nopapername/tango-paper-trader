@@ -1,8 +1,0 @@
-dist/
-*.zip
-.DS_Store
-Thumbs.db
-coverage/
-.worktrees/
-.superpowers/
-.backups/
