@@ -36,25 +36,24 @@ Tango Paper Trader is a bilingual, local-first Chrome extension for paper tradin
 - English and Simplified Chinese
 - No wallet, activation code, account or real transactions
 
-## Development
+## Installation
 
-```powershell
-npm.cmd test
-npm.cmd run check
-npm.cmd run build
-```
+This repository contains the ready-to-load extension package. No Node.js installation or build step is required.
 
-Load `dist/tango-paper-trader` from `chrome://extensions` using **Load unpacked**.
+1. Download and extract the repository ZIP, or clone this repository.
+2. Open the browser's extensions manager and enable **Developer mode**.
+3. Choose **Load unpacked** and select the `tango-paper-trader` folder containing `manifest.json`.
+4. Open GMGN, or refresh an existing GMGN tab.
 
-Use Node.js 22 or newer. The quick-buy layout and mutation regression tests require local Chrome; set `CHROME_PATH` if it is not installed in the standard location. These tests open isolated local fixtures with external network resolution disabled.
+The previous `dist` wrapper has been removed. The local installation folder is now `D:\web3\code_project\tango-paper-trade\tango-paper-trader`.
 
-Build validation checks required local assets before replacing `dist/tango-paper-trader` and preserves other files in `dist`. Backups above 10,000 trade records or 10,000 calibration records are rejected explicitly rather than truncated. Runtime compaction protects open fallback origins and keeps persistent daily PnL totals.
+Before changing an existing extension's installation path, export its JSON backup from the data dashboard. A different unpacked-extension path may use a separate extension identity and storage; import the backup into the newly loaded extension when needed.
 
-Tango quick-buy geometry is locked to Giant: the slot, wrapper, action host and paper button share a 36px rectangle even when GMGN changes its native button size. Synthetic fallback market caps do not produce chart coordinates; independently observed prices or market caps remain eligible.
+## GMGN compatibility
 
-The [2026-10-13 audit](docs/project-audit-2026-10-13.md) records the original findings. The [fix and verification report](docs/project-fixes-2026-10-13.md) tracks the subsequent changes and remaining live-page verification. Current GMGN compatibility requires testing the loaded extension against the current site.
+Paper quick-buy buttons follow GMGN's configured button size. On dual-button cards, the secondary amount stays independent of the primary column input. Explicit zero or invalid amounts disable the corresponding paper action.
 
-The [2026-10-14 follow-up](docs/project-follow-up-2026-10-14.md) records current GMGN DOM inspection, multi-button amount and market-cap fixes, and the review of previously uncommitted changes. On dual-button cards the secondary preset stays independent of the primary column input. Card-based average-entry market-cap markers require complete, independently observed execution history; incomplete or mixed history hides that coordinate.
+Chart lines require trustworthy visible chart coordinates. Synthetic fallback market caps do not produce chart coordinates; independently observed prices or market caps remain eligible. Current GMGN compatibility still depends on the site's current layout and data availability.
 
 ## Safety
 
