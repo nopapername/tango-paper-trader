@@ -42,10 +42,10 @@ This repository contains the ready-to-load extension package. No Node.js install
 
 1. Download and extract the repository ZIP, or clone this repository.
 2. Open the browser's extensions manager and enable **Developer mode**.
-3. Choose **Load unpacked** and select the `tango-paper-trader` folder containing `manifest.json`.
+3. Choose **Load unpacked** and select the repository root folder containing `manifest.json` directly.
 4. Open GMGN, or refresh an existing GMGN tab.
 
-The previous `dist` wrapper has been removed. The local installation folder is now `D:\web3\code_project\tango-paper-trade\tango-paper-trader`.
+There is no `dist` or nested package wrapper. The local installation folder is `D:\web3\code_project\tango-paper-trader`, with `manifest.json` directly inside it.
 
 Before changing an existing extension's installation path, export its JSON backup from the data dashboard. A different unpacked-extension path may use a separate extension identity and storage; import the backup into the newly loaded extension when needed.
 
