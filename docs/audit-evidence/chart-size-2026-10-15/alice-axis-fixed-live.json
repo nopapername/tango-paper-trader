@@ -1,0 +1,1140 @@
+{
+  "samples": [
+    {
+      "diagnostic": {
+        "anchorCount": 19,
+        "axisHint": "UNKNOWN",
+        "axisSequence": 581,
+        "axisSequenceFloor": 0,
+        "frameGeneration": 3,
+        "markerCount": 1,
+        "reason": "RENDERED",
+        "renderedCount": 1,
+        "sources": [
+          {
+            "backingHeight": 538,
+            "backingWidth": 58,
+            "clearedGeneration": 285,
+            "points": [
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 563,
+                "value": 5200,
+                "x": 849,
+                "y": 530.523000683954
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 564,
+                "value": 5600,
+                "x": 849,
+                "y": 496.1320265878654
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 565,
+                "value": 6000,
+                "x": 849,
+                "y": 461.74105249177694
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 566,
+                "value": 6400,
+                "x": 849,
+                "y": 427.35007839568846
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 567,
+                "value": 6800,
+                "x": 849,
+                "y": 392.9591042996
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 568,
+                "value": 7200,
+                "x": 849,
+                "y": 358.5681302035115
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 569,
+                "value": 7600,
+                "x": 849,
+                "y": 324.17715610742295
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 570,
+                "value": 8000,
+                "x": 849,
+                "y": 289.7861820113344
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 571,
+                "value": 8400,
+                "x": 849,
+                "y": 255.395207915246
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 572,
+                "value": 8800,
+                "x": 849,
+                "y": 221.00423381915743
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 573,
+                "value": 9200,
+                "x": 849,
+                "y": 186.6132597230689
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 574,
+                "value": 9600,
+                "x": 849,
+                "y": 152.2222856269804
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 575,
+                "value": 10000,
+                "x": 849,
+                "y": 117.83131153089192
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 576,
+                "value": 10400,
+                "x": 849,
+                "y": 83.44033743480338
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 577,
+                "value": 10800,
+                "x": 849,
+                "y": 49.04936333871484
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 578,
+                "value": 6470,
+                "x": 849,
+                "y": 421.21875
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 579,
+                "value": 8590,
+                "x": 849,
+                "y": 239.21875
+              },
+              {
+                "ageMs": 2249,
+                "currentGeometry": true,
+                "generation": 285,
+                "sequence": 580,
+                "value": 70,
+                "x": 849,
+                "y": 505.21875
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 841,
+              "right": 899,
+              "top": 0,
+              "width": 58
+            }
+          },
+          {
+            "backingHeight": 538,
+            "backingWidth": 785,
+            "clearedGeneration": 287,
+            "points": [
+              {
+                "ageMs": 2248,
+                "currentGeometry": true,
+                "generation": 287,
+                "sequence": 581,
+                "value": 0.1,
+                "x": 735.5,
+                "y": 238
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 56,
+              "right": 841,
+              "top": 0,
+              "width": 785
+            }
+          }
+        ],
+        "visibleCount": 1
+      },
+      "lines": [
+        {
+          "left": "56px",
+          "right": "57px",
+          "text": "虚拟买入 · $6.94K×",
+          "top": "381px"
+        }
+      ],
+      "text": "虚拟买入 · $6.94K×"
+    },
+    {
+      "diagnostic": {
+        "anchorCount": 19,
+        "axisHint": "UNKNOWN",
+        "axisSequence": 619,
+        "axisSequenceFloor": 0,
+        "frameGeneration": 3,
+        "markerCount": 1,
+        "reason": "RENDERED",
+        "renderedCount": 1,
+        "sources": [
+          {
+            "backingHeight": 538,
+            "backingWidth": 58,
+            "clearedGeneration": 299,
+            "points": [
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 601,
+                "value": 5200,
+                "x": 849,
+                "y": 530.523000683954
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 602,
+                "value": 5600,
+                "x": 849,
+                "y": 496.1320265878654
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 603,
+                "value": 6000,
+                "x": 849,
+                "y": 461.74105249177694
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 604,
+                "value": 6400,
+                "x": 849,
+                "y": 427.35007839568846
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 605,
+                "value": 6800,
+                "x": 849,
+                "y": 392.9591042996
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 606,
+                "value": 7200,
+                "x": 849,
+                "y": 358.5681302035115
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 607,
+                "value": 7600,
+                "x": 849,
+                "y": 324.17715610742295
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 608,
+                "value": 8000,
+                "x": 849,
+                "y": 289.7861820113344
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 609,
+                "value": 8400,
+                "x": 849,
+                "y": 255.395207915246
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 610,
+                "value": 8800,
+                "x": 849,
+                "y": 221.00423381915743
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 611,
+                "value": 9200,
+                "x": 849,
+                "y": 186.6132597230689
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 612,
+                "value": 9600,
+                "x": 849,
+                "y": 152.2222856269804
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 613,
+                "value": 10000,
+                "x": 849,
+                "y": 117.83131153089192
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 614,
+                "value": 10400,
+                "x": 849,
+                "y": 83.44033743480338
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 615,
+                "value": 10800,
+                "x": 849,
+                "y": 49.04936333871484
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 616,
+                "value": 6660,
+                "x": 849,
+                "y": 405.21875
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 617,
+                "value": 8590,
+                "x": 849,
+                "y": 239.21875
+              },
+              {
+                "ageMs": 7055,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 618,
+                "value": 70,
+                "x": 849,
+                "y": 505.21875
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 841,
+              "right": 899,
+              "top": 0,
+              "width": 58
+            }
+          },
+          {
+            "backingHeight": 538,
+            "backingWidth": 785,
+            "clearedGeneration": 301,
+            "points": [
+              {
+                "ageMs": 7054,
+                "currentGeometry": true,
+                "generation": 301,
+                "sequence": 619,
+                "value": 0.1,
+                "x": 735.5,
+                "y": 238
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 56,
+              "right": 841,
+              "top": 0,
+              "width": 785
+            }
+          }
+        ],
+        "visibleCount": 1
+      },
+      "lines": [
+        {
+          "left": "56px",
+          "right": "57px",
+          "text": "虚拟买入 · $6.94K×",
+          "top": "381px"
+        }
+      ],
+      "text": "虚拟买入 · $6.94K×"
+    },
+    {
+      "diagnostic": {
+        "anchorCount": 19,
+        "axisHint": "UNKNOWN",
+        "axisSequence": 619,
+        "axisSequenceFloor": 0,
+        "frameGeneration": 3,
+        "markerCount": 1,
+        "reason": "RENDERED",
+        "renderedCount": 1,
+        "sources": [
+          {
+            "backingHeight": 538,
+            "backingWidth": 58,
+            "clearedGeneration": 299,
+            "points": [
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 601,
+                "value": 5200,
+                "x": 849,
+                "y": 530.523000683954
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 602,
+                "value": 5600,
+                "x": 849,
+                "y": 496.1320265878654
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 603,
+                "value": 6000,
+                "x": 849,
+                "y": 461.74105249177694
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 604,
+                "value": 6400,
+                "x": 849,
+                "y": 427.35007839568846
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 605,
+                "value": 6800,
+                "x": 849,
+                "y": 392.9591042996
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 606,
+                "value": 7200,
+                "x": 849,
+                "y": 358.5681302035115
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 607,
+                "value": 7600,
+                "x": 849,
+                "y": 324.17715610742295
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 608,
+                "value": 8000,
+                "x": 849,
+                "y": 289.7861820113344
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 609,
+                "value": 8400,
+                "x": 849,
+                "y": 255.395207915246
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 610,
+                "value": 8800,
+                "x": 849,
+                "y": 221.00423381915743
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 611,
+                "value": 9200,
+                "x": 849,
+                "y": 186.6132597230689
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 612,
+                "value": 9600,
+                "x": 849,
+                "y": 152.2222856269804
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 613,
+                "value": 10000,
+                "x": 849,
+                "y": 117.83131153089192
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 614,
+                "value": 10400,
+                "x": 849,
+                "y": 83.44033743480338
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 615,
+                "value": 10800,
+                "x": 849,
+                "y": 49.04936333871484
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 616,
+                "value": 6660,
+                "x": 849,
+                "y": 405.21875
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 617,
+                "value": 8590,
+                "x": 849,
+                "y": 239.21875
+              },
+              {
+                "ageMs": 26256,
+                "currentGeometry": true,
+                "generation": 299,
+                "sequence": 618,
+                "value": 70,
+                "x": 849,
+                "y": 505.21875
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 841,
+              "right": 899,
+              "top": 0,
+              "width": 58
+            }
+          },
+          {
+            "backingHeight": 538,
+            "backingWidth": 785,
+            "clearedGeneration": 301,
+            "points": [
+              {
+                "ageMs": 26255,
+                "currentGeometry": true,
+                "generation": 301,
+                "sequence": 619,
+                "value": 0.1,
+                "x": 735.5,
+                "y": 238
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 56,
+              "right": 841,
+              "top": 0,
+              "width": 785
+            }
+          }
+        ],
+        "visibleCount": 1
+      },
+      "lines": [
+        {
+          "left": "56px",
+          "right": "57px",
+          "text": "虚拟买入 · $6.94K×",
+          "top": "381px"
+        }
+      ],
+      "text": "虚拟买入 · $6.94K×"
+    },
+    {
+      "diagnostic": {
+        "anchorCount": 20,
+        "axisHint": "UNKNOWN",
+        "axisSequence": 817,
+        "axisSequenceFloor": 0,
+        "frameGeneration": 3,
+        "markerCount": 1,
+        "reason": "RENDERED",
+        "renderedCount": 1,
+        "sources": [
+          {
+            "backingHeight": 538,
+            "backingWidth": 58,
+            "clearedGeneration": 355,
+            "points": [
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 798,
+                "value": 2000,
+                "x": 849,
+                "y": 527.9111615084507
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 799,
+                "value": 4000,
+                "x": 849,
+                "y": 492.8317765317452
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 800,
+                "value": 6000,
+                "x": 849,
+                "y": 457.7523915550398
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 801,
+                "value": 8000,
+                "x": 849,
+                "y": 422.6730065783344
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 802,
+                "value": 10000,
+                "x": 849,
+                "y": 387.5936216016289
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 803,
+                "value": 12000,
+                "x": 849,
+                "y": 352.51423662492346
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 804,
+                "value": 14000,
+                "x": 849,
+                "y": 317.434851648218
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 805,
+                "value": 16000,
+                "x": 849,
+                "y": 282.35546667151254
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 806,
+                "value": 18000,
+                "x": 849,
+                "y": 247.2760816948071
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 807,
+                "value": 20000,
+                "x": 849,
+                "y": 212.1966967181016
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 808,
+                "value": 22000,
+                "x": 849,
+                "y": 177.11731174139618
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 809,
+                "value": 24000,
+                "x": 849,
+                "y": 142.03792676469072
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 810,
+                "value": 26000,
+                "x": 849,
+                "y": 106.9585417879852
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 811,
+                "value": 28000,
+                "x": 849,
+                "y": 71.87915681127976
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 812,
+                "value": 30000,
+                "x": 849,
+                "y": 36.7997718345743
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 813,
+                "value": 6860,
+                "x": 849,
+                "y": 443.21875
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 814,
+                "value": 27450,
+                "x": 849,
+                "y": 82.21875
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 815,
+                "value": 8590,
+                "x": 849,
+                "y": 412.21875
+              },
+              {
+                "ageMs": 9323,
+                "currentGeometry": true,
+                "generation": 355,
+                "sequence": 816,
+                "value": 375,
+                "x": 849,
+                "y": 531.21875
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 841,
+              "right": 899,
+              "top": 0,
+              "width": 58
+            }
+          },
+          {
+            "backingHeight": 538,
+            "backingWidth": 785,
+            "clearedGeneration": 357,
+            "points": [
+              {
+                "ageMs": 9308,
+                "currentGeometry": true,
+                "generation": 357,
+                "sequence": 817,
+                "value": 0.1,
+                "x": 735.5,
+                "y": 411
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 56,
+              "right": 841,
+              "top": 0,
+              "width": 785
+            }
+          }
+        ],
+        "visibleCount": 1
+      },
+      "lines": [
+        {
+          "left": "56px",
+          "right": "57px",
+          "text": "虚拟买入 · $6.94K×",
+          "top": "441px"
+        }
+      ],
+      "text": "虚拟买入 · $6.94K×"
+    },
+    {
+      "diagnostic": {
+        "anchorCount": 19,
+        "axisHint": "UNKNOWN",
+        "axisSequence": 988,
+        "axisSequenceFloor": 0,
+        "frameGeneration": 3,
+        "markerCount": 1,
+        "reason": "RENDERED",
+        "renderedCount": 1,
+        "sources": [
+          {
+            "backingHeight": 538,
+            "backingWidth": 58,
+            "clearedGeneration": 401,
+            "points": [
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 970,
+                "value": 5200,
+                "x": 849,
+                "y": 530.523000683954
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 971,
+                "value": 5600,
+                "x": 849,
+                "y": 496.1320265878654
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 972,
+                "value": 6000,
+                "x": 849,
+                "y": 461.74105249177694
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 973,
+                "value": 6400,
+                "x": 849,
+                "y": 427.35007839568846
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 974,
+                "value": 6800,
+                "x": 849,
+                "y": 392.9591042996
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 975,
+                "value": 7200,
+                "x": 849,
+                "y": 358.5681302035115
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 976,
+                "value": 7600,
+                "x": 849,
+                "y": 324.17715610742295
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 977,
+                "value": 8000,
+                "x": 849,
+                "y": 289.7861820113344
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 978,
+                "value": 8400,
+                "x": 849,
+                "y": 255.395207915246
+              },
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 979,
+                "value": 8800,
+                "x": 849,
+                "y": 221.00423381915743
+              },
+              {
+                "ageMs": 2911,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 980,
+                "value": 9200,
+                "x": 849,
+                "y": 186.6132597230689
+              },
+              {
+                "ageMs": 2911,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 981,
+                "value": 9600,
+                "x": 849,
+                "y": 152.2222856269804
+              },
+              {
+                "ageMs": 2911,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 982,
+                "value": 10000,
+                "x": 849,
+                "y": 117.83131153089192
+              },
+              {
+                "ageMs": 2911,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 983,
+                "value": 10400,
+                "x": 849,
+                "y": 83.44033743480338
+              },
+              {
+                "ageMs": 2911,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 984,
+                "value": 10800,
+                "x": 849,
+                "y": 49.04936333871484
+              },
+              {
+                "ageMs": 2911,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 985,
+                "value": 7080,
+                "x": 849,
+                "y": 369.21875
+              },
+              {
+                "ageMs": 2911,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 986,
+                "value": 8590,
+                "x": 849,
+                "y": 239.21875
+              },
+              {
+                "ageMs": 2911,
+                "currentGeometry": true,
+                "generation": 401,
+                "sequence": 987,
+                "value": 139,
+                "x": 849,
+                "y": 471.21875
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 841,
+              "right": 899,
+              "top": 0,
+              "width": 58
+            }
+          },
+          {
+            "backingHeight": 538,
+            "backingWidth": 785,
+            "clearedGeneration": 403,
+            "points": [
+              {
+                "ageMs": 2910,
+                "currentGeometry": true,
+                "generation": 403,
+                "sequence": 988,
+                "value": 0.1,
+                "x": 735.5,
+                "y": 238
+              }
+            ],
+            "rect": {
+              "bottom": 538,
+              "height": 538,
+              "left": 56,
+              "right": 841,
+              "top": 0,
+              "width": 785
+            }
+          }
+        ],
+        "visibleCount": 1
+      },
+      "lines": [
+        {
+          "left": "56px",
+          "right": "57px",
+          "text": "虚拟买入 · $6.94K×",
+          "top": "381px"
+        }
+      ],
+      "text": "虚拟买入 · $6.94K×"
+    }
+  ],
+  "finalPanel": "T\nTANGO\n模拟盘\nAlice\n✎\n🔊\n⚙\n×\n买入\n◎ 9.4 BNB\n0.1\n0.2\n0.5\n1\n2\n3\n5\n10\n⌁ 0.8%\n♜ 0.001 BNB\n♙ 1%\n入场市值 $6940\n卖出 %\n6056.34万 Alice\n10%\n25%\n50%\n100%\n5%\n15%\n35%\n75%\n⌁ 自动\n♜ 0.001 BNB\n一键回本\n当前市值 $7080\n虚拟余额\n9.4 BNB\n总买入\n0.6 BNB\n总卖出\n0 BNB\n总利润\n-0.0022 BNB\n入场市值 $6940\n当前市值 $7080\n盈亏 -0.37%\n盈亏数额 -0.0022 BNB",
+  "note": "1s -> 1m -> 1s; no trades performed; temporary clear during redraw, observed line restored after fresh ticks."
+}
