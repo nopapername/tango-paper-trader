@@ -1063,6 +1063,13 @@
   function mergeQuote(context, quote) {
     if (!quote) return context.quote;
     const chain = context.token?.chain;
+    // Do not replace the live header with a secondary-pool DEX quote while
+    // its factual GMGN USD price is fresh. Stale/missing prices still refresh.
+    if (String(quote.source || '').toUpperCase() === 'DEXSCREENER') {
+      const current = normalizeObservationDimensions(context.quote);
+      if (Number(current?.priceUsd) > 0
+        && String(current.priceSource || '').toUpperCase().startsWith('GMGN')) return context.quote;
+    }
     const nativePriceUsd = freshNativePrice(chain);
     const validationContext = persistedQuoteContext(context.token);
     const trustedMarketCap = trustedMarketCapObservation(quote, validationContext);
