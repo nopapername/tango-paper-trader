@@ -1767,7 +1767,7 @@
     if (/^(回本|一键回本|RecoverCost|Breakeven)$/i.test(text)) {
       return { side: 'SELL', key: 'SELL:BREAKEVEN', sellPercent: 0, breakeven: true, valid: true };
     }
-    const percent = text.match(/^(\d+(?:\.\d+)?)%$/);
+    const percent = text.match(/^(?:卖出|Sell)?(\d+(?:\.\d+)?)%$/i);
     const sellPercent = Number(percent?.[1] || 0);
     const valid = sellPercent > 0 && sellPercent <= 100;
     return { side: 'SELL', key: valid ? `SELL:${sellPercent}` : 'SELL:UNSUPPORTED', sellPercent, breakeven: false, valid };

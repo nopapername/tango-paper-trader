@@ -1,0 +1,163 @@
+{
+  "sizes": [
+    {
+      "sizeName": "小号",
+      "pairBefore": [
+        {
+          "amount": "0.5",
+          "generation": "9",
+          "height": 24,
+          "id": "tango-paper-9-17",
+          "side": "BUY"
+        },
+        {
+          "amount": "0.1",
+          "generation": "9",
+          "height": 24,
+          "id": "tango-paper-9-18",
+          "side": "BUY"
+        }
+      ],
+      "preview": "模拟买入\n代币\nMINNIE\n投入金额\n0.5 BNB\n观察价格\n$0.000005\n模拟成交价\n$0.00000504\n模拟滑点\n0.8%\n平台费\n0.005 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认",
+      "result": "模拟盘\n虚拟余额 8.978 BNB\n▦ 盈亏日历"
+    },
+    {
+      "sizeName": "大号",
+      "pairBefore": [
+        {
+          "amount": "0.5",
+          "generation": "9",
+          "height": 32,
+          "id": "tango-paper-9-17",
+          "side": "BUY"
+        },
+        {
+          "amount": "0.1",
+          "generation": "9",
+          "height": 32,
+          "id": "tango-paper-9-18",
+          "side": "BUY"
+        }
+      ],
+      "preview": "模拟买入\n代币\nMINNIE\n投入金额\n0.5 BNB\n观察价格\n$0.000005\n模拟成交价\n$0.00000504\n模拟滑点\n0.8%\n平台费\n0.005 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认",
+      "result": "模拟盘\n虚拟余额 8.978 BNB\n▦ 盈亏日历"
+    },
+    {
+      "sizeName": "超大号",
+      "pairBefore": [
+        {
+          "amount": "0.5",
+          "generation": "9",
+          "height": 44,
+          "id": "tango-paper-9-17",
+          "side": "BUY"
+        },
+        {
+          "amount": "0.1",
+          "generation": "9",
+          "height": 44,
+          "id": "tango-paper-9-18",
+          "side": "BUY"
+        }
+      ],
+      "preview": "模拟买入\n代币\nMINNIE\n投入金额\n0.5 BNB\n观察价格\n$0.000005\n模拟成交价\n$0.00000504\n模拟滑点\n0.8%\n平台费\n0.005 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认",
+      "result": "模拟盘\n虚拟余额 8.978 BNB\n▦ 盈亏日历"
+    },
+    {
+      "sizeName": "巨型",
+      "pairBefore": [
+        {
+          "amount": "0.5",
+          "generation": "9",
+          "height": 132.6666717529297,
+          "id": "tango-paper-9-17",
+          "side": "BUY"
+        },
+        {
+          "amount": "0.1",
+          "generation": "9",
+          "height": 132.6666717529297,
+          "id": "tango-paper-9-18",
+          "side": "BUY"
+        }
+      ],
+      "preview": "模拟买入\n代币\nMINNIE\n投入金额\n0.5 BNB\n观察价格\n$0.000005\n模拟成交价\n$0.00000504\n模拟滑点\n0.8%\n平台费\n0.005 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认",
+      "result": "模拟盘\n虚拟余额 8.478 BNB\n▦ 盈亏日历"
+    }
+  ],
+  "columns": [
+    {
+      "x": 273,
+      "button": {
+        "address": "0xd49d5b877868e4c30234aa3b875ad941d5067777",
+        "amount": "0.5",
+        "generation": "73",
+        "id": "tango-paper-73-126"
+      },
+      "preview": "模拟买入\n代币\nORIGINS\n投入金额\n0.5 BNB\n观察价格\n$0.000004\n模拟成交价\n$0.000004032\n模拟滑点\n0.8%\n平台费\n0.005 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认"
+    },
+    {
+      "x": 273,
+      "button": {
+        "address": "0xd49d5b877868e4c30234aa3b875ad941d5067777",
+        "amount": "1",
+        "generation": "73",
+        "id": "tango-paper-73-125"
+      },
+      "preview": "模拟买入\n代币\nORIGINS\n投入金额\n1 BNB\n观察价格\n$0.000004\n模拟成交价\n$0.000004032\n模拟滑点\n0.8%\n平台费\n0.01 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认"
+    },
+    {
+      "x": 671,
+      "button": {
+        "address": "0x25c5bf66c81a92dbdf52a3a278fc590ac8caffff",
+        "amount": "0.5",
+        "generation": "6",
+        "id": "tango-paper-6-11"
+      },
+      "preview": "模拟买入\n代币\n李嘉诚\n投入金额\n0.5 BNB\n观察价格\n$0.0000043\n模拟成交价\n$0.0000043344\n模拟滑点\n0.8%\n平台费\n0.005 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认"
+    },
+    {
+      "x": 671,
+      "button": {
+        "address": "0x25c5bf66c81a92dbdf52a3a278fc590ac8caffff",
+        "amount": "0.1",
+        "generation": "6",
+        "id": "tango-paper-6-12"
+      },
+      "preview": "模拟买入\n代币\n李嘉诚\n投入金额\n0.1 BNB\n观察价格\n$0.0000043\n模拟成交价\n$0.0000043344\n模拟滑点\n0.8%\n平台费\n0.001 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认"
+    },
+    {
+      "x": 1069,
+      "button": {
+        "address": "0xb4b52dc59c075e4e93aba0640b59248ce6e97777",
+        "amount": "0.5",
+        "generation": "9",
+        "id": "tango-paper-9-17"
+      },
+      "preview": "模拟买入\n代币\nMINNIE\n投入金额\n0.5 BNB\n观察价格\n$0.000005\n模拟成交价\n$0.00000504\n模拟滑点\n0.8%\n平台费\n0.005 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认"
+    },
+    {
+      "x": 1069,
+      "button": {
+        "address": "0xb4b52dc59c075e4e93aba0640b59248ce6e97777",
+        "amount": "0.1",
+        "generation": "9",
+        "id": "tango-paper-9-18"
+      },
+      "preview": "模拟买入\n代币\nMINNIE\n投入金额\n0.1 BNB\n观察价格\n$0.000005\n模拟成交价\n$0.00000504\n模拟滑点\n0.8%\n平台费\n0.001 BNB\n网络费\n0.001 BNB\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认"
+    }
+  ],
+  "positions": "当前持仓\n一键清仓\n✕\n持仓总额\n1.959 BNB\n3 持仓\n赛博精神错乱 ↗\n赛博精神错乱\n-0.0101 BNB · -2.01%\n价值 0.4899 BNB\n成本 0.5 BNB\n持仓时间 56s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。\n猫头鹰 ↗\nSmartX吉祥物QQ805121438\n-0.0211 BNB · -2.11%\n价值 0.9789 BNB\n成本 1 BNB\n持仓时间 17m 29s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。\nMINNIE ↗\nAnthropic Dog\n-0.0098 BNB · -1.96%\n价值 0.4902 BNB\n成本 0.5 BNB\n持仓时间 1m 30s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。",
+  "percentBeforeFix": [
+    {
+      "native": "卖出 25%",
+      "paper": "模拟盘—",
+      "side": "SELL"
+    },
+    {
+      "paper": "模拟盘0.1 BNB",
+      "side": "BUY"
+    }
+  ],
+  "note": "All four secondary buy previews passed; only Giant .5 BNB MINNIE confirmed. User separately confirmed .5 BNB manual purchase (赛博精神错乱), retained. Recover-cost unavailable toast observed. SELL prefix fix not yet loaded. Restored Giant, secondary BUY .5, migrated sell percent100 and Recover Cost."
+}

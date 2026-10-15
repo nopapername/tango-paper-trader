@@ -1882,7 +1882,7 @@ test('October dual trench buttons retain the secondary amount while the primary 
 });
 
 test('secondary native sell actions keep their side and never fall back to a paper buy', async () => {
-  for (const [copy, percent, breakeven] of [['25%', 25, false], ['回本', 0, true], ['unknown', 0, false]]) {
+  for (const [copy, percent, breakeven] of [['25%', 25, false], ['\uE081卖出 25%', 25, false], ['Sell 50%', 50, false], ['回本', 0, true], ['unknown', 0, false]]) {
     const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
     const matches = harness.slot.matches.bind(harness.slot);
     harness.slot.matches = selector => selector === '[data-sentry-component="SellButton"]' || matches(selector);
