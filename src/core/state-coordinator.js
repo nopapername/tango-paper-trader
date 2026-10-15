@@ -644,9 +644,7 @@
         } else if (command?.type === 'UPDATE_POSITION_METADATA') {
           result = { state: Tango.Engine.updatePositionMetadata(state, command.token) };
         } else if (command?.type === 'UPDATE_POSITION_METADATA_BATCH') {
-          let next = state;
-          for (const token of command.tokens || []) next = Tango.Engine.updatePositionMetadata(next, token);
-          result = { state: next };
+          result = { state: Tango.Engine.updatePositionMetadataBatch(state, command.tokens) };
         } else if (command?.type === 'RESET_CHAIN') {
           const chain = Tango.Chains.get(command.chain);
           if (!chain) throw new Error('unsupportedChain');

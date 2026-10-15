@@ -14,8 +14,7 @@
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   }
 
-  function matchesFilters(trade, filters = {}) {
-    const search = String(filters.search || '').trim().toLowerCase();
+  function matchesPreparedFilters(trade, filters, search) {
     const matchesSearch = !search || `${trade.symbol || ''} ${trade.tokenAddress || ''}`.toLowerCase().includes(search);
     const matchesSide = !filters.side || filters.side === 'ALL' || trade.side === filters.side;
     const matchesResult = !filters.result || filters.result === 'ALL'
@@ -23,6 +22,18 @@
       || (filters.result === 'LOSS' && Number(trade.realizedPnlNative) < 0);
     const matchesDate = !filters.date || dateKey(trade.executedAt) === filters.date;
     return matchesSearch && matchesSide && matchesResult && matchesDate;
+  }
+
+  function matchesFilters(trade, filters = {}) {
+    return matchesPreparedFilters(trade, filters, String(filters.search || '').trim().toLowerCase());
+  }
+
+  function history(state, selectedChain, filters = {}) {
+    const chain = Tango.Chains.get(selectedChain) || Tango.Chains.get('sol');
+    const search = String(filters.search || '').trim().toLowerCase();
+    const trades = Tango.ChainView.trades(state, chain.id)
+      .filter(trade => matchesPreparedFilters(trade, filters, search));
+    return { chain, trades };
   }
 
   function settingsFor(settings, chainId) {
@@ -48,25 +59,48 @@
     }
   }
 
+  function selected(state, settings, selectedChain, nativePrices = {}, filters = {}) {
+    const { chain, trades } = history(state, selectedChain, filters);
+    const nativePriceUsd = Number(nativePrices?.[chain.id] || 0);
+    return {
+      chain, trades, nativePriceUsd,
+      positions: Tango.ChainView.positions(state, chain.id),
+      summary: Tango.Engine.portfolioSummary(state, chain.id, nativePriceUsd),
+      chainSettings: settingsFor(settings, chain.id)
+    };
+  }
+
   function build(state, settings, selectedChain, nativePrices = {}, filters = {}) {
     const chain = Tango.Chains.get(selectedChain) || Tango.Chains.get('sol');
     const nativePriceUsd = Number(nativePrices?.[chain.id] || 0);
     const positions = Tango.ChainView.positions(state, chain.id);
-    const trades = Tango.ChainView.trades(state, chain.id).filter((trade) => matchesFilters(trade, filters));
+    const trades = history(state, chain.id, filters).trades;
+    const accounts = Tango.Chains.all().map((entry) => ({
+      chain: entry,
+      summary: Tango.Engine.portfolioSummary(state, entry.id, Number(nativePrices?.[entry.id] || 0)),
+      nativePriceUsd: Number(nativePrices?.[entry.id] || 0),
+      usdSummary: availableChainUsdSummary(state, entry.id, nativePrices?.[entry.id])
+    }));
+    // Aggregate exactly the same canonical chain values, in chain order. Commit
+    // both totals together so an overflowing chain leaves neither half applied.
+    let assetsUsd = 0; let pnlUsd = 0; const missingChains = [];
+    for (const account of accounts) {
+      const usd = account.usdSummary;
+      const nextAssets = usd ? assetsUsd + usd.assetsUsd : NaN;
+      const nextPnl = usd ? pnlUsd + usd.pnlUsd : NaN;
+      if (!usd || !Number.isFinite(nextAssets) || nextAssets < 0 || !Number.isFinite(nextPnl)) {
+        missingChains.push(account.chain.id);
+        continue;
+      }
+      assetsUsd = nextAssets; pnlUsd = nextPnl;
+    }
     return {
-      chain,
-      positions,
-      trades,
-      summary: Tango.Engine.portfolioSummary(state, chain.id, nativePriceUsd),
-      globalUsd: Tango.Engine.globalUsdSummary(state, nativePrices),
+      chain, positions, trades,
+      summary: { ...accounts.find(account => account.chain.id === chain.id).summary },
+      globalUsd: { assetsUsd, pnlUsd, complete: missingChains.length === 0, missingChains },
       nativePriceUsd,
       chainSettings: settingsFor(settings, chain.id),
-      accounts: Tango.Chains.all().map((entry) => ({
-        chain: entry,
-        summary: Tango.Engine.portfolioSummary(state, entry.id, Number(nativePrices?.[entry.id] || 0)),
-        nativePriceUsd: Number(nativePrices?.[entry.id] || 0),
-        usdSummary: availableChainUsdSummary(state, entry.id, nativePrices?.[entry.id])
-      }))
+      accounts
     };
   }
 
@@ -109,6 +143,6 @@
     };
   }
 
-  Tango.DashboardModel = { build, matchesFilters, tradesCsvRows, calendar, hasDerivedMarketCapPrice, CSV_FIELDS };
+  Tango.DashboardModel = { build, selected, history, matchesFilters, tradesCsvRows, calendar, hasDerivedMarketCapPrice, CSV_FIELDS };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.DashboardModel;
 })(globalThis);

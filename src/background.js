@@ -18,6 +18,7 @@ const nativePriceCache = new Map();
 const nativePriceRequests = new Map();
 const tokenQuoteCache = new Map();
 const tokenQuoteRequests = new Map();
+let nextTokenQuoteSweepAt = 0;
 const NATIVE_PRICE_CACHE_MS = Number(globalThis.Tango?.QUOTE_STALE_MS || 15_000);
 const TOKEN_QUOTE_CACHE_MS = 15_000;
 const PROVIDER_TIMEOUT_MS = 6_000;
@@ -266,11 +267,15 @@ async function getTokenQuote(chainId, address) {
   const normalizedAddress = Chains.normalizeAddress(chain.id, address);
   const key = quoteKey(chain, normalizedAddress);
   const now = Date.now();
-  tokenQuoteCache.forEach((entry, cachedKey) => {
-    if (now - entry.fetchedAt >= TOKEN_QUOTE_CACHE_MS) tokenQuoteCache.delete(cachedKey);
-  });
+  if (now >= nextTokenQuoteSweepAt || now < nextTokenQuoteSweepAt - 1_000) {
+    tokenQuoteCache.forEach((entry, cachedKey) => {
+      if (now - entry.fetchedAt >= TOKEN_QUOTE_CACHE_MS) tokenQuoteCache.delete(cachedKey);
+    });
+    nextTokenQuoteSweepAt = now + 1_000;
+  }
   const cached = tokenQuoteCache.get(key);
-  if (cached) return cached.quote;
+  if (cached && now - cached.fetchedAt < TOKEN_QUOTE_CACHE_MS) return cached.quote;
+  if (cached) tokenQuoteCache.delete(key);
   if (tokenQuoteRequests.has(key)) return tokenQuoteRequests.get(key);
   const request = fetchTokenQuote(chain, normalizedAddress, key).finally(() => tokenQuoteRequests.delete(key));
   tokenQuoteRequests.set(key, request);
@@ -279,13 +284,14 @@ async function getTokenQuote(chainId, address) {
 
 async function fetchTokenQuote(chain, address, key) {
   const pairs = await fetchProviderJson(`https://api.dexscreener.com/tokens/v1/${encodeURIComponent(chain.dexScreenerChain)}/${encodeURIComponent(address)}`);
-  const matching = Array.isArray(pairs) ? pairs.filter((pair) =>
-    Chains.validateAddress(chain.id, pair?.baseToken?.address)
-      && Chains.normalizeAddress(chain.id, pair.baseToken.address) === address
-      && positiveFinite(pair?.priceUsd)
-  ) : [];
-  matching.sort((a, b) => nonnegativeFiniteOrZero(b?.liquidity?.usd) - nonnegativeFiniteOrZero(a?.liquidity?.usd));
-  const pair = matching[0];
+  let pair = null; let deepestLiquidity = -1;
+  for (const candidate of Array.isArray(pairs) ? pairs : []) {
+    if (!Chains.validateAddress(chain.id, candidate?.baseToken?.address)
+      || Chains.normalizeAddress(chain.id, candidate.baseToken.address) !== address
+      || !positiveFinite(candidate?.priceUsd)) continue;
+    const liquidity = nonnegativeFiniteOrZero(candidate?.liquidity?.usd);
+    if (liquidity > deepestLiquidity) { pair = candidate; deepestLiquidity = liquidity; }
+  }
   const quote = pair ? {
     priceUsd: Number(pair.priceUsd),
     marketCapUsd: nonnegativeFiniteOrZero(pair.marketCap ?? pair.fdv),

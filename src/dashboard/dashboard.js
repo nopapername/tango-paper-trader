@@ -55,11 +55,12 @@
     const age = Date.now() - Number(runtime.nativePriceObservedAt[chain.id]);
     return [chain.id, Number.isFinite(price) && price > 0 && age >= -5_000 && age <= NATIVE_PRICE_TTL_MS ? price : 0];
   }));
-  const model = () => Tango.DashboardModel.build(
+  const model = () => (runtime.tab === 'overview' || !Tango.DashboardModel.selected
+    ? Tango.DashboardModel.build : Tango.DashboardModel.selected)(
     runtime.state, runtime.settings, runtime.selectedChain, freshNativePrices(), runtime.filters
   );
 
-  async function load() {
+  async function performLoad() {
     try {
       const data = await Tango.Store.getAll();
       runtime.state = data.state;
@@ -86,6 +87,17 @@
     }
   }
 
+  let loadTask = null; let loadAgain = false;
+  function load() {
+    if (loadTask) { loadAgain = true; return loadTask; }
+    loadTask = (async () => {
+      let result;
+      do { loadAgain = false; result = await performLoad(); } while (loadAgain);
+      return result;
+    })().finally(() => { loadTask = null; });
+    return loadTask;
+  }
+
   async function refreshNativePrices() {
     return Promise.all(Tango.Chains.all().map((chain) => refreshNativePrice(chain)));
   }
@@ -103,6 +115,16 @@
     const input = focusId && app.querySelector(`#${focusId}`);
     input?.focus();
     if (input && Number.isInteger(selection[0])) input.setSelectionRange?.(...selection);
+  }
+
+  let priceRenderQueued = false;
+  function queuePriceRender() {
+    if (priceRenderQueued) return;
+    priceRenderQueued = true;
+    Promise.resolve().then(() => {
+      priceRenderQueued = false;
+      if (runtime.state && runtime.settings) renderPriceUpdate();
+    });
   }
 
   function refreshNativePrice(chain) {
@@ -126,7 +148,7 @@
       finally {
         clearTimeout(timer);
         delete runtime.nativePriceRequests[chain.id];
-        if (runtime.state && runtime.settings) renderPriceUpdate();
+        if (runtime.state && runtime.settings) queuePriceRender();
       }
     })();
     runtime.nativePriceRequests[chain.id] = request;
@@ -513,7 +535,9 @@
   function updateHistoryResults() {
     const results = app.querySelector('#history-results');
     if (results) {
-      results.innerHTML = historyResults(model());
+      const view = Tango.DashboardModel.history
+        ? Tango.DashboardModel.history(runtime.state, runtime.selectedChain, runtime.filters) : model();
+      results.innerHTML = historyResults(view);
       bindShareButtons(results);
       bindHistoryPages(results);
     }

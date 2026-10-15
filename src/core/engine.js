@@ -1302,29 +1302,44 @@
     return updatePositionQuoteResult(state, token, quote, now).state;
   }
 
-  function updatePositionMetadata(state, token) {
-    const key = positionKey(token?.chain, token?.address);
-    const existing = state.positions[key];
-    if (!existing) return state;
+  function positionMetadataPatch(existing, token) {
+    if (!existing) return null;
     const source = trustedMetadataSource(token);
-    if (!source) return state;
+    if (!source) return null;
     const sourceRank = METADATA_SOURCE_RANK[source];
     const existingSource = String(existing.metadataSource || '').toUpperCase();
     const existingRank = METADATA_SOURCE_RANK[existingSource] || 0;
-    if (sourceRank < existingRank) return state;
+    if (sourceRank < existingRank) return null;
     const symbol = validIdentityText(token.symbol, 32);
     const name = validIdentityText(token.name, 100);
     const logoUrl = String(token.logoUrl || '').trim();
-    if (!symbol && !name && !logoUrl) return state;
+    if (!symbol && !name && !logoUrl) return null;
     const nextSymbol = symbol || existing.symbol;
     const nextName = name || existing.name;
     const nextLogoUrl = logoUrl || existing.logoUrl || '';
-    if (nextSymbol === existing.symbol && nextName === existing.name && nextLogoUrl === existing.logoUrl && source === existingSource) return state;
+    if (nextSymbol === existing.symbol && nextName === existing.name && nextLogoUrl === existing.logoUrl && source === existingSource) return null;
+    return { symbol: nextSymbol, name: nextName, logoUrl: nextLogoUrl,
+      metadataSource: source, metadataUpdatedAt: Date.now(), updatedAt: Date.now() };
+  }
+
+  function updatePositionMetadata(state, token) {
+    const key = positionKey(token?.chain, token?.address);
+    const patch = positionMetadataPatch(state.positions[key], token);
+    if (!patch) return state;
     const nextState = structuredCloneSafe(state);
-    nextState.positions[key] = {
-      ...nextState.positions[key], symbol: nextSymbol, name: nextName, logoUrl: nextLogoUrl,
-      metadataSource: source, metadataUpdatedAt: Date.now(), updatedAt: Date.now()
-    };
+    nextState.positions[key] = { ...nextState.positions[key], ...patch };
+    return nextState;
+  }
+
+  function updatePositionMetadataBatch(state, tokens) {
+    let nextState = state;
+    for (const token of tokens || []) {
+      const key = positionKey(token?.chain, token?.address);
+      const patch = positionMetadataPatch(nextState.positions[key], token);
+      if (!patch) continue;
+      if (nextState === state) nextState = structuredCloneSafe(state);
+      nextState.positions[key] = { ...nextState.positions[key], ...patch };
+    }
     return nextState;
   }
 
@@ -1345,7 +1360,7 @@
   Tango.Engine = {
     round, positionKey, validateQuote, executeBuy, executeSell, executeCloseAll, markPosition,
     portfolioSummary, chainUsdSummary, globalUsdSummary, updatePositionQuote, updatePositionQuoteResult,
-    updatePositionMetadata, breakevenSellPercent,
+    updatePositionMetadata, updatePositionMetadataBatch, breakevenSellPercent,
     usesMarketCapValuation, calibratePosition, ruleSupply
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Engine;

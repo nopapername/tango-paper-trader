@@ -678,6 +678,8 @@
       || node?.querySelector?.(wallet) || node?.querySelector?.(actions));
   }
 
+  let lastQuickBuyFullSyncAt = 0;
+
   function syncQuickBuyButtons(roots, {
     fast = false, addedRoots = [], removedRoots = [], hrefMutations = [],
     policyKey = quickBuyPolicyKey()
@@ -688,6 +690,7 @@
     if (chain && settings && runtime.settings?.enabled && runtime.state?.initialized && runtime.settings?.showListQuickBuy) {
       setContentClass(document.documentElement, 'tango-paper-native-quick-buy-allowed', false);
       setContentClass(document.documentElement, 'tango-paper-quick-buy-active', true);
+      if (!Array.isArray(roots) || !roots.length) lastQuickBuyFullSyncAt = Date.now();
       Tango.GMGN.discoverTokenCards(handleQuickBuy, settings.buyPresets?.[0] || 0.1, t('paper'), roots, {
         fast, addedRoots, removedRoots, hrefMutations, policyKey
       });
@@ -796,7 +799,10 @@
       if (!routeCaptureIsCurrent(routeCapture)) return;
     }
     if (!routeCaptureIsCurrent(routeCapture)) return;
-    syncQuickBuyButtons();
+    // Mutation lanes and the 750ms health probe reconcile new/replaced slots.
+    // Retain a full sweep for missed page events without scanning every quote tick.
+    if (runtime.quickBuyMode !== 'active' || !Tango.GMGN._isTrenchPage?.()
+      || Date.now() - lastQuickBuyFullSyncAt >= 30_000) syncQuickBuyButtons();
     await syncVisiblePositionMetadata(routeCapture);
     if (!routeCaptureIsCurrent(routeCapture)) return;
     const currentKey = runtime.current?.token
@@ -2322,6 +2328,21 @@
     }
   }
 
+  function tokenTradeTotals(chain, address, trades) {
+    const normalizedAddress = Tango.Chains.normalizeAddress(chain, address);
+    let totalBuy = 0; let totalSell = 0; let realizedPnl = 0;
+    (trades || []).forEach((trade) => {
+      if (trade.chain !== chain
+        || Tango.Chains.normalizeAddress(trade.chain, trade.tokenAddress) !== normalizedAddress) return;
+      if (trade.side === 'BUY') totalBuy += Number(trade.amountNative || 0);
+      else if (trade.side === 'SELL') {
+        totalSell += Number(trade.amountNative || 0);
+        realizedPnl += Number(trade.realizedPnlNative || 0);
+      }
+    });
+    return { totalBuy, totalSell, realizedPnl };
+  }
+
   function renderPanel() {
     if (!runtime.state.initialized || !runtime.settings.enabled) return '';
     const chain = activeChain();
@@ -2336,14 +2357,10 @@
     const mark = position ? Tango.Engine.markPosition(position, paperQuote, currentNativePriceUsd()) : null;
     const quoteValid = Boolean(paperQuote);
     const symbol = current?.token?.symbol || 'GMGN';
-    const tokenTrades = current ? Tango.ChainView.trades(runtime.state, chain.id).filter((trade) =>
-      trade.chain === current.token.chain
-      && Tango.Chains.normalizeAddress(trade.chain, trade.tokenAddress)
-        === Tango.Chains.normalizeAddress(current.token.chain, current.token.address)
-    ) : [];
-    const totalBuy = tokenTrades.filter((trade) => trade.side === 'BUY').reduce((sum, trade) => sum + Number(trade.amountNative || 0), 0);
-    const totalSell = tokenTrades.filter((trade) => trade.side === 'SELL').reduce((sum, trade) => sum + Number(trade.amountNative || 0), 0);
-    const totalProfit = tokenTrades.filter((trade) => trade.side === 'SELL').reduce((sum, trade) => sum + Number(trade.realizedPnlNative || 0), 0) + Number(mark?.unrealizedPnlNative || 0);
+    const { totalBuy, totalSell, realizedPnl } = tokenTradeTotals(
+      chain.id, current.token.address, runtime.state.trades
+    );
+    const totalProfit = realizedPnl + Number(mark?.unrealizedPnlNative || 0);
     const feePercent = Number(runtime.settings.platformFeeBps || 0) / 100;
     const breakevenPercent = Tango.Engine.breakevenSellPercent(position, paperQuote, runtime.settings);
     const breakevenLabel = breakevenPercent ? `${t('breakeven')} ${Tango.Format.number(breakevenPercent, language(), 1)}%` : t('breakeven');
@@ -2759,6 +2776,35 @@
     </div></div>`;
   }
 
+  function patchShellText(markup) {
+    const template = document.createElement('template');
+    if (!template.content || !shell.childNodes) return false;
+    template.innerHTML = markup;
+    const changes = [];
+    const equalShape = (before, after) => {
+      if (before.length !== after.length) return false;
+      for (let index = 0; index < before.length; index += 1) {
+        const left = before[index]; const right = after[index];
+        if (left.nodeType !== right.nodeType) return false;
+        if (left.nodeType === 3) {
+          if (left.nodeValue !== right.nodeValue) changes.push([left, right.nodeValue]);
+        } else if (left.nodeType === 1) {
+          if (left.nodeName !== right.nodeName || left.attributes.length !== right.attributes.length) return false;
+          for (const attr of right.attributes) {
+            if (left.getAttribute(attr.name) !== attr.value) return false;
+          }
+          if (!equalShape(left.childNodes, right.childNodes)) return false;
+        } else if (left.nodeValue !== right.nodeValue) return false;
+      }
+      return true;
+    };
+    // Validate the entire tree before mutating it; changed action/identity/form
+    // attributes must use the existing full render and event-binding path.
+    if (!equalShape(shell.childNodes, template.content.childNodes)) return false;
+    changes.forEach(([node, value]) => { node.nodeValue = value; });
+    return true;
+  }
+
   function render() {
     capturePresetDraft();
     const chain = activeChain();
@@ -2790,10 +2836,13 @@
     }
     const markup = `${renderBar(summary)}${renderPanel()}${renderDrawer(summary)}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     if (runtime.renderedMarkup !== markup) {
-      shell.innerHTML = markup;
+      const patched = !runtime.modal && !runtime.presetEditing && patchShellText(markup);
+      if (!patched) {
+        shell.innerHTML = markup;
+        runtime.renderedRecoveryDialog = runtime.modal?.type === 'dashboard-error' ? runtime.modal : null;
+        bindEvents();
+      }
       runtime.renderedMarkup = markup;
-      runtime.renderedRecoveryDialog = runtime.modal?.type === 'dashboard-error' ? runtime.modal : null;
-      bindEvents();
     }
     constrainFloatingElements();
     syncChartMarkers();
@@ -2972,7 +3021,9 @@
       if (location.href !== runtime.lastUrl) {
         handleRouteChange();
       }
-      chartFrames().forEach((frame) => registerChartFrame(frame));
+      if (records.some(record => record.type === 'childList')) {
+        chartFrames().forEach((frame) => registerChartFrame(frame));
+      }
       const fastRoots = [];
       const addedRoots = [];
       const removedRoots = [];
