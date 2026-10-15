@@ -924,6 +924,19 @@ test('CSV download neutralizes spreadsheet formulas without changing numbers, es
   assert.deepEqual(backup.state, before);
 });
 
+test('Dashboard accepts a fallback quote after the primary six-second provider deadline', async () => {
+  const gate = deferred();
+  const dashboard = await loadDashboard({ nativeResponder: () => gate.promise });
+  const pending = dashboard.api.refreshNativePrices();
+  // Advance through eight seconds: the primary provider has timed out, while
+  // its six-second fallback still has time to return.
+  dashboard.timers.filter(timer => !timer.cancelled && timer.delay <= 8_000).forEach(timer => timer.fn());
+  await new Promise(resolve => setImmediate(resolve));
+  gate.resolve({ ok: true, price: 777, observedAt: Date.now() });
+  await pending;
+  assert.equal(dashboard.api.freshNativePrices().sol, 777);
+});
+
 test('Dashboard preserves native price observation timestamps from the background', async () => {
   const observedAt = Date.now() - 100;
   const dashboard = await loadDashboard({ nativeResponder: () => ({ ok: true, price: 2_000, observedAt }) });
@@ -956,7 +969,7 @@ test('Dashboard applies successful native prices before another chain times out 
   assert.equal(dashboard.api.runtime.nativePrices.eth, 456);
   assert.match(dashboard.app.innerHTML, /nativePriceStale/);
   assert.ok(dashboard.app.innerHTML.includes('Selected chain'));
-  const timeout = dashboard.timers.find(timer => timer.delay === 8_000 && !timer.cancelled);
+  const timeout = dashboard.timers.find(timer => timer.delay === 14_000 && !timer.cancelled);
   timeout.fn();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(dashboard.api.runtime.nativePriceRequests.sol, undefined);

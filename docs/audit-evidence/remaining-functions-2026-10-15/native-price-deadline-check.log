@@ -1,0 +1,424 @@
+TAP version 13
+# Subtest: rapid Dashboard chain selections persist only the latest chain without clobbering global settings
+ok 1 - rapid Dashboard chain selections persist only the latest chain without clobbering global settings
+  ---
+  duration_ms: 23.2985
+  type: 'test'
+  ...
+# Subtest: Dashboard history deep link starts on the explicit current chain without a date filter
+ok 2 - Dashboard history deep link starts on the explicit current chain without a date filter
+  ---
+  duration_ms: 2.2207
+  type: 'test'
+  ...
+# Subtest: Dashboard deep-link chain is startup-only and does not override a later user selection
+ok 3 - Dashboard deep-link chain is startup-only and does not override a later user selection
+  ---
+  duration_ms: 3.3354
+  type: 'test'
+  ...
+# Subtest: Dashboard startup storage failure renders a retry that recovers
+ok 4 - Dashboard startup storage failure renders a retry that recovers
+  ---
+  duration_ms: 1.6108
+  type: 'test'
+  ...
+# Subtest: Dashboard chain-account USD display uses the canonical USD summary instead of reconverting native equity
+ok 5 - Dashboard chain-account USD display uses the canonical USD summary instead of reconverting native equity
+  ---
+  duration_ms: 1.5149
+  type: 'test'
+  ...
+# Subtest: Dashboard reset actions contain rejected writes, reload authoritative data, and remain usable
+ok 6 - Dashboard reset actions contain rejected writes, reload authoritative data, and remain usable
+  ---
+  duration_ms: 5.6669
+  type: 'test'
+  ...
+# Subtest: Dashboard rolls back an optimistic chain selection when settings persistence fails
+ok 7 - Dashboard rolls back an optimistic chain selection when settings persistence fails
+  ---
+  duration_ms: 2.7073
+  type: 'test'
+  ...
+# Subtest: Dashboard rolls back a failed latest selection to a stale-successful queued selection
+ok 8 - Dashboard rolls back a failed latest selection to a stale-successful queued selection
+  ---
+  duration_ms: 2.7559
+  type: 'test'
+  ...
+# Subtest: Dashboard settings-save failure restores persisted values and shows an error
+ok 9 - Dashboard settings-save failure restores persisted values and shows an error
+  ---
+  duration_ms: 3.1483
+  type: 'test'
+  ...
+# Subtest: selected-chain reset waits for the visible BSC selection to persist and never targets the old chain
+ok 10 - selected-chain reset waits for the visible BSC selection to persist and never targets the old chain
+  ---
+  duration_ms: 2.9224
+  type: 'test'
+  ...
+# Subtest: CSV export waits for selected-chain persistence and contains BSC rather than the old chain
+ok 11 - CSV export waits for selected-chain persistence and contains BSC rather than the old chain
+  ---
+  duration_ms: 2.1191
+  type: 'test'
+  ...
+# Subtest: selection and immediate scoped settings save serialize and preserve BSC plus global and per-chain edits
+ok 12 - selection and immediate scoped settings save serialize and preserve BSC plus global and per-chain edits
+  ---
+  duration_ms: 3.7465
+  type: 'test'
+  ...
+# Subtest: multi-character history search retains focus and updates filtered results incrementally
+ok 13 - multi-character history search retains focus and updates filtered results incrementally
+  ---
+  duration_ms: 1.9319
+  type: 'test'
+  ...
+# Subtest: history labels market-cap-derived fills without rendering the synthetic token price
+ok 14 - history labels market-cap-derived fills without rendering the synthetic token price
+  ---
+  duration_ms: 2.4888
+  type: 'test'
+  ...
+# Subtest: selected reset revalidates its chain after confirmation and reset prompts state exact destructive scope
+ok 15 - selected reset revalidates its chain after confirmation and reset prompts state exact destructive scope
+  ---
+  duration_ms: 3.188
+  type: 'test'
+  ...
+# Subtest: selected-chain and all-chain reset actions stay separate
+ok 16 - selected-chain and all-chain reset actions stay separate
+  ---
+  duration_ms: 2.2946
+  type: 'test'
+  ...
+# Subtest: saving Dashboard settings changes chain controls only for the selected chain
+ok 17 - saving Dashboard settings changes chain controls only for the selected chain
+  ---
+  duration_ms: 2.5544
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding defaults to 10 and commits one verified six-chain reset before closing
+ok 18 - Dashboard onboarding defaults to 10 and commits one verified six-chain reset before closing
+  ---
+  duration_ms: 1.1822
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding invalid or interrupted forms persist nothing
+ok 19 - Dashboard onboarding invalid or interrupted forms persist nothing
+  ---
+  duration_ms: 0.6593
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding stays open when persisted read-back is not the requested six-chain balance
+ok 20 - Dashboard onboarding stays open when persisted read-back is not the requested six-chain balance
+  ---
+  duration_ms: 0.6898
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding keeps custom values and reports a distinct GMGN open failure
+ok 21 - Dashboard onboarding keeps custom values and reports a distinct GMGN open failure
+  ---
+  duration_ms: 0.9264
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding retry opens GMGN without resetting verified intervening paper state
+ok 22 - Dashboard onboarding retry opens GMGN without resetting verified intervening paper state
+  ---
+  duration_ms: 0.7183
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding overlapping double clicks reset once and open at most once
+ok 23 - Dashboard onboarding overlapping double clicks reset once and open at most once
+  ---
+  duration_ms: 1.5101
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding open failure plus storage rerender retries open only
+ok 24 - Dashboard onboarding open failure plus storage rerender retries open only
+  ---
+  duration_ms: 1.2204
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding stale URL reload uses durable marker and skips reset
+ok 25 - Dashboard onboarding stale URL reload uses durable marker and skips reset
+  ---
+  duration_ms: 1.4693
+  type: 'test'
+  ...
+# Subtest: Dashboard onboarding shows completion when the browser cannot close the tab
+ok 26 - Dashboard onboarding shows completion when the browser cannot close the tab
+  ---
+  duration_ms: 0.7613
+  type: 'test'
+  ...
+# Subtest: changing common capital requires confirmation and resets every chain through one mutation
+ok 27 - changing common capital requires confirmation and resets every chain through one mutation
+  ---
+  duration_ms: 2.9784
+  type: 'test'
+  ...
+# Subtest: saving a displayed principal reconciles legacy unequal chain principals
+ok 28 - saving a displayed principal reconciles legacy unequal chain principals
+  ---
+  duration_ms: 1.5884
+  type: 'test'
+  ...
+# Subtest: language-only Dashboard settings changes remain a normal scoped patch
+ok 29 - language-only Dashboard settings changes remain a normal scoped patch
+  ---
+  duration_ms: 3.9067
+  type: 'test'
+  ...
+# Subtest: CSV exports selected-chain rows while JSON export keeps the full state
+ok 30 - CSV exports selected-chain rows while JSON export keeps the full state
+  ---
+  duration_ms: 3.4657
+  type: 'test'
+  ...
+# Subtest: CSV download neutralizes spreadsheet formulas without changing numbers, escaping, JSON, or state
+ok 31 - CSV download neutralizes spreadsheet formulas without changing numbers, escaping, JSON, or state
+  ---
+  duration_ms: 2.796
+  type: 'test'
+  ...
+# Subtest: Dashboard accepts a fallback quote after the primary six-second provider deadline
+ok 32 - Dashboard accepts a fallback quote after the primary six-second provider deadline
+  ---
+  duration_ms: 3.7768
+  type: 'test'
+  ...
+# Subtest: Dashboard preserves native price observation timestamps from the background
+ok 33 - Dashboard preserves native price observation timestamps from the background
+  ---
+  duration_ms: 1.9083
+  type: 'test'
+  ...
+# Subtest: downloaded CSV shares all 29 model fields and retains safe quote provenance
+ok 34 - downloaded CSV shares all 29 model fields and retains safe quote provenance
+  ---
+  duration_ms: 1.4013
+  type: 'test'
+  ...
+# Subtest: Dashboard applies successful native prices before another chain times out and retries on the next refresh
+ok 35 - Dashboard applies successful native prices before another chain times out and retries on the next refresh
+  ---
+  duration_ms: 3.5697
+  type: 'test'
+  ...
+# Subtest: Dashboard rejects expired and nonfinite provider prices without poisoning existing fresh observations
+ok 36 - Dashboard rejects expired and nonfinite provider prices without poisoning existing fresh observations
+  ---
+  duration_ms: 3.1102
+  type: 'test'
+  ...
+# Subtest: Dashboard renders partial USD data and remains navigable when the real model rejects one overflowed chain conversion
+ok 37 - Dashboard renders partial USD data and remains navigable when the real model rejects one overflowed chain conversion
+  ---
+  duration_ms: 7.861
+  type: 'test'
+  ...
+# Subtest: Dashboard rejects blank numeric fields and invalid presets without saving any settings
+ok 38 - Dashboard rejects blank numeric fields and invalid presets without saving any settings
+  ---
+  duration_ms: 12.4198
+  type: 'test'
+  ...
+# Subtest: Dashboard accepts the shared 9999bps boundary while preserving other edits
+ok 39 - Dashboard accepts the shared 9999bps boundary while preserving other edits
+  ---
+  duration_ms: 2.3289
+  type: 'test'
+  ...
+# Subtest: Dashboard history renders every retained page and resets pagination when a filter changes
+ok 40 - Dashboard history renders every retained page and resets pagination when a filter changes
+  ---
+  duration_ms: 5.8618
+  type: 'test'
+  ...
+# Subtest: PNG export measures long text, constrains every draw, sanitizes filename, and reports null blobs
+ok 41 - PNG export measures long text, constrains every draw, sanitizes filename, and reports null blobs
+  ---
+  duration_ms: 2.7868
+  type: 'test'
+  ...
+# Subtest: Dashboard auto theme follows the system and exposes an explicit auto setting
+ok 42 - Dashboard auto theme follows the system and exposes an explicit auto setting
+  ---
+  duration_ms: 1.6348
+  type: 'test'
+  ...
+# Subtest: theme semantic surfaces resolve to readable light contrast and bilingual UI keys exist
+ok 43 - theme semantic surfaces resolve to readable light contrast and bilingual UI keys exist
+  ---
+  duration_ms: 2.6768
+  type: 'test'
+  ...
+# Subtest: Dashboard shows the specific over-count import error without changing state
+ok 44 - Dashboard shows the specific over-count import error without changing state
+  ---
+  duration_ms: 3.1003
+  type: 'test'
+  ...
+# Subtest: Dashboard reports oversized import bytes and keeps authoritative data unchanged
+ok 45 - Dashboard reports oversized import bytes and keeps authoritative data unchanged
+  ---
+  duration_ms: 1.6739
+  type: 'test'
+  ...
+# Subtest: Dashboard falls back to the generic import toast for malformed typed byte details
+ok 46 - Dashboard falls back to the generic import toast for malformed typed byte details
+  ---
+  duration_ms: 9.2321
+  type: 'test'
+  ...
+# Subtest: Popup startup storage failure renders a retry that recovers
+ok 47 - Popup startup storage failure renders a retry that recovers
+  ---
+  duration_ms: 6.8661
+  type: 'test'
+  ...
+# Subtest: Popup Dashboard button uses the background route and surfaces opening failures
+ok 48 - Popup Dashboard button uses the background route and surfaces opening failures
+  ---
+  duration_ms: 2.1127
+  type: 'test'
+  ...
+# Subtest: Popup routes an uninitialized account to onboarding without writing fixed defaults
+ok 49 - Popup routes an uninitialized account to onboarding without writing fixed defaults
+  ---
+  duration_ms: 2.3985
+  type: 'test'
+  ...
+# Subtest: Popup common-capital reset contains a rejected atomic write and restores authoritative UI
+ok 50 - Popup common-capital reset contains a rejected atomic write and restores authoritative UI
+  ---
+  duration_ms: 3.2164
+  type: 'test'
+  ...
+# Subtest: Popup clears rejected-write feedback after a successful retry
+ok 51 - Popup clears rejected-write feedback after a successful retry
+  ---
+  duration_ms: 3.2718
+  type: 'test'
+  ...
+# Subtest: Popup rolls back a selected chain when settings persistence fails
+ok 52 - Popup rolls back a selected chain when settings persistence fails
+  ---
+  duration_ms: 3.5339
+  type: 'test'
+  ...
+# Subtest: Popup restores the enabled switch when settings persistence fails
+ok 53 - Popup restores the enabled switch when settings persistence fails
+  ---
+  duration_ms: 2.7819
+  type: 'test'
+  ...
+# Subtest: Popup preserves a pending chain selection when enabled changes concurrently
+ok 54 - Popup preserves a pending chain selection when enabled changes concurrently
+  ---
+  duration_ms: 2.3461
+  type: 'test'
+  ...
+# Subtest: Popup account language persists only the owned language field
+ok 55 - Popup account language persists only the owned language field
+  ---
+  duration_ms: 2.3095
+  type: 'test'
+  ...
+# Subtest: Popup rolls back a failed latest chain selection to the last successful queued chain
+ok 56 - Popup rolls back a failed latest chain selection to the last successful queued chain
+  ---
+  duration_ms: 2.4665
+  type: 'test'
+  ...
+# Subtest: Popup waits for pending settings before atomically changing common capital
+ok 57 - Popup waits for pending settings before atomically changing common capital
+  ---
+  duration_ms: 3.0482
+  type: 'test'
+  ...
+# Subtest: Popup waits for a pending selection before opening the shared GMGN entry
+ok 58 - Popup waits for a pending selection before opening the shared GMGN entry
+  ---
+  duration_ms: 2.1018
+  type: 'test'
+  ...
+# Subtest: Popup cancels a queued GMGN navigation when another chain is selected while waiting
+ok 59 - Popup cancels a queued GMGN navigation when another chain is selected while waiting
+  ---
+  duration_ms: 2.0755
+  type: 'test'
+  ...
+# Subtest: Popup master switch follows an external shortcut storage change while open
+ok 60 - Popup master switch follows an external shortcut storage change while open
+  ---
+  duration_ms: 2.6975
+  type: 'test'
+  ...
+# Subtest: Popup uses the active GMGN tab chain until an explicit selector choice persists
+ok 61 - Popup uses the active GMGN tab chain until an explicit selector choice persists
+  ---
+  duration_ms: 3.6888
+  type: 'test'
+  ...
+# Subtest: Popup accepts a fallback native quote after eight seconds instead of dropping it
+ok 62 - Popup accepts a fallback native quote after eight seconds instead of dropping it
+  ---
+  duration_ms: 2.5525
+  type: 'test'
+  ...
+# Subtest: Popup native refresh has independent timeout, periodic retry, and does not block initial controls
+ok 63 - Popup native refresh has independent timeout, periodic retry, and does not block initial controls
+  ---
+  duration_ms: 3.2462
+  type: 'test'
+  ...
+# Subtest: Popup auto theme follows system light mode and expired prices never reach its model
+ok 64 - Popup auto theme follows system light mode and expired prices never reach its model
+  ---
+  duration_ms: 1.8886
+  type: 'test'
+  ...
+# Subtest: Popup invalid common principal shows a validation message and performs no mutation
+ok 65 - Popup invalid common principal shows a validation message and performs no mutation
+  ---
+  duration_ms: 1.7397
+  type: 'test'
+  ...
+# Subtest: Popup rejected selection does not block a later common-capital reset
+ok 66 - Popup rejected selection does not block a later common-capital reset
+  ---
+  duration_ms: 2.0225
+  type: 'test'
+  ...
+# Subtest: Popup changes equal common capital through one confirmed all-chain reset
+ok 67 - Popup changes equal common capital through one confirmed all-chain reset
+  ---
+  duration_ms: 3.2314
+  type: 'test'
+  ...
+# Subtest: Popup repairs divergent legacy principals even when the displayed amount is unchanged
+ok 68 - Popup repairs divergent legacy principals even when the displayed amount is unchanged
+  ---
+  duration_ms: 1.7365
+  type: 'test'
+  ...
+# Subtest: Popup cancellation leaves divergent legacy principals untouched and performs no write
+ok 69 - Popup cancellation leaves divergent legacy principals untouched and performs no write
+  ---
+  duration_ms: 1.4463
+  type: 'test'
+  ...
+1..69
+# tests 69
+# suites 0
+# pass 69
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 220.7313

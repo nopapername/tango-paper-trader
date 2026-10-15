@@ -460,6 +460,16 @@ test('Popup uses the active GMGN tab chain until an explicit selector choice per
   assert.equal(popup.element('#popup-chain').value, 'bsc');
 });
 
+test('Popup accepts a fallback native quote after eight seconds instead of dropping it', async () => {
+  const gate = deferred();
+  const popup = await loadPopup({ nativeResponder: () => gate.promise });
+  popup.timers.filter(timer => !timer.cancelled && timer.delay <= 8_000).forEach(timer => timer.fn());
+  await new Promise(resolve => setImmediate(resolve));
+  gate.resolve({ ok: true, price: 777, observedAt: Date.now() });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(popup.calls.modelNativePrices.some(prices => prices.sol === 777));
+});
+
 test('Popup native refresh has independent timeout, periodic retry, and does not block initial controls', async () => {
   let hung = true;
   const popup = await loadPopup({ nativeResponder: message => message.chain === 'sol' && hung
@@ -468,7 +478,7 @@ test('Popup native refresh has independent timeout, periodic retry, and does not
   assert.ok(popup.element('#refresh-native-prices'));
   assert.equal(popup.calls.modelNativePrices.at(-1).eth, 100);
   assert.equal(popup.calls.modelNativePrices.at(-1).sol, 0);
-  const timeout = popup.timers.find(timer => timer.delay === 8000 && !timer.cancelled); timeout.fn();
+  const timeout = popup.timers.find(timer => timer.delay === 14000 && !timer.cancelled); timeout.fn();
   await new Promise(resolve => setImmediate(resolve));
   hung = false;
   const before = popup.runtimeMessages.length;

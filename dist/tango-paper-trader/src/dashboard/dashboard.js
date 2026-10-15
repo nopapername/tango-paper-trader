@@ -44,7 +44,9 @@
   const cls = (value) => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : 'flat';
   const native = (value, model, signed = false) => Tango.Format.native(value, model.chain.nativeSymbol, lang(), signed);
   const NATIVE_PRICE_TTL_MS = 60_000;
-  const NATIVE_PRICE_TIMEOUT_MS = 8_000;
+  // The worker can try two providers sequentially, each with a 6s deadline.
+  // Allow both attempts plus message delivery before giving up locally.
+  const NATIVE_PRICE_TIMEOUT_MS = 14_000;
   const HISTORY_PAGE_SIZE = 100;
   const freshNativePrices = () => Object.fromEntries(Tango.Chains.all().map((chain) => {
     const price = Number(runtime.nativePrices[chain.id]);

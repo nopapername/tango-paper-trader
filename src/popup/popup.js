@@ -15,7 +15,8 @@
   const nativePriceRequests = {};
   let nativePriceRefreshTimer = null;
   const NATIVE_PRICE_TTL_MS = 60_000;
-  const NATIVE_PRICE_TIMEOUT_MS = 8_000;
+  // Cover the worker's primary + fallback provider deadlines (6s each).
+  const NATIVE_PRICE_TIMEOUT_MS = 14_000;
 
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   const language = () => Tango.I18n.resolveLanguage(settings?.language);
