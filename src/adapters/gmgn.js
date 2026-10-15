@@ -236,20 +236,29 @@
     return root?.querySelector?.('[data-sentry-component="BaseInfoPriceView"]') || null;
   }
 
+  function usdPriceValue(text) {
+    const value = String(text || '').trim();
+    // Older verified headers omit the dollar sign. A native-unit suffix is
+    // never a USD observation, including while GMGN changes quote selection.
+    if (/^(?:0\.0[₀-₉]\d+|[-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)$/.test(value)) {
+      return parseMoney(value);
+    }
+    return /^(?:US)?\$/.test(value) ? parseUsdMoney(value) : 0;
+  }
+
   function findPrice(root) {
     const baseInfo = baseInfoPriceView(root);
     if (baseInfo) {
       const priceItem = Array.from(baseInfo.querySelectorAll('[data-sentry-component="InfoItem"]')).find((item) =>
         /^(价格|price)$/i.test(item.querySelector('.info-item-title')?.textContent?.trim() || '')
       );
-      const value = parseMoney(priceItem?.querySelector('.info-item-value')?.textContent);
-      if (value > 0) return value;
+      if (priceItem) return usdPriceValue(priceItem.querySelector('.info-item-value')?.textContent);
     }
     const direct = firstText([
       '[data-testid="token-price"]', '[data-testid*="price"]', '[data-token-price]',
       '[class*="token-price"]', '[class*="TokenPrice"]', '[class*="price_usd"]'
     ], root);
-    const directValue = parseMoney(direct?.text);
+    const directValue = usdPriceValue(direct?.text);
     if (directValue > 0) return directValue;
 
     const candidates = Array.from(root?.querySelectorAll?.('span,div') || [])

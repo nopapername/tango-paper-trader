@@ -2464,6 +2464,16 @@
     return generation;
   }
 
+  function chartLiveChoice(frame, component) {
+    const scope = frame?.closest?.('.chart-anchor-scope');
+    const controls = Array.from(scope?.querySelectorAll?.(`[data-sentry-component="${component}"]`) || []);
+    if (!controls.length) return null;
+    if (controls.length !== 1) return '';
+    const selected = Array.from(controls[0].children || []).filter((node) =>
+      node.classList?.contains('text-text-100'));
+    return selected.length === 1 ? String(selected[0].textContent || '').trim() : '';
+  }
+
   function chartAxisHint(frame) {
     try {
       if (!frame || frame.isConnected === false || ![...chartFrames()].includes(frame)) return 'UNKNOWN';
@@ -2485,12 +2495,39 @@
       if (!identity || identity.chain !== routeToken.chain || identity.address !== routeToken.address) {
         return 'UNKNOWN';
       }
-      if (String(parts[2]).toUpperCase() !== 'USD') return 'UNKNOWN';
+      const initialCurrency = String(parts[2]).toUpperCase();
+      if (initialCurrency !== 'USD' && (initialCurrency !== activeChain()?.nativeSymbol?.toUpperCase()
+        || chartLiveChoice(frame, 'QuoteSelect') === null)) return 'UNKNOWN';
+      const liveType = chartLiveChoice(frame, 'PriceType');
+      if (liveType !== null) {
+        if (/^(price|价格)$/i.test(liveType)) return 'PRICE';
+        if (/^(market cap|mcap|市值)$/i.test(liveType)) return 'MARKET_CAP';
+        return 'UNKNOWN';
+      }
       if (parts.length === 3) return 'PRICE';
       return String(parts[3]).toUpperCase() === 'MCAP' ? 'MARKET_CAP' : 'UNKNOWN';
     } catch {
       return 'UNKNOWN';
     }
+  }
+
+  function chartQuoteConversion(frame) {
+    const choice = chartLiveChoice(frame, 'QuoteSelect');
+    if (choice === null) {
+      const raw = frame?.getAttribute?.('data-widget-options');
+      if (typeof raw === 'string' && raw.length <= CHART_WIDGET_OPTIONS_MAX_CHARS) {
+        const symbols = new URLSearchParams(raw).getAll('symbol');
+        if (symbols.length === 1 && String(symbols[0].split('/')[2]).toUpperCase() !== 'USD') {
+          return { quoteUsd: 0, quoteCurrency: 'UNKNOWN' };
+        }
+      }
+      return {};
+    }
+    if (choice.toUpperCase() === 'USD') return { quoteUsd: 1, quoteCurrency: 'USD' };
+    const chain = activeChain();
+    const native = choice.toUpperCase() === chain?.nativeSymbol?.toUpperCase();
+    return { quoteUsd: native ? freshNativePrice(chain.id) : 0,
+      quoteCurrency: native ? chain.nativeSymbol.toUpperCase() : 'UNKNOWN' };
   }
 
   function chartDeliveryContext(frame) {
@@ -2500,6 +2537,7 @@
       || '';
     return {
       axisHint: chartAxisHint(frame),
+      ...chartQuoteConversion(frame),
       frameGeneration: Number.isSafeInteger(generation) && generation > 0 ? generation : 0,
       probeId: typeof probeId === 'string' && probeId.length <= CHART_PROBE_ID_MAX_CHARS
         ? probeId
@@ -2623,8 +2661,81 @@
     deliverChartMarkers(frames, runtime.latestMarkerPayload, force);
   }
 
+  async function openDashboard(route = {}) {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD', ...route });
+      if (response?.ok) return;
+      throw new Error(response?.error || t('openDashboardFailed'));
+    } catch (error) {
+      runtime.modal = { type: 'dashboard-error', title: t('openDashboardFailed'),
+        rows: [], note: String(error?.message || t('openDashboardFailed')).slice(0, 300) };
+      render();
+    }
+  }
+
+  function showRecoveryError(message) {
+    if (runtime.modal?.type === 'dashboard-error') {
+      runtime.modal = { ...runtime.modal, note: message };
+    }
+    showToast(message, 'error');
+  }
+
+  async function exportPageBackup() {
+    try {
+      const data = await Tango.Store.exportData();
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `tango-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      try { anchor.click(); } finally {
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } catch (error) { showRecoveryError(t(error.message || 'storageFailed')); }
+  }
+
+  async function previewBackupImport(input) {
+    const dialog = runtime.modal;
+    const file = input.files?.[0];
+    if (!file || dialog?.type !== 'dashboard-error') return;
+    try {
+      const payload = JSON.parse(await file.text());
+      if (runtime.modal !== dialog) return;
+      if (payload?.product !== 'Tango Paper Trader' || !payload.state?.accounts
+        || !payload.settings || !Array.isArray(payload.state.trades)
+        || !payload.state.positions || typeof payload.state.positions !== 'object') throw new Error('importFailed');
+      runtime.modal = { type: 'confirm', title: t('importJson'),
+        rows: [[t('importJson'), file.name], [t('positions'), Object.keys(payload.state.positions).length]],
+        note: language().toLowerCase().startsWith('zh')
+          ? '确认后将替换全部六条链的模拟账户、设置和历史记录。请先导出备份；取消不会更改数据。'
+          : 'Confirmation replaces paper accounts, settings and history on all six chains. Export a backup first; cancel changes nothing.',
+        action: async () => {
+          if (runtime.tradePending) return;
+          runtime.tradePending = true;
+          try {
+            const data = await Tango.Store.importData(payload);
+            runtime.state = data.state;
+            runtime.settings = data.settings;
+            runtime.modal = null;
+            await refresh();
+            showToast(t('dataImported'), 'success');
+          } catch (error) { runtime.modal = null; showToast(t(error.message || 'importFailed'), 'error'); }
+          finally { runtime.tradePending = false; }
+        }
+      };
+      render();
+    } catch {
+      if (runtime.modal === dialog) showRecoveryError(t('importFailed'));
+    }
+    finally { input.value = ''; }
+  }
+
   function renderModal() {
     if (!runtime.modal) return '';
+    if (runtime.modal.type === 'dashboard-error') {
+      return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3><div class="tango-warning">${esc(runtime.modal.note)}</div><div class="tango-modal-actions"><button class="tango-button" data-action="cancel-modal">${t('cancel')}</button><button class="tango-button primary" data-action="export-backup">${t('exportJson')}</button><label>${t('importJson')}<input id="tango-import-backup" type="file" accept=".json,application/json" style="display:block;max-width:100%"></label></div></div></div>`;
+    }
     return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3>
       <div class="tango-confirm-list">${runtime.modal.rows.map(([label,value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
       ${runtime.modal.note ? `<div class="tango-warning">${esc(runtime.modal.note)}</div>` : ''}
@@ -2653,10 +2764,20 @@
     }
     const summary = Tango.Engine.portfolioSummary(runtime.state, activeChain().id, currentNativePriceUsd());
     renderHeaderAccountSummary(summary);
+    // Preserve the native file input while its dialog is open. Replacing it
+    // during a quote tick detaches an in-progress browser file chooser.
+    if (runtime.modal?.type === 'dashboard-error'
+      && runtime.renderedRecoveryDialog === runtime.modal
+      && shadow.querySelector('#tango-import-backup')) {
+      constrainFloatingElements();
+      syncChartMarkers();
+      return;
+    }
     const markup = `${renderBar(summary)}${renderPanel()}${renderDrawer(summary)}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     if (runtime.renderedMarkup !== markup) {
       shell.innerHTML = markup;
       runtime.renderedMarkup = markup;
+      runtime.renderedRecoveryDialog = runtime.modal?.type === 'dashboard-error' ? runtime.modal : null;
       bindEvents();
     }
     constrainFloatingElements();
@@ -2695,21 +2816,10 @@
         const panelCollapsed = !runtime.settings.panelCollapsed;
         await patchRuntimeSettings({ panelCollapsed });
       }
-      if (action === 'dashboard') {
-        chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD' })
-          .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
-          .catch(() => showToast(t('openDashboardFailed'), 'error'));
-      }
-      if (action === 'dashboard-calendar') {
-        chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD', tab: 'calendar', chain: activeChain()?.id })
-          .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
-          .catch(() => showToast(t('openDashboardFailed'), 'error'));
-      }
-      if (action === 'dashboard-history') {
-        chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD', tab: 'history', chain: activeChain()?.id })
-          .then((response) => { if (!response?.ok) showToast(t('openDashboardFailed'), 'error'); })
-          .catch(() => showToast(t('openDashboardFailed'), 'error'));
-      }
+      if (action === 'dashboard') await openDashboard();
+      if (action === 'dashboard-calendar') await openDashboard({ tab: 'calendar', chain: activeChain()?.id });
+      if (action === 'dashboard-history') await openDashboard({ tab: 'history', chain: activeChain()?.id });
+      if (action === 'export-backup') await exportPageBackup();
       if (action === 'toggle-sound') {
         const soundEnabled = !runtime.settings.soundEnabled;
         await patchRuntimeSettings({ soundEnabled });
@@ -2740,6 +2850,11 @@
         }
       }
     }));
+    const backupInput = shadow.querySelector('#tango-import-backup');
+    backupInput?.addEventListener('change', async (event) => {
+      if (!requireTrustedUserEvent(event)) return;
+      await previewBackupImport(backupInput);
+    });
     const sessionSuppressInput = shadow.querySelector('#tango-skip-session-confirm');
     sessionSuppressInput?.addEventListener('change', (event) => {
       if (!requireTrustedUserEvent(event)) {

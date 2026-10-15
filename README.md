@@ -53,6 +53,10 @@ Before changing an existing extension's installation path, export its JSON backu
 
 Paper quick-buy buttons follow GMGN's configured button size. On dual-button cards, the secondary amount stays independent of the primary column input. Explicit zero or invalid amounts disable the corresponding paper action.
 
+The current chart quote selector is respected when switching USD and the chain native asset. Native-denominated header prices are never treated as USD execution prices; verified USD market cap and supply may supply the USD valuation instead.
+
+If an embedded browser blocks the data dashboard tab, the error dialog shows the browser reason and provides local JSON export and import. Import previews the selected file and requires confirmation before replacing all six-chain paper data and settings. Export a backup before restoring.
+
 Chart lines require trustworthy visible chart coordinates. Synthetic fallback market caps do not produce chart coordinates; independently observed prices or market caps remain eligible. Current GMGN compatibility still depends on the site's current layout and data availability.
 
 ## Safety

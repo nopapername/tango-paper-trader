@@ -465,14 +465,19 @@
       setChartDiagnostic('REJECTED_FIT');
       return null;
     }
+    const quoteUsd = Number(activeFrameContext?.quoteUsd ?? 1);
+    if (!(quoteUsd > 0)) {
+      setChartDiagnostic('REJECTED_MODE');
+      return null;
+    }
     const modes = [];
     const addPriceMode = (value) => {
-      if (Number(value) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(value) });
+      if (Number(value) > 0) modes.push({ type: 'PRICE', factor: 1, current: Number(value) / quoteUsd });
     };
     const addMarketCapModes = (value) => {
       if (Number(value) > 0) {
         [1, 1e3, 1e6, 1e9].forEach((factor) => modes.push({
-          type: 'MARKET_CAP', factor, current: Number(value) / factor
+          type: 'MARKET_CAP', factor, current: Number(value) / factor / quoteUsd
         }));
       }
     };
@@ -527,6 +532,7 @@
     lastScaleMode = { type: selected.type, factor: selected.factor };
     const selectedWithContext = {
       ...selected,
+      quoteUsd,
       axisHint,
       frameGeneration: activeFrameContext.frameGeneration,
       probeId: activeFrameContext.probeId
@@ -535,6 +541,7 @@
       selectedWithContext.frameGeneration,
       selectedWithContext.probeId,
       axisHint,
+      quoteUsd,
       selected.type,
       selected.factor,
       selected.sourceId,
@@ -550,7 +557,8 @@
       && stableScale?.factor === selected.factor
       && stableScale?.frameGeneration === selectedWithContext.frameGeneration
       && stableScale?.probeId === selectedWithContext.probeId
-      && stableScale?.axisHint === axisHint;
+      && stableScale?.axisHint === axisHint
+      && stableScale?.quoteUsd === quoteUsd;
     if (sameMode && stableSignature === signature) return stableScale;
     stableScale = selectedWithContext;
     stableSignature = signature;
@@ -666,8 +674,8 @@
     const nodes = [];
     visibleMarkers.forEach((marker) => {
       const rawValue = scale.type === 'MARKET_CAP'
-        ? Number(marker.marketCap) / scale.factor
-        : Number(marker.price);
+        ? Number(marker.marketCap) / scale.factor / scale.quoteUsd
+        : Number(marker.price) / scale.quoteUsd;
       if (!(rawValue > 0)) return;
       const fitX = scale.fit.logarithmic ? Math.log(rawValue) : rawValue;
       const targetY = scale.fit.slope * fitX + scale.fit.intercept;
@@ -715,7 +723,7 @@
         padding: '3px 4px 3px 6px', pointerEvents: 'auto', position: 'absolute', right: '5px', top: '-11px', whiteSpace: 'nowrap'
       });
       const text = document.createElement('span');
-      text.textContent = `${marker.label} · ${compactUsd(scale.type === 'MARKET_CAP' ? marker.marketCap : rawValue)}`;
+      text.textContent = `${marker.label} · ${compactUsd(scale.type === 'MARKET_CAP' ? marker.marketCap : marker.price)}`;
       const close = document.createElement('button');
       close.type = 'button';
       close.textContent = '×';
@@ -840,12 +848,18 @@
   function normalizedFrameContext(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     if (!CHART_AXIS_HINTS.has(value.axisHint)) return null;
+    if (Object.prototype.hasOwnProperty.call(value, 'quoteCurrency')
+      && !['USD', 'SOL', 'ETH', 'BNB', 'OKB', 'UNKNOWN'].includes(value.quoteCurrency)) return null;
+    if (Object.prototype.hasOwnProperty.call(value, 'quoteUsd')
+      && (typeof value.quoteUsd !== 'number' || !Number.isFinite(value.quoteUsd) || value.quoteUsd < 0)) return null;
     if (!Number.isSafeInteger(value.frameGeneration) || value.frameGeneration <= 0) return null;
     if (typeof value.probeId !== 'string'
       || !value.probeId
       || value.probeId.length > CHART_PROBE_ID_MAX_CHARS) return null;
     return {
       axisHint: value.axisHint,
+      ...(Object.prototype.hasOwnProperty.call(value, 'quoteCurrency') ? { quoteCurrency: value.quoteCurrency } : {}),
+      ...(Object.prototype.hasOwnProperty.call(value, 'quoteUsd') ? { quoteUsd: value.quoteUsd } : {}),
       frameGeneration: value.frameGeneration,
       probeId: value.probeId
     };
@@ -868,10 +882,15 @@
       next.frameGeneration !== activeFrameContext.frameGeneration
       || next.probeId !== activeFrameContext.probeId
       || next.axisHint !== activeFrameContext.axisHint
+      || (next.quoteCurrency ?? 'USD') !== (activeFrameContext.quoteCurrency ?? 'USD')
     );
     if (changed) {
       markerAxisSequenceFloor = axisLabelSequence;
       frameContextTextFloor = textCallSequence;
+      clearScaleAndPlacementCaches();
+    }
+    if (!changed && activeFrameContext
+      && (next.quoteUsd ?? 1) !== (activeFrameContext.quoteUsd ?? 1)) {
       clearScaleAndPlacementCaches();
     }
     activeFrameContext = next;
