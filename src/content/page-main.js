@@ -140,3 +140,113 @@
     publish([...quoteCache.values()]);
   });
 })();
+
+// Some embedded webviews leave a newly navigated TradingView blob document
+// completely empty. Retain only the page's own HTML blobs, and recover an
+// identified, persistently empty chart once using a fresh srcdoc navigation.
+// Navigation (rather than document.write) also reinstalls frame content scripts.
+(function initTangoChartLoadingRecovery() {
+  if (window !== window.top || window.__tangoChartLoadingRecovery
+    || location.origin !== 'https://gmgn.ai'
+    || typeof URL.createObjectURL !== 'function'
+    || typeof MutationObserver !== 'function') return;
+  window.__tangoChartLoadingRecovery = true;
+  const captured = new Map();
+  const frames = new WeakMap();
+  const selector = 'iframe[title="Financial Chart"],iframe[title="TradingView"]';
+  let scanQueued = false;
+  const enabled = () => document.querySelector('#tango-paper-trader-host')
+    ?.getAttribute('data-tango-active') === 'true';
+  const setState = (frame, state) => frame.setAttribute('data-tango-chart-load-state', state);
+
+  function chartTemplate(html) {
+    if (typeof html !== 'string' || html.length > 2_000_000) return false;
+    const base = html.match(/<base\b[^>]*\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+    let baseUrl;
+    try { baseUrl = new URL(base, location.href); } catch { return false; }
+    if (baseUrl.origin !== location.origin
+      || !/^\/_next\/static\/trading-view\/[\d.]+\/$/.test(baseUrl.pathname)) return false;
+    const scripts = [...html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)].map(match => match[1]);
+    return scripts.some(src => /^bundles\/runtime\./.test(src))
+      && scripts.some(src => /^bundles\/library\./.test(src))
+      && scripts.every(src => {
+        try { const url = new URL(src, baseUrl); return url.origin === baseUrl.origin && url.pathname.startsWith(baseUrl.pathname); }
+        catch { return false; }
+      });
+  }
+
+  function isEmpty(frame) {
+    try {
+      const doc = frame.contentDocument;
+      return doc?.readyState === 'complete' && doc.body && doc.head
+        && doc.body.childNodes.length === 0 && doc.head.childNodes.length === 0;
+    } catch { return false; }
+  }
+
+  async function recover(frame, state, entry) {
+    state.pending = false;
+    if (!enabled() || !frame.isConnected || frame.getAttribute('src') !== state.source || state.attempted) return;
+    if (!isEmpty(frame)) { setState(frame, state.recoveredSource ? 'RECOVERED' : 'HEALTHY'); return; }
+    state.attempted = true;
+    try {
+      const html = await entry.blob.text();
+      if (!enabled() || !frame.isConnected || frame.getAttribute('src') !== state.source || !isEmpty(frame)) return;
+      if (!chartTemplate(html)) { setState(frame, 'UNRECOGNIZED'); return; }
+      state.recoveredSource = state.source;
+      state.recoveryHtml = html;
+      setState(frame, 'RECOVERING');
+      frame.setAttribute('srcdoc', html);
+    } catch { setState(frame, 'FAILED'); }
+  }
+
+  function scan() {
+    scanQueued = false;
+    for (const frame of document.querySelectorAll(selector)) {
+      const source = frame.getAttribute('src');
+      let state = frames.get(frame);
+      if (state?.recoveredSource && source !== state.recoveredSource) {
+        // srcdoc takes precedence over src; never pin GMGN to our old document.
+        if (frame.getAttribute('srcdoc') === state.recoveryHtml) frame.removeAttribute('srcdoc');
+        frames.delete(frame);
+        state = null;
+      }
+      if (!enabled() || !frame.matches(selector)) continue;
+      const entry = captured.get(source);
+      if (!entry || Date.now() - entry.createdAt > 120_000) continue;
+      if (!state || state.source !== source) {
+        state = { source, pending: false, attempted: false };
+        frames.set(frame, state);
+        frame.addEventListener('load', scheduleScan);
+      }
+      if (state.recoveredSource && !isEmpty(frame)) setState(frame, 'RECOVERED');
+      if (state.pending || state.attempted) continue;
+      state.pending = true;
+      setState(frame, 'WAITING');
+      setTimeout(() => recover(frame, state, entry), 2000);
+    }
+  }
+  function scheduleScan() {
+    if (scanQueued || captured.size === 0) return;
+    scanQueued = true;
+    setTimeout(scan, 50);
+  }
+  const nativeCreate = URL.createObjectURL;
+  URL.createObjectURL = new Proxy(nativeCreate, {
+    apply(target, thisArg, args) {
+      const url = Reflect.apply(target, thisArg, args);
+      try {
+        const blob = args[0];
+        if (/^text\/html(?:;|$)/i.test(blob?.type || '') && typeof blob.text === 'function'
+          && !(blob.size > 2_000_000) && new URL(url).origin === location.origin) {
+          captured.set(url, { blob, createdAt: Date.now() });
+          while (captured.size > 8) captured.delete(captured.keys().next().value);
+          scheduleScan();
+        }
+      } catch { /* Keep the page's native object URL behavior. */ }
+      return url;
+    }
+  });
+  new MutationObserver(scheduleScan).observe(document, {
+    childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'title', 'data-tango-active']
+  });
+})();

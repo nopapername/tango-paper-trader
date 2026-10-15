@@ -2636,6 +2636,8 @@
   function render() {
     capturePresetDraft();
     const chain = activeChain();
+    const chartRecoveryActive = String(Boolean(chain && runtime.settings?.enabled && runtime.state?.initialized));
+    if (host.getAttribute('data-tango-active') !== chartRecoveryActive) host.setAttribute('data-tango-active', chartRecoveryActive);
     if (!chain) {
       clearChainContext();
       return;
