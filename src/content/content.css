@@ -22,19 +22,19 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   border: 0 !important;
   box-sizing: border-box !important;
   display: flex !important;
-  height: 36px !important;
+  height: var(--tango-quick-buy-height, 36px) !important;
   justify-content: center !important;
   isolation: isolate;
   margin: 0 !important;
-  max-height: 36px !important;
+  max-height: var(--tango-quick-buy-height, 36px) !important;
   max-width: 100% !important;
-  min-height: 36px !important;
+  min-height: var(--tango-quick-buy-height, 36px) !important;
   min-width: 0 !important;
   overflow: hidden;
   padding: 0 !important;
   position: relative !important;
   transform: none !important;
-  width: 100% !important;
+  width: var(--tango-quick-buy-width, 100%) !important;
 }
 .BuyButton-continer.tango-native-buy-overridden .tango-quick-buy-action-host,
 .BuyButton-continer.tango-native-buy-overridden .tango-quick-buy-structural-host {
@@ -43,12 +43,12 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   box-sizing: border-box !important;
   display: flex !important;
   flex: 0 0 100% !important;
-  height: 36px !important;
+  height: var(--tango-quick-buy-height, 36px) !important;
   justify-content: center !important;
   margin: 0 !important;
-  max-height: 36px !important;
+  max-height: var(--tango-quick-buy-height, 36px) !important;
   max-width: 100% !important;
-  min-height: 36px !important;
+  min-height: var(--tango-quick-buy-height, 36px) !important;
   min-width: 0 !important;
   overflow: visible !important;
   padding: 0 !important;
@@ -74,8 +74,6 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 }
 .tango-list-quick-buy {
   --tango-quick-buy-accent: #7dd3fc;
-  --tango-quick-buy-display-text: 14px;
-  --tango-quick-buy-label-text: 10px;
   align-items: center !important;
   align-self: stretch !important;
   background: transparent !important;
@@ -87,11 +85,11 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   cursor: pointer;
   display: inline-flex !important;
   flex: 0 0 100% !important;
-  height: 36px !important;
+  height: var(--tango-quick-buy-height, 36px) !important;
   justify-content: center !important;
-  max-height: 36px !important;
+  max-height: var(--tango-quick-buy-height, 36px) !important;
   max-width: 100% !important;
-  min-height: 36px !important;
+  min-height: var(--tango-quick-buy-height, 36px) !important;
   min-width: 0 !important;
   outline: 0 !important;
   padding: 0 !important;
@@ -117,7 +115,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   display: inline-flex !important;
   flex: 1 1 auto !important;
   flex-direction: column !important;
-  font-size: var(--tango-quick-buy-display-text) !important;
+  font-size: var(--tango-quick-buy-display-text, 14px) !important;
   gap: 0 !important;
   height: 100% !important;
   justify-content: center !important;
@@ -144,7 +142,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   border-radius: 3px;
   color: #fff;
   flex: 0 0 auto;
-  font-size: var(--tango-quick-buy-label-text) !important;
+  font-size: var(--tango-quick-buy-label-text, 10px) !important;
   font-weight: 950;
   line-height: .9 !important;
   min-width: max-content;

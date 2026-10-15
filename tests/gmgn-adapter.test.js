@@ -21,8 +21,8 @@ const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
 const EVM_ADDRESS_2 = '0x2222222222222222222222222222222222222222';
 const PUMP_ADDRESS = 'AbCdEf123456789abcdefghijkmnopqrstuvwxyzPUMP';
 const LIVE_QUICK_BUY_SMALL = 'inline-flex items-center justify-center !h-[24px] !px-[6px] !leading-[12px] !text-[12px] !rounded-[4px] !bg-transparent';
-const LIVE_QUICK_BUY_LARGE = 'inline-flex items-center justify-center !h-[28px] !px-[8px] !leading-[14px] !text-[13px] !rounded-[6px] !bg-transparent';
-const LIVE_QUICK_BUY_XL = 'inline-flex items-center justify-center !h-[32px] !px-[10px] !leading-[16px] !text-[14px] !rounded-[8px] !bg-transparent';
+const LIVE_QUICK_BUY_LARGE = 'inline-flex items-center justify-center !h-[32px] !px-[8px] !leading-[14px] !text-[12px] !rounded-[6px] !bg-transparent';
+const LIVE_QUICK_BUY_XL = 'inline-flex items-center justify-center !h-[44px] !px-[19px] !leading-[16px] !text-[13px] !rounded-[8px] !bg-transparent';
 const LIVE_QUICK_BUY_GIANT = 'inline-flex items-center justify-center !h-[36px] !px-[12px] !leading-[18px] !text-[16px] !rounded-[10px] !bg-transparent';
 
 function deferred() {
@@ -107,60 +107,61 @@ function quickBuySafetyCascade(published) {
   return Object.fromEntries(Object.entries(computed).map(([name, result]) => [name, result.value]));
 }
 
-test('all native presentations produce one locked Tango giant control', () => {
-  const profiles = [
-    [LIVE_QUICK_BUY_SMALL, 'height:24px;color:red;border-radius:2px;--customize-button-ultra-color:#f00;'],
-    [LIVE_QUICK_BUY_LARGE, 'height:28px;color:green;border-radius:4px;--customize-button-ultra-color:#0f0;'],
-    [LIVE_QUICK_BUY_XL, 'height:32px;color:blue;border-radius:12px;--customize-button-ultra-color:#00f;'],
-    [LIVE_QUICK_BUY_GIANT, 'height:36px;color:white;border-radius:20px;--customize-button-ultra-color:#fff;'],
-    ['hidden pointer-events-none !h-[100px] !text-[64px] rounded-full text-red-500',
-      'height:100px;font-size:64px;color:red;border-radius:9999px;--customize-button-ultra-color:#f00;']
-  ];
-  for (const [className, styleText] of profiles) {
+test('native explicit sizes survive replacement and live changes preserve action identity', () => {
+  const cases = [[LIVE_QUICK_BUY_SMALL, 'small', 24], [LIVE_QUICK_BUY_LARGE, 'large', 32],
+    [LIVE_QUICK_BUY_XL, 'ultra', 44],
+    ['!h-full !w-full !h-[24px]', 'giant', 100]];
+  for (const [className, size, height] of cases) {
     const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
-    harness.setNativePresentation(className, styleText);
+    harness.setNativePresentation(className,
+      size === 'giant' ? '--quick-buy-pointer-height:100px;--quick-buy-pointer-width:100px;' : '');
     withQuickBuyGlobals(harness, {}, () => {
-      assert.equal(GMGN.discoverTokenCards(() => {}), 1);
-      assert.equal(harness.replacement.dataset.tangoQuickBuySize, 'giant');
-      assert.equal(harness.slot.dataset.tangoQuickBuySize, 'giant');
-      assert.equal(harness.replacement.className, 'tango-list-quick-buy');
-      assert.equal(harness.replacement.style.cssText, '');
-      assert.deepEqual(harness.replacement.children.map((child) => child.className), [
-        'tango-quick-buy-content'
-      ]);
-      assert.deepEqual(harness.replacement.children[0].children.map((child) => child.className), [
-        'tango-paper-hint', 'tango-buy-amount'
-      ]);
+      GMGN.discoverTokenCards(() => {});
+      const binding = harness.slot.__tangoQuickBuyBinding;
+      assert.equal(binding.quickBuyProfile.id, size);
+      assert.equal(binding.quickBuyProfile.heightPx, height);
+      if (size === 'ultra') assert.equal(binding.quickBuyProfile.amountTextPx, 13);
+      assert.equal(harness.slot.style.getPropertyValue('--tango-quick-buy-height'), size === 'giant' ? '100%' : height + 'px');
+      const identity = binding.actionId;
+      const stable = { action: binding.action, generation: binding.generation, nonce: binding.bindingNonce, replacement: binding.replacement };
+      assert.equal(binding.replacement.className, 'tango-list-quick-buy');
+      assert.equal(binding.replacement.style.cssText, '');
+      assert.deepEqual(binding.replacement.children.map((child) => child.className), ['tango-quick-buy-content']);
+      assert.deepEqual(binding.replacement.children[0].children.map((child) => child.className), ['tango-paper-hint', 'tango-buy-amount']);
+      harness.setNativePresentation(LIVE_QUICK_BUY_SMALL, '');
+      GMGN.discoverTokenCards(() => {}, 1, 'PAPER', [harness.card]);
+      assert.equal(harness.slot.__tangoQuickBuyBinding, binding);
+      assert.equal(binding.actionId, identity);
+      assert.equal(binding.action, stable.action);
+      assert.equal(binding.generation, stable.generation);
+      assert.equal(binding.bindingNonce, stable.nonce);
+      assert.equal(binding.replacement, stable.replacement);
+      assert.equal(binding.replacement.className, 'tango-list-quick-buy');
+      assert.equal(binding.replacement.style.cssText, '');
+      assert.equal(binding.quickBuyProfile.heightPx, 24);
+      assert.equal(harness.nativeControl.isConnected, false);
+      GMGN.discoverTokenCards(() => {}, 1, 'PAPER', [harness.card]);
+      assert.equal(binding.quickBuyProfile.heightPx, 24, 'detached leaf retains native size');
+      GMGN.clearQuickBuy();
+      assert.equal(harness.slot.style.getPropertyValue('--tango-quick-buy-height'), '');
     });
   }
 });
 
-test('native presentation mutation preserves giant geometry and action identity', () => {
+test('health probe detects Giant layout mode changes at the same pointer height and repairs geometry drift', () => {
   const harness = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
-  const guard = guardHarness();
-  withQuickBuyGlobals(harness, { guard }, () => {
-    assert.equal(GMGN.discoverTokenCards(() => {}), 1);
-    const binding = harness.slot.__tangoQuickBuyBinding;
-    const initial = {
-      replacement: binding.replacement,
-      binding,
-      action: binding.action,
-      generation: binding.generation,
-      actionId: binding.actionId,
-      nonce: binding.bindingNonce
-    };
-
-    harness.setNativePresentation(LIVE_QUICK_BUY_SMALL, 'color:red;border-radius:2px;');
-    assert.equal(GMGN.discoverTokenCards(() => {}, 1, 'PAPER', [harness.card]), 0);
-    assert.equal(harness.slot.__tangoQuickBuyBinding, initial.binding);
-    assert.equal(binding.replacement, initial.replacement);
-    assert.equal(binding.action, initial.action);
-    assert.equal(binding.generation, initial.generation);
-    assert.equal(binding.actionId, initial.actionId);
-    assert.equal(binding.bindingNonce, initial.nonce);
-    assert.equal(binding.replacement.dataset.tangoQuickBuySize, 'giant');
-    assert.equal(binding.replacement.className, 'tango-list-quick-buy');
-    assert.equal(binding.replacement.style.cssText, '');
+  harness.setNativePresentation('!h-[100px]', '');
+  withQuickBuyGlobals(harness, {}, () => {
+    GMGN.discoverTokenCards(() => {});
+    harness.nativeControl.className = '!h-full !h-[24px]';
+    harness.nativeControl.style.cssText = '--quick-buy-pointer-height:100px;';
+    assert.equal(GMGN.quickBuyNeedsReconcile(), true, 'same px but different full-height geometry');
+    GMGN.discoverTokenCards(() => {}, 1, 'PAPER', [harness.card]);
+    assert.equal(harness.slot.style.getPropertyValue('--tango-quick-buy-height'), '100%');
+    harness.slot.style.setProperty('--tango-quick-buy-height', '36px');
+    assert.equal(GMGN.quickBuyNeedsReconcile(), true, 'authored geometry must be repaired');
+    GMGN.discoverTokenCards(() => {}, 1, 'PAPER', [harness.card]);
+    assert.equal(harness.slot.style.getPropertyValue('--tango-quick-buy-height'), '100%');
   });
 });
 
@@ -516,7 +517,7 @@ ${safetyCss}
 ${contentCss}
 </style></head><body><main id="cases"></main><script>
 (() => {
-  const heights = [24, 28, 32, 36, 48, 113];
+  const heights = [24, 32, 44, 36, 100, 132];
   const rect = (element) => {
     const value = element.getBoundingClientRect();
     return {
@@ -540,10 +541,14 @@ ${contentCss}
     fixture.className = 'fixture';
     fixture.id = id + '-' + requestedHostHeight;
     fixture.style.setProperty('--requested-height', requestedHostHeight + 'px');
+    if (requestedHostHeight >= 100) fixture.style.height = requestedHostHeight + 'px';
     const slot = document.createElement('div');
     slot.className = 'relative !w-full !h-full !box-border group-btns max-w-[200px] border BuyButton-continer tango-native-buy-overridden hostile-slot';
     slot.dataset.tangoQuickBuy = '1';
-    slot.dataset.tangoQuickBuySize = 'giant';
+    slot.dataset.tangoQuickBuySize = 'native';
+    slot.style.setProperty('--tango-quick-buy-height', requestedHostHeight >= 100 ? '100%' : requestedHostHeight + 'px');
+    slot.style.setProperty('--tango-quick-buy-display-text', requestedHostHeight <= 32 ? '12px' : requestedHostHeight === 44 ? '13px' : '14px');
+    slot.style.setProperty('--tango-quick-buy-label-text', requestedHostHeight <= 24 ? '9px' : '10px');
     const nested = id !== 'direct';
     const overflow = id === 'real-wrapper' ? document.createElement('div') : null;
     if (overflow) {
@@ -581,17 +586,20 @@ ${contentCss}
       overflow.append(host);
       slot.append(overflow);
     } else if (nested) slot.append(host);
-    fixture.append(slot);
+    const sibling = document.createElement('button');
+    sibling.textContent = 'native sibling';
+    fixture.append(slot, sibling);
     document.querySelector('#cases').append(fixture);
-    return { fixture, fixtureKind: id, slot, overflow, host, paper, content, hint, amount, requestedHostHeight };
+    return { fixture, sibling, fixtureKind: id, slot, overflow, host, paper, content, hint, amount, requestedHostHeight };
   };
   const controls = heights.flatMap((height) => [
     build('direct', height), build('nested', height), build('real-wrapper', height)
   ]);
   document.body.offsetHeight;
-  const states = controls.map(({ fixtureKind, slot, overflow, host, paper, content, hint, amount, requestedHostHeight }) => ({
+  const states = controls.map(({ fixtureKind, sibling, slot, overflow, host, paper, content, hint, amount, requestedHostHeight }) => ({
     fixture: fixtureKind,
     requestedHostHeight,
+    siblingUncovered: rect(sibling).top >= rect(slot).bottom,
     rects: {
       slot: rect(slot),
       overflow: overflow ? rect(overflow) : null,
@@ -671,7 +679,7 @@ ${contentCss}
   }
 }
 
-test('headless Chrome fills the exact Giant slot through direct nested and GMGN-shaped wrapper chains', () => {
+test('headless Chrome fills native-sized slots through direct nested and GMGN-shaped wrapper chains', () => {
   const report = headlessLockedGiantQuickBuyLayoutReport();
   assert.equal(report.states.length, 18, 'three topologies x six hostile native heights');
   const near = (actual, expected, message) => {
@@ -679,7 +687,7 @@ test('headless Chrome fills the exact Giant slot through direct nested and GMGN-
   };
   for (const state of report.states) {
     const expected = state.rects.slot;
-    assert.equal(expected.height, 36, `${state.fixture}:${state.requestedHostHeight}: slot height`);
+    assert.equal(expected.height, state.requestedHostHeight, `${state.fixture}:${state.requestedHostHeight}: slot height`);
     assert.equal(expected.width, 120, `${state.fixture}:${state.requestedHostHeight}: slot width`);
     for (const [layer, layerRect] of Object.entries(state.rects)) {
       if (!layerRect) continue;
@@ -695,13 +703,14 @@ test('headless Chrome fills the exact Giant slot through direct nested and GMGN-
       assert.equal(style.transform, 'none', `${state.fixture}:${style.kind}: transform`);
       if (style.kind !== 'slot') assert.equal(style.overflow, 'visible');
     }
-    assert.equal(state.amountFont, 14, `${state.fixture}: amount font`);
-    assert.equal(state.hintFont, 10, `${state.fixture}: hint font`);
+    assert.equal(state.amountFont, state.requestedHostHeight <= 32 ? 12 : state.requestedHostHeight === 44 ? 13 : 14, `${state.fixture}: amount font`);
+    assert.equal(state.hintFont, state.requestedHostHeight <= 24 ? 9 : 10, `${state.fixture}: hint font`);
     assert.equal(state.paperRadius, '6px', `${state.fixture}: Tango radius`);
     assert.equal(state.paperColor, 'rgb(125, 211, 252)', `${state.fixture}: Tango accent`);
     assert.notEqual(state.contentBackground, 'rgba(0, 0, 0, 0)', `${state.fixture}: painted surface`);
     assert.equal(state.contentAlign, 'center');
     assert.equal(state.contentJustify, 'center');
+    assert.equal(state.siblingUncovered, true, 'native siblings remain uncovered');
     assert.equal(state.textInsideContent, true, `${state.fixture}: unclipped centered text`);
   }
   assert.equal(report.focus.active, true);
@@ -799,6 +808,7 @@ function quickBuyHarness({
   const slot = {
     isConnected: true,
     dataset: {},
+    style: { values: new Map(), setProperty(k, v) { this.values.set(k, v); }, getPropertyValue(k) { return this.values.get(k) || ''; }, getPropertyPriority() { return ''; }, removeProperty(k) { this.values.delete(k); } },
     classList: {
       add: (...names) => names.forEach((name) => classes.add(name)),
       remove: (...names) => names.forEach((name) => classes.delete(name)),
@@ -5816,7 +5826,7 @@ function headlessQuickBuyMutationLifecycleReport() {
   try {
     const page = `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'">
-<title>${HEADLESS_LAYOUT_PENDING_TITLE}</title></head><body>
+<title>${HEADLESS_LAYOUT_PENDING_TITLE}</title><style>${fs.readFileSync(path.join(root, 'src/content/content.css'), 'utf8')}</style></head><body>
 <div data-sentry-component="TrenchColumn">New creation
  <div class="group/a" href="https://gmgn.ai/base/token/${EVM_ADDRESS}">${EVM_ADDRESS}<br>TEST Test Token<br>MC<br>$10K
   <div class="BuyButton-continer"><div class="initial-wrapper"><div class="group/btn"><button data-testid="quickbuy">0.1 ETH</button></div></div></div>
@@ -5867,6 +5877,7 @@ function headlessQuickBuyMutationLifecycleReport() {
     report.phases.push({ name, ...counts,
       papers: slot.querySelectorAll('.tango-list-quick-buy').length,
       nativeControls: [...slot.querySelectorAll('button')].filter((node) => !paperQuickBuyMutationNode(node)).length,
+      size: binding?.quickBuyProfile?.id, height: binding?.replacement?.getBoundingClientRect().height,
       bindingNonce: binding?.bindingNonce, paperConnected: binding?.replacement?.isConnected === true,
       structuralHosts: binding?.structuralHosts?.length || 0,
       wrappersMarked: (binding?.structuralHosts || []).every((node) => node.classList.contains('tango-quick-buy-structural-host')),
@@ -5883,7 +5894,7 @@ function headlessQuickBuyMutationLifecycleReport() {
     gmgn.discoverTokenCards(onQuickBuy, 0.1, 'PAPER', [slot]);
     setTimeout(() => {
       snapshot('stable-rediscovery');
-      initialHost.className = 'group/btn gmgn-new-class';
+      initialHost.className = 'group/btn !h-[44px] !px-[19px] !text-[13px]';
     }, 500);
     setTimeout(() => snapshot('class-drift-repaired'), 1000);
     setTimeout(() => {
@@ -5935,6 +5946,7 @@ function headlessQuickBuyMutationLifecycleReport() {
         structuralHosts: slot.querySelectorAll('.tango-quick-buy-structural-host').length,
         actionHosts: slot.querySelectorAll('.tango-quick-buy-action-host').length,
         overridden: slot.classList.contains('tango-native-buy-overridden'),
+        sizeVariable: slot.style.getPropertyValue('--tango-quick-buy-height'),
         nativeOrders, paperOrders
       };
       delete report.reactNative; delete report.latestNative;
@@ -5965,6 +5977,8 @@ test('native MutationObserver converges after rediscovery class drift and React 
   const report = headlessQuickBuyMutationLifecycleReport();
   assert.equal(report.initialInjected, 1);
   const phases = Object.fromEntries(report.phases.map((phase) => [phase.name, phase]));
+  assert.equal(phases['class-drift-repaired'].size, 'ultra');
+  assert.equal(phases['class-drift-repaired'].height, 44, 'live host size updates after native leaf removal');
   const stable = phases['stable-rediscovery'];
   assert.equal(stable.relevantClassStyleRecords, 0,
     'stable adapter rediscovery must emit no ancestor class/style records');
@@ -5998,7 +6012,7 @@ test('native MutationObserver converges after rediscovery class drift and React 
   assert.equal(report.latestNativeIsAuthoritative, true);
   assert.deepEqual(report.restored, {
     latestNativeConnected: true, precedingNativeConnected: false, originalNativeConnected: false,
-    papers: 0, structuralHosts: 0, actionHosts: 0, overridden: false,
+    papers: 0, structuralHosts: 0, actionHosts: 0, overridden: false, sizeVariable: '',
     nativeOrders: 0, paperOrders: 0
   }, 'master OFF restores only the latest coherent native generation and releases geometry');
 });

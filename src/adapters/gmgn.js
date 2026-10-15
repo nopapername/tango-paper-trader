@@ -1567,16 +1567,69 @@
     if (!enabled && hasClass) element.classList.remove?.(name);
   }
 
+  // Read GMGN's authored sizing signals. Computed geometry already includes
+  // our overrides after mounting, so it cannot identify a later native setting.
+  function nativeQuickBuyProfile(slot, replacement) {
+    const binding = slot?.__tangoQuickBuyBinding;
+    const host = lockedQuickBuyActionHost(slot, replacement);
+    const native = nativeQuickBuyControl(slot) || binding?.nativeControl;
+    const sources = [...new Set([host, slot, native].filter(Boolean))];
+    const inline = (node, name) => node.style?.getPropertyValue?.(name)
+      || String(node.style?.cssText || '').match(new RegExp('(?:^|;)\\s*' + name + '\\s*:\\s*([^;]+)'))?.[1] || '';
+    const px = (value) => /^\s*\d+(?:\.\d+)?px\s*$/.test(value)
+      ? Math.min(240, Math.max(16, Number.parseFloat(value))) : null;
+    for (const node of sources) {
+      const classes = String(node.className || '');
+      const pointerHeight = sources.map((item) => px(inline(item, '--quick-buy-pointer-height'))).find(Boolean);
+      if (/(?:^|\s)!?h-full(?:\s|$)/.test(classes) && pointerHeight) {
+        return { id: 'giant', heightPx: pointerHeight, heightCss: '100%', widthPx: null,
+          amountTextPx: 14, hintTextPx: 10 };
+      }
+      const authoredHeight = classes.match(/(?:^|\s)!?h-\[(\d+(?:\.\d+)?)px\]/)?.[1];
+      const height = authoredHeight ? px(authoredHeight + 'px') : px(inline(node, 'height'));
+      if (!height) continue;
+      const id = height <= 24 ? 'small' : height <= 32 ? 'large' : height === 44 ? 'ultra' : 'giant';
+      return { id, heightPx: height, widthPx: null,
+        amountTextPx: height <= 32 ? 12 : height === 44 ? 13 : 14,
+        hintTextPx: height <= 24 ? 9 : 10 };
+    }
+    return LOCKED_QUICK_BUY_PROFILE;
+  }
+
+  function quickBuyGeometryValues(profile) {
+    return {
+      '--tango-quick-buy-height': profile.heightCss || profile.heightPx + 'px',
+      '--tango-quick-buy-width': profile.widthPx ? profile.widthPx + 'px' : '100%',
+      '--tango-quick-buy-display-text': profile.amountTextPx + 'px',
+      '--tango-quick-buy-label-text': profile.hintTextPx + 'px'
+    };
+  }
+
+  function applyQuickBuyGeometry(slot, profile) {
+    if (!slot?.style?.setProperty) return;
+    const values = quickBuyGeometryValues(profile);
+    slot.__tangoQuickBuyOriginalGeometry ||= new Map();
+    for (const [name, value] of Object.entries(values)) {
+      if (!slot.__tangoQuickBuyOriginalGeometry.has(name)) {
+        slot.__tangoQuickBuyOriginalGeometry.set(name, [slot.style.getPropertyValue?.(name) || '',
+          slot.style.getPropertyPriority?.(name) || '']);
+      }
+      if (slot.style.getPropertyValue?.(name) !== value) slot.style.setProperty(name, value);
+    }
+  }
+
   function applyLockedQuickBuyPresentation(replacement, slot = null) {
     if (!replacement) return LOCKED_QUICK_BUY_PROFILE;
+    const profile = nativeQuickBuyProfile(slot, replacement);
+    applyQuickBuyGeometry(slot, profile);
     if (replacement.className !== 'tango-list-quick-buy') replacement.className = 'tango-list-quick-buy';
     if (replacement.style && replacement.style.cssText !== '') replacement.style.cssText = '';
     ensureInertQuickBuy(replacement);
-    if (replacement.dataset.tangoQuickBuySize !== LOCKED_QUICK_BUY_PROFILE.id) {
-      replacement.dataset.tangoQuickBuySize = LOCKED_QUICK_BUY_PROFILE.id;
+    if (replacement.dataset.tangoQuickBuySize !== profile.id) {
+      replacement.dataset.tangoQuickBuySize = profile.id;
     }
-    if (slot?.dataset && slot.dataset.tangoQuickBuySize !== LOCKED_QUICK_BUY_PROFILE.id) {
-      slot.dataset.tangoQuickBuySize = LOCKED_QUICK_BUY_PROFILE.id;
+    if (slot?.dataset && slot.dataset.tangoQuickBuySize !== profile.id) {
+      slot.dataset.tangoQuickBuySize = profile.id;
     }
     const binding = slot?.__tangoQuickBuyBinding;
     const actionHost = lockedQuickBuyActionHost(slot, replacement);
@@ -1593,9 +1646,9 @@
     if (binding) {
       binding.actionHost = actionHost;
       binding.structuralHosts = structuralHosts;
-      binding.quickBuyProfile = LOCKED_QUICK_BUY_PROFILE;
+      binding.quickBuyProfile = profile;
     }
-    return LOCKED_QUICK_BUY_PROFILE;
+    return profile;
   }
 
   function syncQuickBuyPresentation(slot) {
@@ -2007,10 +2060,17 @@
         || !Tango.NativeQuickBuyGuard?.isPaperActionTrusted?.(
           replacement, paperGuardIdentity(binding)
         )) return true;
+      const profile = nativeQuickBuyProfile(slot, replacement);
       if (replacement.className !== 'tango-list-quick-buy'
         || replacement.style?.cssText
-        || replacement.dataset?.tangoQuickBuySize !== 'giant'
-        || slot.dataset?.tangoQuickBuySize !== 'giant') return true;
+        || replacement.dataset?.tangoQuickBuySize !== profile.id
+        || slot.dataset?.tangoQuickBuySize !== profile.id
+        || ['heightPx', 'heightCss', 'widthPx', 'amountTextPx', 'hintTextPx'].some(
+          (key) => binding.quickBuyProfile?.[key] !== profile[key]
+        )
+        || (slot.style?.getPropertyValue && Object.entries(quickBuyGeometryValues(profile)).some(
+          ([name, value]) => slot.style.getPropertyValue(name) !== value
+        ))) return true;
       if (replacement.dataset?.tangoPaperAction !== 'quick-buy'
         || replacement.dataset?.tangoActionId !== binding.actionId
         || replacement.dataset?.tangoBindingNonce !== binding.bindingNonce
@@ -2296,6 +2356,11 @@
     if (canRestore) replacement.replaceWith(original);
     else replacement?.remove?.();
     if (canRestore) restoreAdditionalNativeQuickBuyControls(slot, binding);
+    for (const [name, [value, priority]] of slot.__tangoQuickBuyOriginalGeometry || []) {
+      if (value) slot.style?.setProperty?.(name, value, priority);
+      else slot.style?.removeProperty?.(name);
+    }
+    delete slot.__tangoQuickBuyOriginalGeometry;
     delete slot.__tangoQuickBuyBinding;
     delete slot.__tangoOriginalQuickBuy;
     delete slot.__tangoReplacementQuickBuy;

@@ -86,13 +86,21 @@ function loadChartBridge({
   }
   const makeElement = () => {
     const children = [];
+    const eventListeners = new Map();
     return {
       id: '', isConnected: true, style: {}, children,
       get childElementCount() { return children.length; },
       append(...nodes) { children.push(...nodes); },
       appendChild(node) { children.push(node); return node; },
       replaceChildren(...nodes) { children.splice(0, children.length, ...nodes); },
-      addEventListener() {}, setAttribute() {}
+      addEventListener(type, listener) {
+        if (!eventListeners.has(type)) eventListeners.set(type, []);
+        eventListeners.get(type).push(listener);
+      },
+      dispatchEvent(event) {
+        for (const listener of eventListeners.get(event.type) || []) listener(event);
+      },
+      setAttribute() {}
     };
   };
   const instrumented = chartSource.replace(
@@ -122,6 +130,7 @@ function loadChartBridge({
         };
       },
       trackedCanvasCount() { return labelsByCanvas.size; },
+      overlayNodes() { return overlay?.children || []; },
       hideMarker(id) { hiddenMarkerIds.add(id); renderMarkers(); },
       record(context, text, x, y) { recordLabel(context, text, x, y); },
       seedAxisRecords(context, samples) {
@@ -230,6 +239,55 @@ function loadChartBridge({
     )
   };
 }
+
+test('BUY and SELL numeric labels survive replay, actual close clicks hide one line, and reload repaints', async (t) => {
+  for (const scenario of [
+    { axisHint: 'MARKET_CAP', anchors: ['$5K', '$6K', '$7K'], buy: 6_000, sell: 6_500,
+      expected: ['Paper Buy · $6.00K', 'Paper Sell · $6.50K'] },
+    { axisHint: 'PRICE', anchors: ['$1', '$2', '$3'], buy: 2, sell: 2.5,
+      expected: ['Paper Buy · $2.0000', 'Paper Sell · $2.5000'] }
+  ]) {
+    await t.test(scenario.axisHint, () => {
+      const isMarketCap = scenario.axisHint === 'MARKET_CAP';
+      const coordinate = (value) => ({ marketCap: isMarketCap ? value : 0, price: isMarketCap ? 0 : value });
+      const payload = {
+        chain: 'bsc', tokenAddress: BSC_ADDRESS,
+        currentMarketCap: isMarketCap ? scenario.buy : 0,
+        currentPrice: isMarketCap ? 0 : scenario.buy,
+        markers: [
+          { id: 'buy', side: 'BUY', ...coordinate(scenario.buy), label: 'Paper Buy', closeLabel: 'Hide line' },
+          { id: 'sell', side: 'SELL', ...coordinate(scenario.sell), label: 'Paper Sell', closeLabel: 'Hide line' }
+        ]
+      };
+      const frameContext = { axisHint: scenario.axisHint, frameGeneration: 1, probeId: 'test:1' };
+      const captureAnchors = (chart) => scenario.anchors.forEach((text, index) => {
+        chart.api.record(chart.canvasContext, text, 950, 400 - index * 100);
+      });
+      const texts = (chart) => chart.api.overlayNodes().map(line => line.children[0].children[0].textContent);
+      const chart = loadChartBridge();
+      captureAnchors(chart);
+      chart.markers(payload, frameContext);
+      assert.deepEqual(Array.from(texts(chart)), scenario.expected);
+
+      const close = chart.api.overlayNodes()[0].children[0].children[1];
+      let prevented = 0;
+      let stopped = 0;
+      close.dispatchEvent({ type: 'click', preventDefault() { prevented += 1; }, stopPropagation() { stopped += 1; } });
+      assert.equal(prevented, 1);
+      assert.equal(stopped, 1);
+      assert.deepEqual(Array.from(texts(chart)), [scenario.expected[1]], 'click hides only the selected BUY');
+      chart.markers(payload, frameContext);
+      assert.deepEqual(Array.from(texts(chart)), [scenario.expected[1]], 'same-token replay preserves the hidden line');
+
+      const reloaded = loadChartBridge();
+      reloaded.markers(payload, frameContext);
+      assert.equal(reloaded.api.snapshot().overlayChildren, 0, 'reload waits for its own axis anchors');
+      captureAnchors(reloaded);
+      reloaded.api.render();
+      assert.deepEqual(Array.from(texts(reloaded)), scenario.expected, 'fresh bridge redraws BUY and SELL after new anchors');
+    });
+  }
+});
 
 test('chart child recovers a dropped startup READY from one exact probe without marker feedback', () => {
   const chart = loadChartBridge();

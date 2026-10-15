@@ -248,7 +248,7 @@ test('quick-buy lifecycle has a cheap 750ms drift probe and observes presentatio
 });
 
 
-test('paper quick-buy owns one exact full-fill locked Giant rectangle', () => {
+test('paper quick-buy fills the native-sized rectangle with a safe fallback', () => {
   const declarationsFor = (wanted) => {
     for (const match of cssSource.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
       const selectors = match[1].split(',').map((selector) => selector.trim());
@@ -270,10 +270,10 @@ test('paper quick-buy owns one exact full-fill locked Giant rectangle', () => {
 
   const assertExactUpstream = (name, sourceRule) => {
     assert.match(sourceRule, /box-sizing:\s*border-box\s*!important/, `${name}: border box`);
-    assert.match(sourceRule, /height:\s*36px\s*!important/, `${name}: height`);
-    assert.match(sourceRule, /min-height:\s*36px\s*!important/, `${name}: min height`);
-    assert.match(sourceRule, /max-height:\s*36px\s*!important/, `${name}: max height`);
-    assert.match(sourceRule, /width:\s*100%\s*!important/, `${name}: width`);
+    assert.match(sourceRule, /height:\s*var\(--tango-quick-buy-height,\s*36px\)\s*!important/, `${name}: height`);
+    assert.match(sourceRule, /min-height:\s*var\(--tango-quick-buy-height,\s*36px\)\s*!important/, `${name}: min height`);
+    assert.match(sourceRule, /max-height:\s*var\(--tango-quick-buy-height,\s*36px\)\s*!important/, `${name}: max height`);
+    assert.match(sourceRule, /width:\s*(?:100%|var\(--tango-quick-buy-width,\s*100%\))\s*!important/, `${name}: width`);
     assert.match(sourceRule, /min-width:\s*0\s*!important/, `${name}: min width`);
     assert.match(sourceRule, /padding:\s*0\s*!important/, `${name}: padding`);
     assert.match(sourceRule, /margin:\s*0\s*!important/, `${name}: margin`);
@@ -284,21 +284,20 @@ test('paper quick-buy owns one exact full-fill locked Giant rectangle', () => {
   assertExactUpstream('action host', hostRule);
   assertExactUpstream('structural host', structuralRule);
 
-  assert.match(buttonRule, /height:\s*36px\s*!important/);
-  assert.match(buttonRule, /min-height:\s*36px\s*!important/);
-  assert.match(buttonRule, /max-height:\s*36px\s*!important/);
+  assert.match(buttonRule, /height:\s*var\(--tango-quick-buy-height,\s*36px\)\s*!important/);
+  assert.match(buttonRule, /min-height:\s*var\(--tango-quick-buy-height,\s*36px\)\s*!important/);
+  assert.match(buttonRule, /max-height:\s*var\(--tango-quick-buy-height,\s*36px\)\s*!important/);
   assert.match(buttonRule, /width:\s*100%\s*!important/);
   assert.match(buttonRule, /align-self:\s*stretch\s*!important/);
   assert.match(buttonRule, /flex:\s*0\s+0\s+100%\s*!important/);
   assert.match(buttonRule, /border-radius:\s*6px\s*!important/);
-  assert.match(buttonRule, /--tango-quick-buy-display-text:\s*14px/);
-  assert.match(buttonRule, /--tango-quick-buy-label-text:\s*10px/);
+  assert.match(wrapperRule, /var\(--tango-quick-buy-display-text,\s*14px\)/);
   assert.match(wrapperRule, /align-self:\s*stretch\s*!important/);
   assert.match(wrapperRule, /flex:\s*1\s+1\s+auto\s*!important/);
   assert.match(wrapperRule, /height:\s*100%\s*!important/);
   assert.match(wrapperRule, /width:\s*100%\s*!important/);
   assert.match(wrapperRule, /background:\s*color-mix\(in srgb,\s*var\(--tango-quick-buy-accent\)\s*16%,\s*transparent\)\s*!important/i);
-  assert.match(hintRule, /font-size:\s*var\(--tango-quick-buy-label-text\)\s*!important/);
+  assert.match(hintRule, /font-size:\s*var\(--tango-quick-buy-label-text,\s*10px\)\s*!important/);
   assert.match(amountRule, /font-size:\s*1em\s*!important/);
   assert.match(hoverRule, /var\(--tango-quick-buy-accent\)\s*24%/);
   assert.match(focusRule, /var\(--tango-quick-buy-accent\)/);
