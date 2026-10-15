@@ -46,23 +46,27 @@
   }
 
   function explicitSupplyField(object) {
-    const matches = EXPLICIT_SUPPLY_KEYS
-      .filter((key) => object?.[key] != null)
-      .map((key) => ({ key, value: numberFrom(object[key]) }))
-      .filter((match) => match.value > 0);
-    const values = new Set(matches.map((match) => match.value));
-    return {
-      ...(matches[0] || { key: '', value: 0 }),
-      ambiguous: values.size > 1
-    };
+    let first = null; let ambiguous = false;
+    for (const key of EXPLICIT_SUPPLY_KEYS) {
+      if (object?.[key] == null) continue;
+      const value = numberFrom(object[key]);
+      if (!(value > 0)) continue;
+      if (!first) first = { key, value };
+      else if (first.value !== value) ambiguous = true;
+    }
+    return { ...(first || { key: '', value: 0 }), ambiguous };
   }
 
   function objectAddress(object, chain) {
-    const addresses = ADDRESS_KEYS
-      .filter((key) => object?.[key] != null && Tango.Chains.validateAddress(chain.id, object[key]))
-      .map((key) => Tango.Chains.normalizeAddress(chain.id, object[key]));
-    const unique = [...new Set(addresses)];
-    return { address: unique[0] || '', conflicting: unique.length > 1 };
+    let address = ''; let conflicting = false;
+    for (const key of ADDRESS_KEYS) {
+      const candidate = object?.[key];
+      if (candidate == null || !Tango.Chains.validateAddress(chain.id, candidate)) continue;
+      const normalized = Tango.Chains.normalizeAddress(chain.id, candidate);
+      if (!address) address = normalized;
+      else if (address !== normalized) conflicting = true;
+    }
+    return { address, conflicting };
   }
 
   function coherentValuationTriple(priceUsd, marketCapUsd, totalSupply) {

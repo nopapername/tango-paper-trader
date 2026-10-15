@@ -52,6 +52,19 @@
     return `$${number(numeric, language, digits)}`;
   }
 
+  function dateTimeFormatter(language) {
+    // One formatter per rendered batch: reuse rows without retaining a stale
+    // system time zone after a user changes their OS settings.
+    const formatter = new Intl.DateTimeFormat(language, {
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric'
+    });
+    return value => {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? date.toLocaleString(language) : formatter.format(date);
+    };
+  }
+
   function duration(ms, language) {
     const seconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
     if (seconds < 60) return `${seconds}s`;
@@ -63,5 +76,5 @@
     return language === 'zh-CN' ? `${days}天 ${hours % 24}小时` : `${days}d ${hours % 24}h`;
   }
 
-  Tango.Format = { compact, number, native, sol, percent, usd, duration };
+  Tango.Format = { compact, number, native, sol, percent, usd, duration, dateTimeFormatter };
 })(globalThis);

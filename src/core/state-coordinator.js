@@ -78,6 +78,18 @@
       throw new Error('invalidStorageBudget');
     }
     const normalized = Tango.State.normalizeState(state, settings);
+    // Exact UTF-8 measurement and strict validation remain mandatory. Build
+    // eviction dependencies only when bytes or record counts actually exceed limits.
+    if (normalized.trades.length <= Tango.MAX_TRADES
+      && normalized.calibrations.length <= Tango.MAX_TRADES) {
+      const measuredBytes = serializedStateBytes(normalized);
+      if (measuredBytes <= budgetBytes) {
+        Tango.State.normalizeState(normalized, settings, { strict: true });
+        return { state: normalized, measuredBytes, budgetBytes,
+          removedTradeIds: [], removedCalibrationIds: [] };
+      }
+    }
+
     const protectedTradeIndexes = new Set(options.protectedTradeIndexes || []);
     const protectedCalibrationIndexes = new Set(options.protectedCalibrationIndexes || []);
     const openFallbackKeys = new Set(Object.values(normalized.positions || {})
@@ -461,11 +473,22 @@
       return prepared.state;
     }
 
+    let readTask = null;
+    function invalidateReads() { readTask = null; }
     function getAll() {
-      return serialized(readSnapshot);
+      if (!readTask) {
+        const task = serialized(readSnapshot);
+        readTask = task;
+        const release = () => { if (readTask === task) readTask = null; };
+        task.then(release, release);
+      }
+      return readTask.then(snapshot => typeof global.structuredClone === 'function'
+        ? global.structuredClone(snapshot) : JSON.parse(JSON.stringify(snapshot)));
     }
 
     function mutate(command) {
+      // A read requested after any mutation must remain behind that mutation.
+      invalidateReads();
       return serialized(async () => {
         const { state, settings, migrationPending } = await readSnapshot({
           persistMigration: false,
@@ -694,7 +717,7 @@
       });
     }
 
-    return { getAll, mutate };
+    return { getAll, mutate, invalidateReads };
   }
 
   Tango.StateCoordinator = { create, serializedStateBytes, compactStateForStorage };

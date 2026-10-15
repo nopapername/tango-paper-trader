@@ -603,7 +603,9 @@
     return overlay;
   }
 
+  let lastDiagnosticKey = ''; let lastDiagnosticAt = 0;
   function renderMarkers() {
+    if (document.hidden) return;
     try {
       renderMarkerOverlay();
     } finally {
@@ -614,7 +616,12 @@
           : !visibleCount ? 'HIDDEN'
             : !frameContextMatchesObservedProbe(activeFrameContext) ? 'FRAME_CONTEXT_MISMATCH'
               : chartDiagnostic.reason;
-        // Public DOM diagnostics contain only rendering state, never token or trade identifiers.
+        const diagnosticKey = [reason, markers.length, visibleCount, overlay.childElementCount,
+          axisLabelSequence, markerAxisSequenceFloor, chartDiagnostic.axisHint,
+          chartDiagnostic.frameGeneration].join(':');
+        const now = Date.now();
+        if (diagnosticKey !== lastDiagnosticKey || now - lastDiagnosticAt >= 1000 || now < lastDiagnosticAt) {
+        // Diagnostic sampling has its own cadence; rendering and invalidation stay immediate.
         overlay.setAttribute('data-tango-chart-diagnostic', JSON.stringify({
           reason,
           markerCount: markers.length,
@@ -642,6 +649,8 @@
             };
           })
         }));
+        lastDiagnosticKey = diagnosticKey; lastDiagnosticAt = now;
+        }
       }
     }
   }
@@ -1035,5 +1044,6 @@
     markerEconomicCoordinates.clear();
     renderMarkers();
   }, { passive: true });
+  document.addEventListener?.('visibilitychange', () => { if (!document.hidden) renderMarkers(); });
   setInterval(renderMarkers, 400);
 })();

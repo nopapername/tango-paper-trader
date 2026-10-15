@@ -184,6 +184,7 @@
       const candidate = { trade, ...coordinates };
       if (!firstBuy && trade.side === 'BUY') firstBuy = candidate;
       if (trade.side === 'SELL' && sellTrades.length < 4) sellTrades.push(candidate);
+      if (firstBuy && sellTrades.length === 4 && matchingTradeSupply > 0) break;
     }
 
     const knownSupply = knownExecutionSupply(position) || matchingTradeSupply;

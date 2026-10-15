@@ -4,6 +4,7 @@
 
   const quoteCache = new Map();
   let lastRequestObservedAt = 0;
+  let quoteVersion = 0; let replayVersion = -1; let replayLocked = false;
 
   function nextRequestObservedAt() {
     lastRequestObservedAt = Math.max(Date.now(), lastRequestObservedAt + 1);
@@ -39,7 +40,10 @@
       const key = `${quote.chain}:${quote.address}`;
       const previous = quoteCache.get(key);
       const observation = previous === quote ? quote : Tango.GMGNQuotes.mergeObservation(previous, quote);
-      if (observation) quoteCache.set(key, observation);
+      if (observation) {
+        if (observation !== previous) quoteVersion += 1;
+        quoteCache.set(key, observation);
+      }
       return observation;
     }).filter(Boolean);
     if (!merged.length) return;
@@ -137,7 +141,10 @@
 
   window.addEventListener('message', (event) => {
     if (event.source !== window || event.data?.source !== 'TANGO_PAPER_CONTENT' || event.data?.type !== 'REQUEST_QUOTES') return;
+    if (replayLocked && replayVersion === quoteVersion) return;
     publish([...quoteCache.values()]);
+    replayVersion = quoteVersion; replayLocked = true;
+    Promise.resolve().then(() => { replayLocked = false; });
   });
 })();
 
@@ -155,6 +162,7 @@
   const frames = new WeakMap();
   const selector = 'iframe[title="Financial Chart"],iframe[title="TradingView"]';
   let scanQueued = false;
+  let hasRecoveredFrame = false;
   const enabled = () => document.querySelector('#tango-paper-trader-host')
     ?.getAttribute('data-tango-active') === 'true';
   const setState = (frame, state) => frame.setAttribute('data-tango-chart-load-state', state);
@@ -194,6 +202,7 @@
       if (!chartTemplate(html)) { setState(frame, 'UNRECOGNIZED'); return; }
       state.recoveredSource = state.source;
       state.recoveryHtml = html;
+      hasRecoveredFrame = true;
       setState(frame, 'RECOVERING');
       frame.setAttribute('srcdoc', html);
     } catch { setState(frame, 'FAILED'); }
@@ -201,6 +210,9 @@
 
   function scan() {
     scanQueued = false;
+    for (const [url, entry] of captured) {
+      if (Date.now() - entry.createdAt > 120_000) captured.delete(url);
+    }
     for (const frame of document.querySelectorAll(selector)) {
       const source = frame.getAttribute('src');
       let state = frames.get(frame);
@@ -226,7 +238,7 @@
     }
   }
   function scheduleScan() {
-    if (scanQueued || captured.size === 0) return;
+    if (scanQueued || (captured.size === 0 && !hasRecoveredFrame)) return;
     scanQueued = true;
     setTimeout(scan, 50);
   }
@@ -246,7 +258,15 @@
       return url;
     }
   });
-  new MutationObserver(scheduleScan).observe(document, {
+  const containsChart = (node) => node?.nodeType === 1
+    && (node.matches?.(selector) || node.querySelector?.(selector));
+  new MutationObserver((records) => {
+    if (records.some(record => record.type === 'attributes'
+      ? (record.attributeName === 'data-tango-active'
+        ? record.target === document.querySelector('#tango-paper-trader-host')
+        : record.target?.matches?.(selector))
+      : [...(record.addedNodes || []), ...(record.removedNodes || [])].some(containsChart))) scheduleScan();
+  }).observe(document, {
     childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'title', 'data-tango-active']
   });
 })();

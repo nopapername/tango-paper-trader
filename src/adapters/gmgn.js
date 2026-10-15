@@ -1657,7 +1657,7 @@
 
   // Read GMGN's authored sizing signals. Computed geometry already includes
   // our overrides after mounting, so it cannot identify a later native setting.
-  function nativeQuickBuyProfile(slot, replacement) {
+  function nativeQuickBuyProfile(slot, replacement, knownNativeControl) {
     if (slot?.matches?.('[data-sentry-component="SellButton"]')) {
       const group = slot.closest?.('[data-sentry-component="BuyButtons"]');
       const peers = Array.from(group?.querySelectorAll?.('.BuyButton-continer') || [])
@@ -1670,7 +1670,7 @@
     }
     const binding = slot?.__tangoQuickBuyBinding;
     const host = lockedQuickBuyActionHost(slot, replacement);
-    const native = nativeQuickBuyControl(slot) || binding?.nativeControl;
+    const native = (knownNativeControl === undefined ? nativeQuickBuyControl(slot) : knownNativeControl) || binding?.nativeControl;
     const sources = [...new Set([host, slot, native].filter(Boolean))];
     const inline = (node, name) => node.style?.getPropertyValue?.(name)
       || String(node.style?.cssText || '').match(new RegExp('(?:^|;)\\s*' + name + '\\s*:\\s*([^;]+)'))?.[1] || '';
@@ -2198,7 +2198,7 @@
         || !Tango.NativeQuickBuyGuard?.isPaperActionTrusted?.(
           replacement, paperGuardIdentity(binding)
         )) return true;
-      const profile = nativeQuickBuyProfile(slot, replacement);
+      const profile = nativeQuickBuyProfile(slot, replacement, nativeControl);
       if (replacement.className !== 'tango-list-quick-buy'
         || replacement.style?.cssText
         || replacement.dataset?.tangoQuickBuySize !== profile.id

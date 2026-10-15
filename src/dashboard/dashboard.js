@@ -55,7 +55,9 @@
     const age = Date.now() - Number(runtime.nativePriceObservedAt[chain.id]);
     return [chain.id, Number.isFinite(price) && price > 0 && age >= -5_000 && age <= NATIVE_PRICE_TTL_MS ? price : 0];
   }));
-  const model = () => (runtime.tab === 'overview' || !Tango.DashboardModel.selected
+  const model = () => Tango.DashboardModel.forTab
+    ? Tango.DashboardModel.forTab(runtime.state, runtime.settings, runtime.selectedChain, freshNativePrices(), runtime.filters, runtime.tab)
+    : (runtime.tab === 'overview' || !Tango.DashboardModel.selected
     ? Tango.DashboardModel.build : Tango.DashboardModel.selected)(
     runtime.state, runtime.settings, runtime.selectedChain, freshNativePrices(), runtime.filters
   );
@@ -123,7 +125,7 @@
     priceRenderQueued = true;
     Promise.resolve().then(() => {
       priceRenderQueued = false;
-      if (runtime.state && runtime.settings) renderPriceUpdate();
+      if (!document.hidden && runtime.state && runtime.settings) renderPriceUpdate();
     });
   }
 
@@ -218,7 +220,10 @@
     if (pending?.chainId === chainId) await pending.promise;
     await runtime.settingsWrite;
     if (runtime.selectedChain !== chainId || runtime.settings?.selectedChain !== chainId) return null;
-    const view = model();
+    // Export actions must not depend on a tab that can change while awaiting a write.
+    const view = Tango.DashboardModel.history
+      ? Tango.DashboardModel.history(runtime.state, chainId, runtime.filters)
+      : model();
     return view.chain.id === chainId ? view : null;
   }
 
@@ -228,11 +233,11 @@
   ];
   const SETTINGS_CHECKBOX_FIELDS = new Set(['fast', 'confirm', 'sound', 'list-buy']);
 
-  function settingsFormSnapshot() {
+  function settingsFormSnapshot(root = app) {
     if (runtime.tab !== 'settings') return null;
     const fields = {};
     SETTINGS_FORM_FIELDS.forEach((field) => {
-      const input = app.querySelector(`#setting-${field}`);
+      const input = root.querySelector(`#setting-${field}`);
       if (input) fields[field] = SETTINGS_CHECKBOX_FIELDS.has(field)
         ? { checked: Boolean(input.checked) } : { value: String(input.value ?? '') };
     });
@@ -273,6 +278,36 @@
     }
   }
 
+  function patchDashboardText(template) {
+    if (!template.content || !app.childNodes) return false;
+    const changes = [];
+    const structuralClasses = value => String(value || '').split(/\s+/)
+      .filter(name => name && !['up', 'down', 'flat'].includes(name)).join(' ');
+    const equalShape = (before, after) => {
+      if (before.length !== after.length) return false;
+      for (let index = 0; index < before.length; index += 1) {
+        const left = before[index]; const right = after[index];
+        if (left.nodeType !== right.nodeType) return false;
+        if (left.nodeType === 3) {
+          if (left.nodeValue !== right.nodeValue) changes.push(() => { left.nodeValue = right.nodeValue; });
+        } else if (left.nodeType === 1) {
+          if (left.nodeName !== right.nodeName || left.attributes.length !== right.attributes.length) return false;
+          for (const attr of right.attributes) {
+            const old = left.getAttribute(attr.name);
+            if (old === attr.value) continue;
+            if (attr.name !== 'class' || structuralClasses(old) !== structuralClasses(attr.value)) return false;
+            changes.push(() => left.setAttribute('class', attr.value));
+          }
+          if (!equalShape(left.childNodes, right.childNodes)) return false;
+        } else if (left.nodeValue !== right.nodeValue) return false;
+      }
+      return true;
+    };
+    if (!equalShape(app.childNodes, template.content.childNodes)) return false;
+    changes.forEach(change => change());
+    return true;
+  }
+
   function render() {
     if (runtime.tab === 'settings' && (!runtime.settingsFormBaseline
       || runtime.settingsFormBaseline.chain !== runtime.selectedChain)) runtime.settingsFormRevision += 1;
@@ -291,7 +326,7 @@
     const chainOptions = Tango.Chains.all().map((chain) => (
       `<option value="${chain.id}" ${chain.id === view.chain.id ? 'selected' : ''}>${esc(chain.name)} (${esc(chain.nativeSymbol)})</option>`
     )).join('');
-    app.innerHTML = `<div class="app"><aside class="sidebar">
+    const markup = `<div class="app"><aside class="sidebar">
       <div class="brand"><span class="dot"></span>TANGO <span class="badge">${t('paper')}</span></div>
       <nav class="nav">${Object.entries(titles).map(([id, title]) => `<button data-tab="${id}" class="${runtime.tab === id ? 'active' : ''}">${title}</button>`).join('')}</nav>
       <div class="sidebar-bottom">Tango Paper Trader v${Tango.VERSION}<br>${t('paperOnly')}</div>
@@ -300,8 +335,16 @@
       <button class="button primary" data-action="open-gmgn">GMGN ↗</button></div></div>
       ${nativePriceStatus()}${renderTab(view)}
     </main></div>${runtime.toast ? `<div class="toast">${esc(runtime.toast)}</div>` : ''}`;
-    bind();
-    runtime.settingsFormBaseline = settingsFormSnapshot();
+    const template = document.createElement('template');
+    if (template.content) template.innerHTML = markup;
+    const nextBaseline = template.content ? settingsFormSnapshot(template.content) : null;
+    const patched = patchDashboardText(template);
+    if (!patched) {
+      if (template.content && app.replaceChildren) app.replaceChildren(template.content);
+      else app.innerHTML = markup;
+      bind();
+    }
+    runtime.settingsFormBaseline = nextBaseline || settingsFormSnapshot();
     restoreSettingsDraft(settingsDraft);
   }
 
@@ -466,6 +509,8 @@
   }
 
   function historyResults(view, compact = false) {
+    const formatDate = Tango.Format.dateTimeFormatter?.(lang())
+      || (value => new Date(value).toLocaleString(lang()));
     const pageCount = Math.max(1, Math.ceil(view.trades.length / HISTORY_PAGE_SIZE));
     runtime.historyPage = Math.max(0, Math.min(runtime.historyPage, pageCount - 1));
     const offset = compact ? 0 : runtime.historyPage * HISTORY_PAGE_SIZE;
@@ -473,7 +518,7 @@
     const valuation = (trade) => Tango.DashboardModel.hasDerivedMarketCapPrice(trade)
       ? `${t('marketCap')} · ${Tango.Format.usd(trade.marketCapUsd, lang(), true)}`
       : Tango.Format.usd(trade.executionPriceUsd, lang());
-    const rows = trades.map((trade) => `<tr><td>${new Date(trade.executedAt).toLocaleString(lang())}</td><td class="token-cell">${esc(trade.symbol || trade.tokenAddress)}</td>
+    const rows = trades.map((trade) => `<tr><td>${formatDate(trade.executedAt)}</td><td class="token-cell">${esc(trade.symbol || trade.tokenAddress)}</td>
       <td class="${trade.side === 'BUY' ? 'up' : 'down'}">${trade.side === 'BUY' ? t('buy') : t('sell')}</td><td>${native(trade.amountNative, view)}</td><td>${valuation(trade)}</td>
       <td>${Tango.Format.usd(trade.marketCapUsd, lang(), true)}</td><td class="${cls(trade.realizedPnlNative)}">${trade.side === 'SELL' ? native(trade.realizedPnlNative, view, true) : '—'}</td>
       <td>${trade.side === 'SELL' ? `<button class="button" data-share="${esc(trade.id)}">PNG</button> <button class="button" data-copy-share="${esc(trade.id)}">${t('copyImage')}</button>` : ''}</td></tr>`).join('');
@@ -818,6 +863,9 @@
   });
   global.matchMedia?.('(prefers-color-scheme: light)')?.addEventListener?.('change', () => {
     if (runtime.settings?.theme === 'auto') renderPriceUpdate();
+  });
+  document.addEventListener?.('visibilitychange', () => {
+    if (!document.hidden && runtime.state && runtime.settings) renderPriceUpdate();
   });
   Tango.Store.subscribe(load);load();
 })(globalThis);

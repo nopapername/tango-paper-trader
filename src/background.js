@@ -14,6 +14,12 @@ const stateCoordinator = globalThis.Tango?.StateCoordinator?.create({
   writeRaw: (values) => chrome.storage.local.set(values)
 });
 
+globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
+  if (area === 'local' && (changes[globalThis.Tango.STORAGE_KEY] || changes[globalThis.Tango.SETTINGS_KEY])) {
+    stateCoordinator?.invalidateReads();
+  }
+});
+
 const nativePriceCache = new Map();
 const nativePriceRequests = new Map();
 const tokenQuoteCache = new Map();

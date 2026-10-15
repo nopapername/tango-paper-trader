@@ -2412,6 +2412,7 @@
 
   function constrainFloatingElements() {
     if (!runtime.settings?.enabled || !runtime.state?.initialized) return;
+    const measurements = [];
     for (const [selector, settingKey] of [
       ['.tango-bar', 'barPosition'], ['.tango-panel', 'panelPosition'], ['.tango-drawer', 'drawerPosition']
     ]) {
@@ -2421,13 +2422,17 @@
       if (!element?.getBoundingClientRect) continue;
       const rect = element.getBoundingClientRect();
       if (!(rect.width > 0) || !(rect.height > 0)) continue;
-      // Clamp display coordinates only. A larger viewport should restore the
-      // user's saved position without a settings write on every resize.
-      element.style.left = `${Math.min(Math.max(0, innerWidth - rect.width), Math.max(0, position.x))}px`;
-      element.style.top = `${Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, position.y))}px`;
-      element.style.right = 'auto';
-      element.style.bottom = 'auto';
-      element.style.transform = 'none';
+      measurements.push({ element, position, rect });
+    }
+    for (const { element, position, rect } of measurements) {
+      const styles = {
+        left: `${Math.min(Math.max(0, innerWidth - rect.width), Math.max(0, position.x))}px`,
+        top: `${Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, position.y))}px`,
+        right: 'auto', bottom: 'auto', transform: 'none'
+      };
+      for (const [key, value] of Object.entries(styles)) {
+        if (element.style[key] !== value) element.style[key] = value;
+      }
     }
   }
   window.addEventListener('resize', constrainFloatingElements);
@@ -2466,7 +2471,7 @@
     return Tango.Markers.buildPayload({
       current: runtime.current,
       position: currentPosition(),
-      trades: Tango.ChainView.trades(runtime.state, chain.id),
+      trades: runtime.state.trades,
       labels: { entry: t('paperBuy'), exit: t('paperSell'), hide: t('hideChartLine') }
     });
   }
@@ -2776,32 +2781,35 @@
     </div></div>`;
   }
 
-  function patchShellText(markup) {
-    const template = document.createElement('template');
+  function patchShellText(markup, prepared = null) {
+    const template = prepared || document.createElement('template');
     if (!template.content || !shell.childNodes) return false;
-    template.innerHTML = markup;
+    if (!prepared) template.innerHTML = markup;
     const changes = [];
+    const structuralClasses = value => String(value || '').split(/\s+/)
+      .filter(name => name && !['tango-up', 'tango-down', 'tango-flat'].includes(name)).join(' ');
     const equalShape = (before, after) => {
       if (before.length !== after.length) return false;
       for (let index = 0; index < before.length; index += 1) {
         const left = before[index]; const right = after[index];
         if (left.nodeType !== right.nodeType) return false;
         if (left.nodeType === 3) {
-          if (left.nodeValue !== right.nodeValue) changes.push([left, right.nodeValue]);
+          if (left.nodeValue !== right.nodeValue) changes.push(() => { left.nodeValue = right.nodeValue; });
         } else if (left.nodeType === 1) {
           if (left.nodeName !== right.nodeName || left.attributes.length !== right.attributes.length) return false;
           for (const attr of right.attributes) {
-            if (left.getAttribute(attr.name) !== attr.value) return false;
+            const old = left.getAttribute(attr.name);
+            if (old === attr.value) continue;
+            if (attr.name !== 'class' || structuralClasses(old) !== structuralClasses(attr.value)) return false;
+            changes.push(() => left.setAttribute('class', attr.value));
           }
           if (!equalShape(left.childNodes, right.childNodes)) return false;
         } else if (left.nodeValue !== right.nodeValue) return false;
       }
       return true;
     };
-    // Validate the entire tree before mutating it; changed action/identity/form
-    // attributes must use the existing full render and event-binding path.
     if (!equalShape(shell.childNodes, template.content.childNodes)) return false;
-    changes.forEach(([node, value]) => { node.nodeValue = value; });
+    changes.forEach(change => change());
     return true;
   }
 
@@ -2836,9 +2844,13 @@
     }
     const markup = `${renderBar(summary)}${renderPanel()}${renderDrawer(summary)}${renderPnlCalendar()}${renderModal()}${runtime.toast ? `<div class="tango-toast ${esc(runtime.toast.type)}">${esc(runtime.toast.message)}</div>` : ''}`;
     if (runtime.renderedMarkup !== markup) {
-      const patched = !runtime.modal && !runtime.presetEditing && patchShellText(markup);
+      const template = document.createElement('template');
+      if (template.content) template.innerHTML = markup;
+      const patched = template.content && !runtime.modal && !runtime.presetEditing
+        && patchShellText(markup, template);
       if (!patched) {
-        shell.innerHTML = markup;
+        if (template.content && shell.replaceChildren) shell.replaceChildren(template.content);
+        else shell.innerHTML = markup;
         runtime.renderedRecoveryDialog = runtime.modal?.type === 'dashboard-error' ? runtime.modal : null;
         bindEvents();
       }
@@ -3021,9 +3033,6 @@
       if (location.href !== runtime.lastUrl) {
         handleRouteChange();
       }
-      if (records.some(record => record.type === 'childList')) {
-        chartFrames().forEach((frame) => registerChartFrame(frame));
-      }
       const fastRoots = [];
       const addedRoots = [];
       const removedRoots = [];
@@ -3076,6 +3085,7 @@
           }
         }
       }
+      if (chartMutation) chartFrames().forEach((frame) => registerChartFrame(frame));
       if (fastRoots.length && runtime.settings?.enabled
         && runtime.state?.initialized && runtime.settings?.showListQuickBuy
         && !runtime.quickBuySettingsPending && !runtime.quickBuyAuthoritativelyDisabled) {
@@ -3120,7 +3130,8 @@
     document.addEventListener('change', handleQuickBuyAmountChange, true);
     await tickQuote();
     runtime.quoteTimer = setInterval(tickQuote, 3000);
-    runtime.markerTimer = setInterval(syncChartMarkers, 1000);
+    runtime.markerTimer = setInterval(() => { if (!document.hidden) syncChartMarkers(); }, 1000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncChartMarkers(); });
     runtime.routeTimer = setInterval(handleRouteChange, 150);
     runtime.quickBuyProbeTimer = setInterval(probeQuickBuyHealth, 750);
   }

@@ -70,6 +70,16 @@
     };
   }
 
+  function forTab(state, settings, selectedChain, nativePrices = {}, filters = {}, tab = 'overview') {
+    if (!['positions', 'history', 'settings', 'calendar'].includes(tab)) return build(state, settings, selectedChain, nativePrices, filters);
+    const chain = Tango.Chains.get(selectedChain) || Tango.Chains.get('sol');
+    const view = { chain, chainSettings: settingsFor(settings, chain.id),
+      nativePriceUsd: Number(nativePrices?.[chain.id] || 0) };
+    if (tab === 'positions') view.positions = Tango.ChainView.positions(state, chain.id);
+    if (tab === 'history') view.trades = history(state, chain.id, filters).trades;
+    return view;
+  }
+
   function build(state, settings, selectedChain, nativePrices = {}, filters = {}) {
     const chain = Tango.Chains.get(selectedChain) || Tango.Chains.get('sol');
     const nativePriceUsd = Number(nativePrices?.[chain.id] || 0);
@@ -143,6 +153,6 @@
     };
   }
 
-  Tango.DashboardModel = { build, selected, history, matchesFilters, tradesCsvRows, calendar, hasDerivedMarketCapPrice, CSV_FIELDS };
+  Tango.DashboardModel = { build, selected, history, forTab, matchesFilters, tradesCsvRows, calendar, hasDerivedMarketCapPrice, CSV_FIELDS };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.DashboardModel;
 })(globalThis);
