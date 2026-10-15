@@ -1,0 +1,90 @@
+{
+  "baseline": "当前持仓\n一键清仓\n✕\n持仓总额\n1.9576 BNB\n3 持仓\n赛博精神错乱 ↗\n赛博精神错乱\n-0.0104 BNB · -2.08%\n价值 0.4896 BNB\n成本 0.5 BNB\n持仓时间 3m 36s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。\n猫头鹰 ↗\nSmartX吉祥物QQ805121438\n-0.0218 BNB · -2.18%\n价值 0.9782 BNB\n成本 1 BNB\n持仓时间 20m 9s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。\nMINNIE ↗\nAnthropic Dog\n-0.0102 BNB · -2.03%\n价值 0.4898 BNB\n成本 0.5 BNB\n持仓时间 4m 10s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。",
+  "sell25Preview": "模拟卖出\n代币\nMINNIE\n金额\n25%\n观察价格\n$0.000005\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认",
+  "after25": "当前持仓\n一键清仓\n✕\n持仓总额\n1.8351 BNB\n3 持仓\n赛博精神错乱 ↗\n赛博精神错乱\n-0.0104 BNB · -2.08%\n价值 0.4896 BNB\n成本 0.5 BNB\n持仓时间 3m 51s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。\n猫头鹰 ↗\nSmartX吉祥物QQ805121438\n-0.0218 BNB · -2.18%\n价值 0.9782 BNB\n成本 1 BNB\n持仓时间 20m 24s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。\nMINNIE ↗\nAnthropic Dog\n-0.0076 BNB · -2.03%\n价值 0.3674 BNB\n成本 0.375 BNB\n持仓时间 4m 25s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。",
+  "sell100Preview": "模拟卖出\n代币\nMINNIE\n金额\n100%\n观察价格\n$0.000005\n正在使用临时模拟估值；验证行情到达后会进行中性校准。\n本次浏览器会话不再提示（重启浏览器后恢复）\n取消\n确认",
+  "after100": "当前持仓\n一键清仓\n✕\n持仓总额\n1.4678 BNB\n2 持仓\n赛博精神错乱 ↗\n赛博精神错乱\n-0.0104 BNB · -2.08%\n价值 0.4896 BNB\n成本 0.5 BNB\n持仓时间 4m 5s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。\n猫头鹰 ↗\nSmartX吉祥物QQ805121438\n-0.0218 BNB · -2.18%\n价值 0.9782 BNB\n成本 1 BNB\n持仓时间 20m 38s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。",
+  "noPosition": [
+    "当前没有持仓"
+  ],
+  "sellSizes": [
+    {
+      "sizeName": "小号",
+      "buttons": [
+        {
+          "generation": "10",
+          "height": 24,
+          "side": "SELL",
+          "text": "模拟盘100%"
+        },
+        {
+          "generation": "10",
+          "height": 24,
+          "side": "BUY",
+          "text": "模拟盘0.1 BNB"
+        }
+      ]
+    },
+    {
+      "sizeName": "大号",
+      "buttons": [
+        {
+          "generation": "10",
+          "height": 32,
+          "side": "SELL",
+          "text": "模拟盘100%"
+        },
+        {
+          "generation": "10",
+          "height": 32,
+          "side": "BUY",
+          "text": "模拟盘0.1 BNB"
+        }
+      ]
+    },
+    {
+      "sizeName": "超大号",
+      "buttons": [
+        {
+          "generation": "10",
+          "height": 44,
+          "side": "SELL",
+          "text": "模拟盘100%"
+        },
+        {
+          "generation": "10",
+          "height": 44,
+          "side": "BUY",
+          "text": "模拟盘0.1 BNB"
+        }
+      ]
+    },
+    {
+      "sizeName": "巨型",
+      "buttons": [
+        {
+          "generation": "10",
+          "height": 132.6666717529297,
+          "side": "SELL",
+          "text": "模拟盘100%"
+        },
+        {
+          "generation": "10",
+          "height": 132.6666717529297,
+          "side": "BUY",
+          "text": "模拟盘0.1 BNB"
+        }
+      ]
+    }
+  ],
+  "offMode": [
+    {
+      "side": "BUY",
+      "text": "模拟盘0.1 BNB"
+    }
+  ],
+  "restoredConfig": "2号按钮\n-\n按数量\n\n买入\n卖出\n关",
+  "finalUserPositions": "当前持仓\n一键清仓\n✕\n持仓总额\n1.4678 BNB\n2 持仓\n赛博精神错乱 ↗\n赛博精神错乱\n-0.0104 BNB · -2.08%\n价值 0.4896 BNB\n成本 0.5 BNB\n持仓时间 5m 12s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。\n猫头鹰 ↗\nSmartX吉祥物QQ805121438\n-0.0218 BNB · -2.18%\n价值 0.9782 BNB\n成本 1 BNB\n持仓时间 21m 46s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。",
+  "finalHeaderText": "模拟盘\n虚拟余额 8.4571 BNB\n▦ 盈亏日历",
+  "note": "Only MINNIE .5 BNB test position sold. User-owned owl and cyber positions retained. Giant and secondary quantity BUY .5 restored; migrated sell100%/recover-cost restored."
+}
