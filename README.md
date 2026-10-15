@@ -57,6 +57,8 @@ The current chart quote selector is respected when switching USD and the chain n
 
 If an embedded browser blocks the data dashboard tab, the error dialog shows the browser reason and provides local JSON export and import. Import previews the selected file and requires confirmation before replacing all six-chain paper data and settings. Export a backup before restoring.
 
+The extension popup also shows the browser's dashboard-opening failure reason. If the same package opens consistently in Chrome but the embedded browser reports `Owl extension-created tab was blocked before presentation`, the request reached the browser and the embedded browser rejected presenting the extension tab. Reinstalling Tango does not address that rejection and can lose local paper data. Keep the existing installation and export a JSON backup before changing browsers or installation paths. No alternate tab-opening route is attempted after a browser rejection.
+
 Chart lines require trustworthy visible chart coordinates. Synthetic fallback market caps do not produce chart coordinates; independently observed prices or market caps remain eligible. Current GMGN compatibility still depends on the site's current layout and data availability.
 
 ## Safety

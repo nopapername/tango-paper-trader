@@ -295,8 +295,12 @@
     document.querySelector('#dashboard')?.addEventListener('click', async () => {
       try {
         const response = await global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD' });
-        if (!response?.ok) throw new Error('openDashboardFailed');
-      } catch { statusMessage = t('openDashboardFailed'); render(); }
+        if (!response?.ok) throw new Error(response?.error || '');
+      } catch (error) {
+        const detail = String(error?.message || '').trim().slice(0, 300);
+        statusMessage = detail ? `${t('openDashboardFailed')}: ${detail}` : t('openDashboardFailed');
+        render();
+      }
     });
     document.querySelector('#gmgn')?.addEventListener('click', async () => {
       const selectionRevision = selectedChainRevision;
