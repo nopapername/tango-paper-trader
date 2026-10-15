@@ -317,6 +317,35 @@ test('adapter callback rechecks live trench slot route href and generation when 
   }
 });
 
+test('both same-card quick buys recover after a temporary address loss advances their shared generation', async () => {
+  const first = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  const second = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
+  const slots = [first.slot, second.slot];
+  first.card.querySelectorAll = (selector) => selector === '.BuyButton-continer' ? slots : [];
+  second.slot.closest = (selector) => selector === '.BuyButton-continer' ? second.slot : first.card;
+  second.nativeControl.closest = (selector) => selector === '.BuyButton-continer' ? second.slot : null;
+  const query = first.document.querySelectorAll.bind(first.document);
+  first.document.querySelectorAll = (selector) => selector === '.BuyButton-continer' ? slots : query(selector);
+  const guard = guardHarness();
+  await withQuickBuyGlobals(first, { guard }, async () => {
+    const orders = [];
+    const onBuy = (order) => orders.push(order);
+    GMGN.discoverTokenCards(onBuy);
+    const staleCallbacks = slots.map(slot => slot.__tangoQuickBuyHandler);
+    first.exposeCardHref('');
+    GMGN.discoverTokenCards(onBuy);
+    first.exposeCardHref(`https://gmgn.ai/base/token/${EVM_ADDRESS}`);
+    GMGN.discoverTokenCards(onBuy);
+    await guard.invokeRegistered(first.replacement);
+    await guard.invokeRegistered(second.replacement);
+    assert.equal(orders.length, 2, 'both renewed controls must execute independently');
+    assert.equal(first.slot.dataset.tangoCardGeneration, second.slot.dataset.tangoCardGeneration);
+    for (const callback of staleCallbacks) await callback();
+    assert.equal(orders.length, 2, 'callbacks captured before the address loss remain invalid');
+    assert.equal(first.nativeControl.realHandlerCalls + second.nativeControl.realHandlerCalls, 0);
+  });
+});
+
 test('two slots on one card isolate Guard callbacks reinsertion and in-flight state', async () => {
   const first = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
   const second = quickBuyHarness({ chain: 'base', address: EVM_ADDRESS });
@@ -1849,6 +1878,100 @@ test('October dual trench buttons retain the secondary amount while the primary 
     assert.equal(first.slot.dataset.tangoAmountSol, '0.5');
     assert.equal(second.slot.dataset.tangoAmountSol, '2');
     assert.equal(first.nativeControl.realHandlerCalls + second.nativeControl.realHandlerCalls, 0);
+  });
+});
+
+test('secondary native sell actions keep their side and never fall back to a paper buy', async () => {
+  for (const [copy, percent, breakeven] of [['25%', 25, false], ['回本', 0, true], ['unknown', 0, false]]) {
+    const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+    const matches = harness.slot.matches.bind(harness.slot);
+    harness.slot.matches = selector => selector === '[data-sentry-component="SellButton"]' || matches(selector);
+    harness.nativeControl.textContent = copy;
+    const query = harness.slot.querySelector.bind(harness.slot);
+    harness.slot.querySelector = selector => selector === '[data-testid="quicksell"]' ? harness.nativeControl : query(selector);
+    await withQuickBuyGlobals(harness, {}, async () => {
+      const orders = [];
+      GMGN.discoverTokenCards(order => orders.push(order));
+      await harness.slot.__tangoQuickBuyHandler?.();
+      if (copy === 'unknown') assert.equal(orders.length, 0);
+      else {
+        assert.equal(orders.length, 1);
+        assert.equal(orders[0].side, 'SELL');
+        assert.equal(orders[0].sellPercent, percent);
+        assert.equal(orders[0].breakeven, breakeven);
+      }
+      assert.equal(harness.nativeControl.realHandlerCalls, 0);
+    });
+  }
+});
+
+test('mounting a paper sell preserves the connected native sell label as its action evidence', async () => {
+  const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  const matches = harness.slot.matches.bind(harness.slot);
+  harness.slot.matches = selector => selector === '[data-sentry-component="SellButton"]' || matches(selector);
+  harness.nativeControl.textContent = '25%';
+  harness.nativeControl.matches = selector => selector === '[data-testid="quicksell"]';
+  const query = harness.slot.querySelector.bind(harness.slot);
+  harness.slot.querySelector = selector => selector === '[data-testid="quicksell"]'
+    ? harness.nativeControl.isConnected ? harness.nativeControl : null : query(selector);
+  await withQuickBuyGlobals(harness, {}, async () => {
+    const orders = [];
+    GMGN.discoverTokenCards(order => orders.push(order));
+    assert.equal(harness.nativeControl.isConnected, true);
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders[0].side, 'SELL');
+    assert.equal(orders[0].sellPercent, 25);
+    assert.equal(harness.nativeControl.realHandlerCalls, 0);
+  });
+});
+
+test('switching a secondary control from buy to sell or changing its percentage retires old callbacks', async () => {
+  const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  let sellMode = false;
+  const matches = harness.slot.matches.bind(harness.slot);
+  harness.slot.matches = selector => selector === '[data-sentry-component="SellButton"]' ? sellMode : matches(selector);
+  const query = harness.slot.querySelector.bind(harness.slot);
+  harness.slot.querySelector = selector => selector === '[data-testid="quicksell"]'
+    ? sellMode ? harness.nativeControl : null : query(selector);
+  await withQuickBuyGlobals(harness, {}, async () => {
+    const orders = [];
+    const onAction = order => orders.push(order);
+    GMGN.discoverTokenCards(onAction);
+    const buy = harness.slot.__tangoQuickBuyHandler;
+    sellMode = true;
+    harness.nativeControl.textContent = '25%';
+    await buy();
+    assert.equal(orders.length, 0, 'a changed native side blocks the old buy before reconciliation');
+    GMGN.discoverTokenCards(onAction);
+    const sell25 = harness.slot.__tangoQuickBuyHandler;
+    await sell25();
+    assert.equal(orders[0].side, 'SELL');
+    assert.equal(orders[0].sellPercent, 25);
+    harness.nativeControl.textContent = '50%';
+    await sell25();
+    assert.equal(orders.length, 1, 'a changed percentage blocks the old sell before reconciliation');
+    GMGN.discoverTokenCards(onAction);
+    await harness.slot.__tangoQuickBuyHandler();
+    assert.equal(orders[1].sellPercent, 50);
+    assert.equal(harness.nativeControl.realHandlerCalls, 0);
+  });
+});
+
+test('a secondary sell follows its uniquely paired primary button size', async () => {
+  const primary = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  const secondary = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  const group = { querySelectorAll: selector => selector === '.BuyButton-continer' ? [primary.slot, secondary.slot] : [] };
+  for (const harness of [primary, secondary]) {
+    const closest = harness.slot.closest.bind(harness.slot);
+    harness.slot.closest = selector => selector === '[data-sentry-component="BuyButtons"]' ? group : closest(selector);
+  }
+  const matches = secondary.slot.matches.bind(secondary.slot);
+  secondary.slot.matches = selector => selector === '[data-sentry-component="SellButton"]' || matches(selector);
+  await withQuickBuyGlobals(primary, {}, async () => {
+    primary.setNativePresentation(LIVE_QUICK_BUY_SMALL, '');
+    assert.equal(GMGN._applyLockedQuickBuyPresentation(primary.document.createElement('button'), secondary.slot).heightPx, 24);
+    primary.setNativePresentation('!h-full', '--quick-buy-pointer-height:100px');
+    assert.equal(GMGN._applyLockedQuickBuyPresentation(primary.document.createElement('button'), secondary.slot).heightCss, '100%');
   });
 });
 

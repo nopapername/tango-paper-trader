@@ -2707,6 +2707,33 @@ test('panel trade totals keep Solana address identity case-sensitive', () => {
   assert.match(loaded.api.renderPanel(), /<span>totalBuy<\/span><strong>2 SOL<\/strong>/);
 });
 
+test('secondary quick sells route to existing same-token paper sells and reject unavailable positions', async () => {
+  for (const mode of ['percent', 'breakeven', 'missing', 'unrecoverable', 'unknown']) {
+    const loaded = loadContent();
+    loaded.api.runtime.settings.confirmationEnabled = false;
+    const context = quoteContext();
+    const position = {
+      chain: 'eth', tokenAddress: ADDRESS_A, symbol: 'TEST', quantity: 2,
+      costBasisNative: 1, lastPriceUsd: 2, lastMarketCapUsd: 2000, lastNativePriceUsd: 3000,
+      quoteObservedAt: loaded.clock.now
+    };
+    if (mode !== 'missing') loaded.api.runtime.state.positions[`eth:${ADDRESS_A}`] = position;
+    loaded.api.runtime.current = context;
+    loaded.api.rememberNativePrice('eth', 3000, loaded.clock.now);
+    loaded.context.Tango.Engine.breakevenSellPercent = () => mode === 'unrecoverable' ? null : 50;
+    await loaded.api.handleQuickBuy({
+      ...context, amountNative: 1, side: mode === 'unknown' ? 'UNKNOWN' : 'SELL',
+      sellPercent: 25, breakeven: mode === 'breakeven' || mode === 'unrecoverable'
+    });
+    assert.equal(loaded.calls.buy, 0, mode);
+    if (mode === 'percent' || mode === 'breakeven') {
+      assert.equal(loaded.calls.sell, 1, mode);
+      assert.equal(loaded.calls.sellOrders[0].percent, mode === 'percent' ? 25 : 50);
+      assert.equal(loaded.calls.sellOrders[0].token.address, ADDRESS_A);
+    } else assert.equal(loaded.calls.sell, 0, mode);
+  }
+});
+
 test('quick buy with no market data commits immediately with a deterministic fallback quote', async () => {
   const never = deferred();
   const loaded = loadContent({

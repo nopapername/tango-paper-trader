@@ -1185,6 +1185,10 @@
     for (const control of candidates) {
       if (!control || seen.has(control) || control.isConnected === false
         || containsPaperQuickBuyControl(control)) continue;
+      // Keep the authored sell label as live evidence for the bound percentage
+      // or recover-cost action. The paper host hides it and Guard blocks it.
+      if (control.matches?.('[data-testid="quicksell"]')
+        || control.closest?.('[data-testid="quicksell"]')?.matches?.('[data-testid="quicksell"]')) continue;
       const closestSlot = control.closest?.('.BuyButton-continer');
       if (closestSlot && closestSlot !== slot) continue;
       seen.add(control);
@@ -1425,6 +1429,7 @@
       bindingNonce: binding.bindingNonce,
       chain: binding.chain,
       amountNative: binding.amountNative,
+      tradeActionKey: binding.tradeAction?.key || 'BUY',
       paperLabel: binding.paperLabel,
       policyKey: binding.policyKey,
       routeHref: global.location?.href || '',
@@ -1478,7 +1483,8 @@
       || slot.matches?.('.BuyButton-continer') !== true
       || slot.closest?.('[class~="group/a"]') !== card
       || !isTrenchPage() || chainFromUrl() !== binding.chain
-      || cardGeneration(card) !== binding.generation) return false;
+      || cardGeneration(card) !== binding.generation
+      || (binding.tradeAction?.key || 'BUY') !== quickBuyTradeAction(slot).key) return false;
     if (binding.state === 'resolving-identity') {
       return !binding.birth || quickBuyBirthMatchesBinding(binding.birth, binding);
     }
@@ -1501,6 +1507,8 @@
       && binding.bindingNonce === intent.bindingNonce
       && binding.chain === intent.chain
       && Number(binding.amountNative) === Number(intent.amountNative)
+      && (binding.tradeAction?.key || 'BUY') === intent.tradeActionKey
+      && quickBuyTradeAction(binding.slot).key === intent.tradeActionKey
       && binding.paperLabel === intent.paperLabel
       && binding.policyKey === intent.policyKey
       && quickBuyBirthMatchesBinding(binding.birth, binding)
@@ -1552,11 +1560,15 @@
 
   function applyPaperStateCopy(binding, state) {
     const nativeSymbol = Tango.Chains.get(binding.chain)?.nativeSymbol || '';
+    const tradeAction = binding.tradeAction || { side: 'BUY' };
+    const readyCopy = tradeAction.side === 'SELL'
+      ? `Tango Paper Sell ${tradeAction.breakeven ? 'Recover Cost' : tradeAction.valid ? tradeAction.sellPercent + '%' : 'unavailable'}`
+      : `Tango Paper Buy ${binding.amountNative} ${nativeSymbol}`.trim();
     const copy = state === 'resolving-identity'
       ? 'Tango paper click accepted — confirming token identity'
       : (state === 'in-flight'
         ? 'Tango paper order is processing'
-        : `Tango Paper Buy ${binding.amountNative} ${nativeSymbol}`.trim());
+        : readyCopy);
     binding.replacement.title = copy;
     binding.replacement.setAttribute?.('aria-label', copy);
   }
@@ -1630,6 +1642,16 @@
   // Read GMGN's authored sizing signals. Computed geometry already includes
   // our overrides after mounting, so it cannot identify a later native setting.
   function nativeQuickBuyProfile(slot, replacement) {
+    if (slot?.matches?.('[data-sentry-component="SellButton"]')) {
+      const group = slot.closest?.('[data-sentry-component="BuyButtons"]');
+      const peers = Array.from(group?.querySelectorAll?.('.BuyButton-continer') || [])
+        .filter((peer) => peer !== slot && peer.closest?.('[data-sentry-component="BuyButtons"]') === group
+          && quickBuyTradeAction(peer).side === 'BUY');
+      if (peers.length === 1) {
+        const pairedProfile = nativeQuickBuyProfile(peers[0], peers[0].__tangoReplacementQuickBuy);
+        if (pairedProfile !== LOCKED_QUICK_BUY_PROFILE) return pairedProfile;
+      }
+    }
     const binding = slot?.__tangoQuickBuyBinding;
     const host = lockedQuickBuyActionHost(slot, replacement);
     const native = nativeQuickBuyControl(slot) || binding?.nativeControl;
@@ -1736,7 +1758,24 @@
       || Number(previousAmount) || Number(defaultAmount);
   }
 
+  function quickBuyTradeAction(slot) {
+    const sell = slot?.querySelector?.('[data-testid="quicksell"]');
+    if (!sell && !slot?.matches?.('[data-sentry-component="SellButton"]')) {
+      return { side: 'BUY', key: 'BUY', valid: true };
+    }
+    const text = String(sell?.textContent || '').replace(/[\uE000-\uF8FF\s]/g, '');
+    if (/^(回本|一键回本|RecoverCost|Breakeven)$/i.test(text)) {
+      return { side: 'SELL', key: 'SELL:BREAKEVEN', sellPercent: 0, breakeven: true, valid: true };
+    }
+    const percent = text.match(/^(\d+(?:\.\d+)?)%$/);
+    const sellPercent = Number(percent?.[1] || 0);
+    const valid = sellPercent > 0 && sellPercent <= 100;
+    return { side: 'SELL', key: valid ? `SELL:${sellPercent}` : 'SELL:UNSUPPORTED', sellPercent, breakeven: false, valid };
+  }
+
   function cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol) {
+    const action = quickBuyTradeAction(slot);
+    if (action.side === 'SELL') return action.valid ? action.sellPercent || 1 : 0;
     const columnInput = trenchColumn(card)?.querySelector('[data-sentry-component="BuyAmountInput"] input');
     // The secondary preset is independent of the primary column input. The
     // current native action can also be the slot itself rather than a child.
@@ -1749,8 +1788,9 @@
       nativeText, slot.dataset.tangoAmountSol, defaultAmountSol);
   }
 
-  function renderQuickBuyContent(replacement, paperLabel, amountNative, nativeSymbol) {
+  function renderQuickBuyContent(replacement, paperLabel, amountNative, nativeSymbol, tradeAction = { side: 'BUY' }) {
     replacement.textContent = '';
+    replacement.dataset.tangoSide = tradeAction.side;
     const wrapper = document.createElement('span');
     wrapper.className = 'tango-quick-buy-content';
     const hint = document.createElement('span');
@@ -1759,7 +1799,9 @@
     const amount = document.createElement('span');
     amount.className = 'tango-buy-amount';
     amount.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m13.688 8.12-6.471 7.705c-.206.245-.604.061-.55-.255l1.007-5.843-4.617-.061c-.88-.012-1.352-1.038-.79-1.714L8.723.191c.205-.247.605-.063.55.253L8.247 6.399l4.641.003c.888.001 1.371 1.038.8 1.718Z"/></svg><span>'
-      + amountNative + ' ' + nativeSymbol + '</span>';
+      + (tradeAction.side === 'SELL'
+        ? tradeAction.breakeven ? (paperLabel === '模拟盘' ? '回本' : 'Recover Cost') : tradeAction.valid ? tradeAction.sellPercent + '%' : '—'
+        : amountNative + ' ' + nativeSymbol) + '</span>';
     wrapper.append(hint, amount);
     replacement.append(wrapper);
   }
@@ -1770,7 +1812,7 @@
     const replacement = document.createElement('button');
     replacement.type = 'button';
     const quickBuyProfile = applyLockedQuickBuyPresentation(replacement, slot);
-    renderQuickBuyContent(replacement, paperLabel, amountNative, chainDefinition.nativeSymbol);
+    renderQuickBuyContent(replacement, paperLabel, amountNative, chainDefinition.nativeSymbol, quickBuyTradeAction(slot));
     return { replacement, quickBuyProfile };
   }
 
@@ -1783,7 +1825,8 @@
       if (!slot.isConnected || !card.isConnected || !replacement.isConnected
         || binding?.actionId !== actionId || binding?.key !== bindingKey
         || binding?.state === 'resolving-identity'
-        || liveQuickBuyIdentityMatches(binding) !== true) return;
+        || liveQuickBuyIdentityMatches(binding) !== true
+        || binding.tradeAction?.valid === false) return;
       const activeOperation = activeQuickBuyOperation(bindingKey, slot);
       if (activeOperation) {
         binding.operation = activeOperation;
@@ -1821,7 +1864,10 @@
         rememberTrenchSnapshot({ token, quote });
         await onQuickBuy({
           actionId, token: { ...token }, quote: { ...quote },
-          amountNative, amountSol: amountNative, sourceUrl: evidence.href
+          amountNative, amountSol: amountNative, sourceUrl: evidence.href,
+          ...(binding.tradeAction?.side === 'SELL' ? {
+            side: 'SELL', sellPercent: binding.tradeAction.sellPercent, breakeven: binding.tradeAction.breakeven
+          } : {})
         });
       } finally {
         releaseQuickBuyOperation(operation);
@@ -1860,6 +1906,7 @@
       slot, key: '', chain, address: '', href: '', card, nativeControl: nativeControl || null,
       replacement, actionId, bindingNonce, generation, state: 'resolving-identity',
       amountNative, paperLabel, policyKey, birth, birthAmountNative: amountNative, pendingOnly: false,
+      tradeAction: quickBuyTradeAction(slot),
       onQuickBuy, chainDefinition, quickBuyProfile,
       cardGenerationIdentity: cardGenerationIdentity(card),
       actionHost: null, operation: null, additionalNativeControls: []
@@ -1899,14 +1946,19 @@
     const verifiedNativeControl = liveNativeControl || preservedNativeControl;
     const evidence = cardAddressEvidence(card, chain);
     const claimedIntent = claimQuickBuyIdentityIntent(binding, evidence, now);
-    const bindingNonce = nextBindingNonce(binding.generation);
+    // Another slot on this card may have advanced the shared generation while
+    // its address was absent. Only the newly verified action adopts it; old
+    // callbacks and pending intents keep their original generation and expire.
+    const generation = cardGeneration(card);
+    const bindingNonce = nextBindingNonce(generation);
     const actionId = `tango-paper-${bindingNonce}`;
     const handleClick = createQuickBuyHandler({
       slot, card, replacement, bindingKey, chain, address, actionId, onQuickBuy, amountNative
     });
     const nextBinding = Object.assign({}, binding, {
-      slot, key: bindingKey, chain, address, href, card, actionId, bindingNonce,
+      slot, key: bindingKey, chain, address, href, card, actionId, bindingNonce, generation,
       amountNative, paperLabel, state: 'ready',
+      tradeAction: quickBuyTradeAction(slot),
       policyKey, onQuickBuy, chainDefinition,
       cardGenerationIdentity: cardGenerationIdentity(card),
       nativeControl: verifiedNativeControl, pendingOnly: false,
@@ -1922,7 +1974,7 @@
       }
       return false;
     }
-    renderQuickBuyContent(replacement, paperLabel, amountNative, chainDefinition.nativeSymbol);
+    renderQuickBuyContent(replacement, paperLabel, amountNative, chainDefinition.nativeSymbol, nextBinding.tradeAction);
     applyPaperStateCopy(nextBinding, 'ready');
     slot.dataset.tangoQuickBuy = '1';
     slot.dataset.tangoTokenAddress = address;
@@ -2225,6 +2277,7 @@
       if (existingBinding?.state === 'resolving-identity'
         && (existingBinding.chain !== chain
           || Number(existingBinding.amountNative) !== Number(pendingAmount)
+          || (existingBinding.tradeAction?.key || 'BUY') !== quickBuyTradeAction(slot).key
           || existingBinding.paperLabel !== paperLabel
           || existingBinding.policyKey !== policyKey)) {
         cancelQuickBuyIdentityIntent(existingBinding, 'binding-drift');
@@ -2312,6 +2365,8 @@
         continue;
       }
       if (existingBinding?.replacement?.isConnected && existingBinding.key === bindingKey
+        && existingBinding.generation === cardGeneration(card)
+        && (existingBinding.tradeAction?.key || 'BUY') === quickBuyTradeAction(slot).key
         && Number(existingBinding.amountNative) === amountSol && existingBinding.paperLabel === paperLabel
         && existingBinding.policyKey === policyKey
         && existingBinding.card === card) {
@@ -2365,6 +2420,7 @@
         slot, key: bindingKey, chain, address, href, card, nativeControl, replacement,
         actionId, bindingNonce, generation, state: existingOperation ? 'in-flight' : 'ready',
         amountNative: amountSol, paperLabel, policyKey, onQuickBuy, chainDefinition, quickBuyProfile,
+        tradeAction: quickBuyTradeAction(slot),
         pendingOnly: false,
         cardGenerationIdentity: liveCardGenerationIdentity,
         actionHost: null, additionalNativeControls: [], operation: existingOperation

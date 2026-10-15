@@ -1,0 +1,140 @@
+{
+  "baseline": "Before root test: 9 BNB, one user-owned owl position with 1 BNB cost",
+  "secondaryBuy": "DCAT .5 BNB -> 8.5 BNB, new test-only position",
+  "reproduced": {
+    "condition": "Giant -> Small",
+    "secondaryGeneration": 64,
+    "primaryGeneration": 65,
+    "balanceBefore": 8.5,
+    "balanceAfter": 8.5,
+    "lastClickAt": null
+  },
+  "afterCleanup": "当前持仓\n一键清仓\n✕\n持仓总额\n0.9818 BNB\n1 持仓\n猫头鹰 ↗\nSmartX吉祥物QQ805121438\n-0.0182 BNB · -1.82%\n价值 0.9818 BNB\n成本 1 BNB\n持仓时间 4m 51s\n25%\n50%\n平仓\n当前显示值使用该链该代币最近可用的模拟行情。",
+  "sizes": [
+    {
+      "sizeName": "大号",
+      "buttons": [
+        {
+          "amount": "0.5",
+          "generation": "96",
+          "id": "tango-paper-96-129",
+          "rect": {
+            "bottom": 473.3333435058594,
+            "height": 32,
+            "left": 532.3125,
+            "right": 590.375,
+            "top": 441.3333435058594,
+            "width": 58.0625,
+            "x": 532.3125,
+            "y": 441.3333435058594
+          },
+          "size": "large"
+        },
+        {
+          "amount": "1",
+          "generation": "97",
+          "id": "tango-paper-97-130",
+          "rect": {
+            "bottom": 473.3333435058594,
+            "height": 32,
+            "left": 594.375,
+            "right": 652.4375,
+            "top": 441.3333435058594,
+            "width": 58.0625,
+            "x": 594.375,
+            "y": 441.3333435058594
+          },
+          "size": "large"
+        }
+      ]
+    },
+    {
+      "sizeName": "超大号",
+      "buttons": [
+        {
+          "amount": "0.5",
+          "generation": "96",
+          "id": "tango-paper-96-129",
+          "rect": {
+            "bottom": 483.3333435058594,
+            "height": 44,
+            "left": 523.3125,
+            "right": 585.875,
+            "top": 439.3333435058594,
+            "width": 62.5625,
+            "x": 523.3125,
+            "y": 439.3333435058594
+          },
+          "size": "ultra"
+        },
+        {
+          "amount": "1",
+          "generation": "97",
+          "id": "tango-paper-97-130",
+          "rect": {
+            "bottom": 483.3333435058594,
+            "height": 44,
+            "left": 589.875,
+            "right": 652.4375,
+            "top": 439.3333435058594,
+            "width": 62.5625,
+            "x": 589.875,
+            "y": 439.3333435058594
+          },
+          "size": "ultra"
+        }
+      ]
+    },
+    {
+      "sizeName": "巨型",
+      "buttons": [
+        {
+          "amount": "0.5",
+          "generation": "96",
+          "id": "tango-paper-96-129",
+          "rect": {
+            "bottom": 479.3333587646485,
+            "height": 132.6666717529297,
+            "left": 499.2083435058594,
+            "right": 573.8333435058594,
+            "top": 346.66668701171875,
+            "width": 74.625,
+            "x": 499.2083435058594,
+            "y": 346.66668701171875
+          },
+          "size": "giant"
+        },
+        {
+          "amount": "1",
+          "generation": "97",
+          "id": "tango-paper-97-130",
+          "rect": {
+            "bottom": 479.3333587646485,
+            "height": 132.6666717529297,
+            "left": 577.8333740234375,
+            "right": 652.4375457763672,
+            "top": 346.66668701171875,
+            "width": 74.60417175292969,
+            "x": 577.8333740234375,
+            "y": 346.66668701171875
+          },
+          "size": "giant"
+        }
+      ]
+    }
+  ],
+  "sellModeMisclassified": [
+    {
+      "amount": "0.1",
+      "nativeComponent": "SellButton",
+      "nativeSellText": "回本",
+      "paperText": "模拟盘0.1 BNB"
+    },
+    {
+      "amount": "1",
+      "nativeComponent": null,
+      "paperText": "模拟盘1 BNB"
+    }
+  ],
+  "detailPanel": "T\nTANGO\n模拟盘\n猫头鹰\n✎\n🔊\n⚙\n×\n买入\n◎ 8.978 BNB\n0.1\n0.2\n0.5\n1\n2\n3\n5\n10\n⌁ 0.8%\n♜ 0.001 BNB\n♙ 1%\n入场市值 $4200\n卖出 %\n1.68亿 猫头鹰\n10%\n25%\n50%\n100%\n5%\n15%\n35%\n75%\n⌁ 自动\n♜ 0.001 BNB\n一键回本\n当前市值 $4000\n虚拟余额\n8.978 BNB\n总买入\n1 BNB\n总卖出\n0 BNB\n总利润\n-0.067 BNB\n入场市值 $4200\n当前市值 $4000\n盈亏 -6.7%\n盈亏数额 -0.067 BNB"
+}

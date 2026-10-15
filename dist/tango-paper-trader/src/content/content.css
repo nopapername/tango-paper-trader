@@ -104,6 +104,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 .tango-list-quick-buy:hover {
   filter: brightness(1.12);
 }
+.tango-list-quick-buy[data-tango-side="SELL"] { --tango-quick-buy-accent: #ff6673; }
 .tango-list-quick-buy:active { opacity: .55; }
 .tango-list-quick-buy[data-tango-paper-state="in-flight"] { cursor: wait; opacity: .65; }
 .tango-quick-buy-content {

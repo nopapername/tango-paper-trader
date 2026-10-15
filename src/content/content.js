@@ -1687,6 +1687,21 @@
     if (runtime.quickBuyLocks.size > 100) {
       [...runtime.quickBuyLocks.entries()].filter(([, at]) => Date.now() - at > 5000).forEach(([key]) => runtime.quickBuyLocks.delete(key));
     }
+    if (clickContext.side === 'SELL') {
+      const key = Tango.Engine.positionKey(chain.id, clickContext.token.address);
+      const position = runtime.state.positions[key];
+      if (!position) return showToast(t('noPosition'), 'error');
+      const quote = resolvePaperTradeQuote(clickContext.token, clickContext.quote, { position });
+      if (!quote) return showToast(t('invalidQuote'), 'error');
+      const percent = clickContext.breakeven === true
+        ? Tango.Engine.breakevenSellPercent(position, quote, runtime.settings)
+        : Number(clickContext.sellPercent);
+      if (!(percent > 0 && percent <= 100)) {
+        return showToast(t(clickContext.breakeven === true ? 'breakevenUnavailable' : 'invalidAmount'), 'error');
+      }
+      return sell(percent, { token: clickContext.token, quote }, routeCapture);
+    }
+    if (clickContext.side && clickContext.side !== 'BUY') return showToast(t('invalidAmount'), 'error');
     await buy(amountNative, clickContext, routeCapture);
   }
 
