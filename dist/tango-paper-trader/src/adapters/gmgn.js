@@ -273,15 +273,36 @@
     return new RegExp(`${prefix}.{0,8}${suffix}`, caseInsensitive ? 'i' : '').test(source);
   }
 
+  function isQuoteTokenIdentityNode(node) {
+    let current = node;
+    for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+      if (current.getAttribute?.('data-testid') === 'quote-token-tag') return true;
+      if (String(current.tagName || '').toUpperCase() === 'A'
+        && current.querySelector?.('[data-testid="quote-token-tag"]')) return true;
+    }
+    return false;
+  }
+
+  function detailIdentityText(element) {
+    const quoteLinks = Array.from(element?.querySelectorAll?.('a[href]') || [])
+      .filter(isQuoteTokenIdentityNode);
+    let text = String(element?.textContent || '');
+    quoteLinks.forEach((link) => {
+      const quoteText = String(link.textContent || '');
+      if (quoteText) text = text.split(quoteText).join('');
+    });
+    return text;
+  }
+
   function elementHasTokenAddress(element, address, chainId = null) {
     if (!element) return false;
-    const text = String(element.textContent || '');
+    const text = detailIdentityText(element);
     // Avoid accepting a page-wide ancestor merely because another widget happens
     // to contain the new route address while GMGN is still rendering the old header.
     if (text.length <= 4_000 && addressHintMatches(text, address, chainId)) return true;
     const nodes = [element, ...Array.from(element.querySelectorAll?.('a[href], [title], [data-address], [data-token-address], [data-mint], [data-ca]') || []).slice(0, 80)];
     const caseInsensitive = !chainId || Tango.Chains.get(chainId)?.addressFamily === 'EVM';
-    return nodes.some((node) => ['href', 'title', 'data-address', 'data-token-address', 'data-mint', 'data-ca']
+    return nodes.filter((node) => !isQuoteTokenIdentityNode(node)).some((node) => ['href', 'title', 'data-address', 'data-token-address', 'data-mint', 'data-ca']
       .some((attribute) => {
         const value = String(node.getAttribute?.(attribute) || '');
         return (caseInsensitive ? value.toLowerCase() : value).includes(caseInsensitive ? String(address).toLowerCase() : String(address));
@@ -316,10 +337,12 @@
     const attributeNodes = Array.from(scope.querySelectorAll?.('[data-address], [data-token-address], [data-mint], [data-ca]') || []);
     const evidence = [];
     leafNodes.forEach((node) => {
+      if (isQuoteTokenIdentityNode(node)) return;
       const hint = visibleAddressHint(node.textContent, chainId);
       if (hint) evidence.push({ node, hint });
     });
     attributeNodes.forEach((node) => {
+      if (isQuoteTokenIdentityNode(node)) return;
       ['data-address', 'data-token-address', 'data-mint', 'data-ca'].forEach((attribute) => {
         const hint = visibleAddressHint(node.getAttribute?.(attribute), chainId);
         if (hint) evidence.push({ node, hint });
@@ -332,6 +355,7 @@
     if (!addressNode || distance > 8) return null;
 
     const linkedAddresses = Array.from(scope.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || [])
+      .filter((node) => !isQuoteTokenIdentityNode(node))
       .map((link) => {
         try { return tokenAddressFromUrl(new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai').href); }
         catch { return ''; }
@@ -345,6 +369,7 @@
   function elementChainBinding(element, chainId) {
     if (!chainId) return 'MATCH';
     const links = Array.from(element?.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || [])
+      .filter((node) => !isQuoteTokenIdentityNode(node))
       .filter((link) => {
         try {
           const parsed = new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai');

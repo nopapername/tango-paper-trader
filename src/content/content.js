@@ -452,7 +452,7 @@
   function positionUsdValue(position, mark = Tango.Engine.markPosition(
     position, freshExecutableQuote(position), currentNativePriceUsd()
   )) {
-    return Number(position.quantity || 0) * Number(mark.priceUsd || 0);
+    return Number(mark.quantity ?? position.quantity ?? 0) * Number(mark.priceUsd || 0);
   }
   function positionUsdTotal(positions) {
     return positions.reduce((sum, position) => sum + positionUsdValue(position), 0);

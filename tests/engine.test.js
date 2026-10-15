@@ -1492,6 +1492,57 @@ test('a native-only correction is neutral and finite without rewriting history o
   assert.doesNotThrow(() => State.normalizeState(calibrated, paperSettings, { strict: true }));
 });
 
+test('live marks project neutral supply correction before persisted calibration settles', () => {
+  const bought = Engine.executeBuy(state(), {
+    token: ethToken, quote: internalUnknownFallbackQuote(), amountNative: 1
+  }, paperSettings, 1_000);
+  const snapshot = structuredClone(bought.position);
+  const mark = Engine.markPosition(bought.position, exactUnknownFallbackCorrection());
+  assert.ok(Math.abs(mark.valueNative - 1) < 1e-12);
+  assert.ok(Math.abs(mark.unrealizedPnlNative) < 1e-12);
+  assert.deepEqual(bought.position, snapshot);
+});
+
+test('current native observations cannot revalue uncalibrated native fallback quantities', () => {
+  const bought = Engine.executeBuy(state(), {
+    token: ethToken, amountNative: 1,
+    quote: {
+      priceUsd: 2, nativePriceUsd: 1, observedAt: 1_000, nativePriceObservedAt: 1_000,
+      source: 'GMGN_NETWORK', provisional: true, syntheticNativePrice: true,
+      valuationMode: 'PRICE', priceProvenance: 'OBSERVED_PRICE'
+    }
+  }, paperSettings, 1_000);
+  const mark = Engine.markPosition(bought.position, undefined, 2_000);
+  assert.equal(mark.valueNative, 1);
+  assert.equal(Engine.portfolioSummary(bought.state, 'eth', 2_000).positionsValueNative, 1);
+  assert.equal(Engine.chainUsdSummary(bought.state, 'eth', 2_000).positionsUsd, 2_000);
+});
+
+test('live mark after partial sell corrects a smaller supply while preserving actual market movement', () => {
+  const fallback = internalUnknownFallbackQuote();
+  const bought = Engine.executeBuy(state(), {
+    token: ethToken, quote: fallback, amountNative: 1
+  }, paperSettings, 1_000);
+  const sold = Engine.executeSell(bought.state, {
+    token: ethToken, quote: { ...fallback, observedAt: 1_500, nativePriceObservedAt: 1_500 }, percent: 10
+  }, paperSettings, 1_500);
+  const factual = exactUnknownFallbackCorrection(2_000, {
+    totalSupply: 100_000_000, marketCapDivisor: 100_000_000,
+    marketCapUsd: 2_720, priceUsd: 2_720 / 100_000_000
+  });
+  const position = sold.state.positions[Engine.positionKey('eth', ethToken.address)];
+  const snapshot = structuredClone(sold.state);
+  const live = Engine.markPosition(position, factual);
+  // 90% remaining, then a genuine 15% market-cap decrease: .9 * .85.
+  assert.ok(Math.abs(live.valueNative - 0.765) < 1e-12);
+  assert.ok(Math.abs(live.unrealizedPnlNative - -0.135) < 1e-12);
+  assert.deepEqual(sold.state, snapshot);
+  const calibrated = Engine.updatePositionQuote(sold.state, ethToken, factual, 2_000);
+  assert.ok(Math.abs(Engine.markPosition(calibrated.positions[Engine.positionKey('eth', ethToken.address)]).valueNative - 0.765) < 1e-12);
+  assert.deepEqual(calibrated.trades, sold.state.trades);
+  assert.deepEqual(calibrated.accounts, sold.state.accounts);
+});
+
 test('public calibratePosition preserves the raw state return contract', () => {
   const syntheticQuote = {
     priceUsd: 1, nativePriceUsd: 1, observedAt: 1_000, nativePriceObservedAt: 1_000,

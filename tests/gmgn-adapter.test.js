@@ -1390,6 +1390,66 @@ test('detail header accepts a nearby CA leaf in its small exclusive identity con
   }
 });
 
+test('detail identity ignores quote-token links without accepting them as current-token evidence', () => {
+  const originalDocument = global.document;
+  const makeFixture = ({ quoteAddress = EVM_ADDRESS_2, quoteChain = 'bsc', currentEvidence = true, conflict = false, quoteInHeader = false } = {}) => {
+    const body = {};
+    const tag = { textContent: 'BNCB', childElementCount: 0, getAttribute: () => null };
+    const quote = {
+      tagName: 'A', href: `https://gmgn.ai/${quoteChain}/token/${quoteAddress}`,
+      textContent: quoteInHeader ? quoteAddress : 'BNCB',
+      querySelector: selector => selector === '[data-testid="quote-token-tag"]' ? tag : null,
+      getAttribute(name) { return name === 'href' ? this.href : null; }
+    };
+    tag.parentElement = quote;
+    const devLink = { href: `https://gmgn.ai/bsc/token/${EVM_ADDRESS}`, querySelector: () => null,
+      getAttribute(name) { return name === 'href' ? this.href : null; } };
+    const otherLink = { href: `https://gmgn.ai/bsc/token/${EVM_ADDRESS_2}`, querySelector: () => null,
+      getAttribute(name) { return name === 'href' ? this.href : null; } };
+    const addressNode = { textContent: EVM_ADDRESS, childElementCount: 0, getAttribute: () => null };
+    const header = {
+      textContent: quoteInHeader ? `Current ${quote.textContent}` : 'Current',
+      querySelectorAll: selector => quoteInHeader && selector.includes('a[href') ? [quote] : [],
+      querySelector: () => null
+    };
+    const leaves = [...(currentEvidence ? [addressNode] : []), tag];
+    const links = [...(currentEvidence ? [devLink] : []), quote, ...(conflict ? [otherLink] : [])];
+    const container = {
+      tagName: 'DIV', textContent: `Current ${currentEvidence ? EVM_ADDRESS : ''} BNCB`, parentElement: body,
+      querySelectorAll(selector) {
+        if (selector === '[data-sentry-component="TokenHeader"]') return [header];
+        if (selector === '*') return [header, ...leaves, ...links];
+        if (selector === 'span,div,p,a,button') return leaves;
+        if (selector.includes('a[href')) return links;
+        return [];
+      }
+    };
+    header.parentElement = container;
+    addressNode.parentElement = container;
+    quote.parentElement = quoteInHeader ? header : container;
+    const bar = { getAttribute: () => 'BaseInfoBar', querySelectorAll: () => [header] };
+    container.parentElement = bar;
+    bar.parentElement = body;
+    global.document = { querySelectorAll: selector => selector === '[data-sentry-component="BaseInfoBar"]' ? [bar] : [header] };
+    return { header, container };
+  };
+  try {
+    for (const quoteChain of ['bsc', 'eth']) {
+      const fixture = makeFixture({ quoteChain });
+      const detail = GMGN._findTokenDetailScope(EVM_ADDRESS, 'bsc');
+      assert.equal(detail?.header, fixture.header, `${quoteChain} quote asset does not invalidate current identity`);
+      assert.equal(detail?.bindingScope, fixture.container);
+      assert.equal(detail?.chainBound, true);
+    }
+    makeFixture({ conflict: true });
+    assert.equal(GMGN._findTokenDetailScope(EVM_ADDRESS, 'bsc'), null, 'unmarked conflicting token remains rejected');
+    makeFixture({ currentEvidence: false, quoteAddress: EVM_ADDRESS, quoteInHeader: true });
+    assert.equal(GMGN._findTokenDetailScope(EVM_ADDRESS, 'bsc'), null, 'quote asset alone cannot authorize current identity');
+  } finally {
+    global.document = originalDocument;
+  }
+});
+
 test('detail scope prefers the current BaseInfoBar when another widget repeats the same CA', () => {
   const originalDocument = global.document;
   const body = {};

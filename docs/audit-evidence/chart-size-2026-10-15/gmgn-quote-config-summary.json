@@ -1,0 +1,112 @@
+{
+  "source": "https://gmgn.ai/static/config/quotes.json",
+  "version": 49,
+  "chains": {
+    "bsc": {
+      "count": 589,
+      "major": 13,
+      "rwa": 572
+    },
+    "robinhood": {
+      "count": 199,
+      "major": 4,
+      "rwa": 195
+    },
+    "xlayer": {
+      "count": 96,
+      "major": 2,
+      "rwa": 94
+    },
+    "base": {
+      "count": 477,
+      "major": 5,
+      "rwa": 471
+    },
+    "sol": {
+      "count": 582,
+      "major": 5,
+      "rwa": 577
+    },
+    "eth": {
+      "count": 7,
+      "major": 6,
+      "rwa": 1
+    },
+    "monad": {
+      "count": 4,
+      "major": 4,
+      "rwa": 0
+    },
+    "hyperevm": {
+      "count": 3,
+      "major": 3,
+      "rwa": 0
+    },
+    "megaeth": {
+      "count": 1,
+      "major": 1,
+      "rwa": 0
+    },
+    "arc": {
+      "count": 2,
+      "major": 1,
+      "rwa": 1
+    },
+    "stable": {
+      "count": 4,
+      "major": 4,
+      "rwa": 0
+    },
+    "arbitrum": {
+      "count": 3,
+      "major": 3,
+      "rwa": 0
+    }
+  },
+  "bscExamples": [
+    {
+      "ca": "0x0000000000000000000000000000000000000000",
+      "title": "BNB",
+      "tags": [
+        "major_quote",
+        "tax_dividend_only"
+      ]
+    },
+    {
+      "ca": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "title": "BNB",
+      "tags": [
+        "major_quote",
+        "tax_dividend_only"
+      ]
+    },
+    {
+      "ca": "0x02fca66c1d1afb4e2a7884261eb00f63598a7436",
+      "title": "NVDAB",
+      "tags": [
+        "rwa"
+      ]
+    },
+    {
+      "ca": "0x21caef8a43163eea865baee23b9c2e327696a3bf",
+      "title": "XAUT0",
+      "tags": [
+        "rwa"
+      ]
+    },
+    {
+      "ca": "0x9b8e987e6fec8cf1380c4dca7071e2c7853aeea1",
+      "title": "FXION",
+      "tags": [
+        "rwa"
+      ]
+    },
+    {
+      "ca": "0x4902c5ebc598265ed2212b559b042de8a5eeec3f",
+      "title": "BNCB",
+      "tags": [
+        "rwa"
+      ]
+    }
+  ]
+}

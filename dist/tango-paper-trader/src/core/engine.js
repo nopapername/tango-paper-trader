@@ -1143,11 +1143,25 @@
     const nativePriceUsd = Number.isFinite(override) && override > 0
       ? override
       : Number(quote?.nativePriceUsd || position.lastNativePriceUsd || 0);
+    // A live quote can render before its calibration write settles. Project the
+    // same neutral unit corrections here so old quantities and new units cannot
+    // manufacture a temporary gain or loss.
+    let quantity = Number(position.quantity);
+    const oldSupply = trustedSupply(position);
+    const observedSupply = quote && quoteSupply(quote, position);
+    if (usesMarketCapValuation(position) && oldSupply && observedSupply
+      && supplyRank(observedSupply.source) > supplyRank(oldSupply.source)) {
+      quantity *= observedSupply.totalSupply / oldSupply.totalSupply;
+    }
+    const oldNativePriceUsd = Number(position.lastNativePriceUsd);
+    if (position.provisionalNativePrice === true && oldNativePriceUsd > 0 && nativePriceUsd > 0) {
+      quantity *= nativePriceUsd / oldNativePriceUsd;
+    }
     const valueNative = priceUsd > 0 && nativePriceUsd > 0
-      ? Number(position.quantity) * priceUsd / nativePriceUsd : Number(position.costBasisNative);
+      ? quantity * priceUsd / nativePriceUsd : Number(position.costBasisNative);
     const unrealizedPnlNative = valueNative - Number(position.costBasisNative);
     const roi = Number(position.costBasisNative) > 0 ? unrealizedPnlNative / Number(position.costBasisNative) * 100 : 0;
-    return { valueNative, unrealizedPnlNative, roi, priceUsd, nativePriceUsd };
+    return { valueNative, unrealizedPnlNative, roi, priceUsd, nativePriceUsd, quantity };
   }
 
   function breakevenSellPercent(position, quote, settings) {
@@ -1190,10 +1204,13 @@
     if (!Number.isFinite(price) || !(price > 0)) throw new Error('invalidNativePrice');
     const positionsUsd = Object.values(state.positions || {})
       .filter((position) => position.chain === chain)
-      .reduce((sum, position) => checkedArithmetic(
-        sum + checkedArithmetic(Number(position.quantity) * markPosition(position).priceUsd, 'nonnegative'),
-        'nonnegative'
-      ), 0);
+      .reduce((sum, position) => {
+        const mark = markPosition(position, undefined, price);
+        return checkedArithmetic(
+          sum + checkedArithmetic(mark.quantity * mark.priceUsd, 'nonnegative'),
+          'nonnegative'
+        );
+      }, 0);
     const cashUsd = checkedArithmetic(Number(account.cashBalanceNative) * price, 'nonnegative');
     const principalUsd = checkedArithmetic(Number(account.initialBalanceNative) * price, 'nonnegative');
     const assetsUsd = checkedArithmetic(cashUsd + positionsUsd, 'nonnegative');

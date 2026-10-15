@@ -461,3 +461,16 @@ test('generic native price requires the exact GMGN major-coin endpoint and a non
     }]
   }, 701, trusted), []);
 });
+
+
+test('explicit USD market cap wins over generic pool quote units without invalidating USD observations', () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  for (const [genericKey, explicitKey] of [['market_cap', 'market_cap_usd'], ['marketCap', 'marketCapUsd']]) {
+    const [quote] = Quotes.extract({ address, price_usd: 2, total_supply: 1000,
+      [genericKey]: 10, [explicitKey]: 2000 }, 'bsc', 123);
+    assert.equal(quote.priceUsd, 2);
+    assert.equal(quote.marketCapUsd, 2000);
+    assert.equal(quote.totalSupply, 1000);
+    assert.notEqual(quote.totalSupplyAmbiguous, true);
+  }
+});

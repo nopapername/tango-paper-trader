@@ -1,0 +1,47 @@
+[
+  {
+    "name": "小号",
+    "dom": {
+      "rect": {
+        "h": 24,
+        "w": 63.25
+      },
+      "size": "small",
+      "style": "isolation: isolate; --quick-buy-layer-color: var(--customize-button-ultra-color); --loading-size: 12px; --tango-quick-buy-height: 24px; --tango-quick-buy-width: 100%; --tango-quick-buy-display-text: 12px; --tango-quick-buy-label-text: 9px;",
+      "text": "模拟盘\n0.5 BNB"
+    }
+  },
+  {
+    "name": "大号",
+    "dom": {
+      "h": 32,
+      "size": "large",
+      "text": "模拟盘\n0.5 BNB",
+      "w": 63.25
+    }
+  },
+  {
+    "name": "超大号",
+    "dom": {
+      "rect": {
+        "h": 44,
+        "w": 68.16667175292969
+      },
+      "size": "ultra",
+      "style": "isolation: isolate; --quick-buy-layer-color: var(--customize-button-ultra-color); --loading-size: 13px; --tango-quick-buy-height: 44px; --tango-quick-buy-width: 100%; --tango-quick-buy-display-text: 13px; --tango-quick-buy-label-text: 10px;",
+      "text": "模拟盘\n0.5 BNB"
+    }
+  },
+  {
+    "name": "巨型",
+    "dom": {
+      "rect": {
+        "h": 132.6666717529297,
+        "w": 74.625
+      },
+      "size": "giant",
+      "style": "isolation: isolate; --quick-buy-layer-color: var(--customize-button-ultra-color); --loading-size: 12px; --tango-quick-buy-height: 100%; --tango-quick-buy-width: 100%; --tango-quick-buy-display-text: 14px; --tango-quick-buy-label-text: 10px; border-color: rgb(var(--color-primary) / 1); box-shadow: rgba(255, 255, 255, 0) 0px 0px 0px 0px inset; --quick-buy-pointer-color: var(--customize-button2-ultra-color); --quick-buy-pointer-width: 100px; --quick-buy-pointer-height: 100px;",
+      "text": "模拟盘\n0.5 BNB"
+    }
+  }
+]

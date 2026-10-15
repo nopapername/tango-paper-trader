@@ -32,4 +32,33 @@
 
 最终运行 `npm test`：1,028 项通过，0 失败、0 跳过；`npm run check`、`npm run build` 和 `git diff --check` 均通过。完整测试输出保存在 [回归日志](audit-evidence/chart-size-2026-10-15/regression.log)。
 
-已构建 `dist/tango-paper-trader`。四档尺寸在线验收需要重新加载插件。买卖横线位置、正常图表数字、刷新补画及点击隐藏仍需要可见正常 K 线页面完成在线验收。
+## 重载后的在线补测与新增问题
+
+用户重新加载插件并打开正常图表后，四档尺寸实际测得：小号 24px、大号 32px、超大号 44px、巨型 132.67px。巨型使用卡片父容器高度；四档显示均有变化。已恢复原来的小号配置，证据见 [尺寸测量](audit-evidence/chart-size-2026-10-15/live-sizes.json)。
+
+正常图表代币为 `0x9dd4cfe37fe2bdd5de6639e7fa0c51bdb6507777`。用户预先已有 0.5 BNB 模拟仓位。买入横线显示“虚拟买入 · $41.29K”，点击 × 后消失。随后卖出 10%，余额从 9.5 变为 9.5471 BNB，剩余数量从约 8,888.41 万变为 7,999.57 万；没有清空该用户预先建立的剩余仓位。
+
+此次在线测试新发现并修复：
+
+1. **计价资产链接污染详情身份校验。** 新版头部包含 BNCB 的链接与 `quote-token-tag` 标记，原逻辑把这个独立计价资产当成当前代币地址冲突，拒绝实时详情报价，导致估值停留旧值、历史估值卖出不生成横线。现在仅排除明确标记的计价资产，并继续拒绝真正的其他代币地址冲突；不能单凭计价标签授权当前代币身份。
+2. **校准写入前混用新价格和旧数量。** 刷新后曾出现临时估值收益异常跳变。估值现在在异步校准持久化完成前，预先应用与校准一致的供应量/原生币单位修正；保留真实行情波动，现金和成交历史不被预览修改。
+3. **API 市值字段优先级。** 同一对象同时包含 `market_cap_usd` 与通用 `market_cap` 时，显式 USD 字段现在优先，避免计价资产单位混入 USD 估值。
+4. **行情接口链识别。** 已观察到的 K 线和成交接口路径包含链名，响应归属现在根据该链名绑定，避免页面切链时错误使用当前页面链；同时检查重定向响应的一致性。
+
+买入横线截图：[正常图表](audit-evidence/chart-size-2026-10-15/normal-buy-line.png)；隐藏结果：[隐藏截图](audit-evidence/chart-size-2026-10-15/normal-line-hidden.png)。刷新后 GMGN 原生图表再次成为空白文档，因此补画和新补丁后的卖出横线尚需再次在线验收。另观察到横线范围偏短，需获取正常 TradingView 主图/价格轴画布边界后确认。
+
+## API 与前端数据复用
+
+从内置浏览器页面已加载资源确认了以下接口；仅记录公开路径，不保存设备、标签页或指纹查询参数：
+
+| 已观察资源 | 可复用内容与处理 |
+| --- | --- |
+| `/static/config/quotes.json` | v49 配置区分 `major_quote` 与 `rwa`；BSC 包含 BNCB、NVDAB、FXION、XAUT0 等。用于验证计价资产的页面语义，不作为价格或汇率来源 |
+| `/mrwapi/v1/multi_token_info`、`multi_token_full_info` | 现有被动解析已覆盖多代币数据；以精确链、地址、字段时间戳合并，减少重复读取 |
+| `/api/v1/major_coin_prices` | 复用页面原生币美元价格，避免把池底资产价格当 BNB/USD |
+| `/api/v1/token_mcap_candles/<chain>/<token>` | 已观察 `pool_type=tpool`；路径链名参与归属校验，不把市值 K 线当成单价 |
+| `/vas/api/mul-region/token_trades_v2/<chain>/<token>` | 使用明确链归属，继续按字段与地址校验被动收到的数据 |
+
+公开配置的抽样统计见 [配置记录](audit-evidence/chart-size-2026-10-15/gmgn-quote-config-summary.json)。现有机制已经覆盖 pool、launchpad 和多代币接口；本次没有根据未观察到的响应结构猜测汇率换算，也没有把无地址归属的嵌套元数据附到当前代币。数值上满足“价格 × 供应量 = 市值”不能单独证明计价单位为 USD。
+
+新增修复合并后再次运行：`npm test` 1,036 项通过、0 失败，扩展校验及构建通过。日志见 [后续回归](audit-evidence/chart-size-2026-10-15/followup-regression.log)。`dist/tango-paper-trader` 已重建，等待重新加载后的图表在线验收。

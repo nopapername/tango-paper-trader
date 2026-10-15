@@ -3,7 +3,8 @@
   const ADDRESS_KEYS = ['address', 'token_address', 'tokenAddress', 'mint', 'mint_address', 'contract_address', 'contractAddress', 'ca'];
   const EXPLICIT_PRICE_KEYS = ['price_usd', 'priceUsd', 'usd_price', 'usdPrice'];
   const GENERIC_PRICE_KEYS = ['price'];
-  const MC_KEYS = ['market_cap', 'marketCap', 'market_cap_usd', 'marketCapUsd', 'mc', 'fdv'];
+  // A pool may expose generic quote-unit values beside explicit USD fields.
+  const MC_KEYS = ['market_cap_usd', 'marketCapUsd', 'market_cap', 'marketCap', 'mc', 'fdv'];
   const LIQUIDITY_KEYS = ['liquidity_usd', 'liquidityUsd', 'liquidity'];
   const EXPLICIT_SUPPLY_KEYS = ['total_supply', 'totalSupply'];
   const GENERIC_SUPPLY_KEYS = ['supply'];

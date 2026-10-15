@@ -16,7 +16,13 @@
     const hostname = parsed.hostname.toLowerCase();
     if (hostname !== 'gmgn.ai' && !hostname.endsWith('.gmgn.ai')) return null;
     const pathSlug = parsed.pathname.split('/').filter(Boolean)[0];
-    return Tango.Chains.get(pathSlug) || Tango.Chains.get(parsed.searchParams.get('chain'));
+    // These observed GMGN API routes carry their chain after the resource name.
+    // Bind passive responses to that chain even when the page has navigated.
+    const apiChain = parsed.pathname.match(
+      /^\/(?:api\/v1\/token_mcap_candles|vas\/api\/mul-region\/token_trades_v2)\/([^/]+)\//
+    )?.[1];
+    return Tango.Chains.get(pathSlug) || Tango.Chains.get(apiChain)
+      || Tango.Chains.get(parsed.searchParams.get('chain'));
   }
 
   function requestContext(url, includeObservedAt = true) {

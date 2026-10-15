@@ -339,3 +339,29 @@ test('page tap does not create a WebSocket or include GMGN execution endpoints',
   assert.doesNotMatch(source, /new\s+WebSocket\s*\(/);
   assert.doesNotMatch(source, /strategy_order|wallet\/list|swap\/route|sendTransaction|signTransaction/);
 });
+
+
+for (const endpoint of ['api/v1/token_mcap_candles', 'vas/api/mul-region/token_trades_v2']) {
+  test(`observed ${endpoint} route binds fetch and XHR data to its explicit chain`, async () => {
+    const route = `https://gmgn.ai/${endpoint}/bsc/${EVM_ADDRESS}`;
+    const loaded = loadPageMain(async () => jsonResponse({ address: EVM_ADDRESS, priceUsd: 4 }, route));
+    await loaded.context.fetch(route);
+    await new Promise((resolve) => setImmediate(resolve));
+    const xhr = new loaded.context.XMLHttpRequest();
+    xhr.open('GET', route);
+    xhr.send();
+    xhr.status = 200;
+    xhr.responseURL = route;
+    xhr.responseText = JSON.stringify({ address: EVM_ADDRESS, priceUsd: 5 });
+    xhr.dispatch('load');
+    assert.deepEqual(loaded.published.map((quote) => quote.chain), ['bsc', 'bsc']);
+  });
+}
+
+test('chain-segment API redirect cannot publish another chains response', async () => {
+  const loaded = loadPageMain(async () => jsonResponse({ address: EVM_ADDRESS, priceUsd: 4 },
+    `https://gmgn.ai/vas/api/mul-region/token_trades_v2/base/${EVM_ADDRESS}`));
+  await loaded.context.fetch(`https://gmgn.ai/vas/api/mul-region/token_trades_v2/bsc/${EVM_ADDRESS}`);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(loaded.published, []);
+});
