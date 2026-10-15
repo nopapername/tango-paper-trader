@@ -657,7 +657,10 @@
       averageEntryPriceUsd: nextAverageEntryPriceUsd,
       averageEntryMarketCap: nextAverageEntryMarketCap,
       lastPriceUsd: newPriceUsd,
-      lastMarketCapUsd: Number(quote.marketCapUsd || existing.lastMarketCapUsd || 0),
+      lastMarketCapUsd: coherentPositionMarketCap(newPriceUsd,
+        Number(quote.marketCapUsd || existing.lastMarketCapUsd || 0), selectedTotalSupply,
+        { ...existing, supplySource: selectedSupply?.source || existing.supplySource,
+          lastPriceProvenance: priceProvenanceForQuote(quote, existing) }),
       lastNativePriceUsd: newNativePriceUsd,
       quoteObservedAt: safeDurableObservedAt(quote.observedAt, Number(now)) ?? Number(now),
       updatedAt: Number(now),
@@ -706,6 +709,20 @@
     };
     nextState.calibrations = [event, ...(state.calibrations || [])];
     return { status: 'CALIBRATED', state: nextState };
+  }
+
+  function coherentPositionMarketCap(priceUsd, marketCapUsd, totalSupply, context) {
+    const derived = ['MARKET_CAP_DERIVED', 'MARKET_CAP_RATIO_DERIVED', 'MIXED_DERIVED'];
+    const needsCoherence = context?.valuationMode === 'MARKET_CAP'
+      || context?.supplySource === 'GMGN_RATIO'
+      || derived.includes(context?.lastPriceProvenance)
+      || derived.includes(context?.averageEntryPriceProvenance);
+    if (!needsCoherence || context?.supplySource === UNKNOWN_FALLBACK_SOURCE
+      || !(priceUsd > 0 && totalSupply > 0)) return marketCapUsd;
+    if (marketCapUsd > 0 && Math.abs(marketCapUsd / priceUsd - totalSupply) <= totalSupply * .001) return marketCapUsd;
+    // Preserve the observed fill price and raw trade MC. A durable position's
+    // valuation coordinate must use the same units as its trusted supply.
+    return checkedArithmetic(priceUsd * totalSupply, 'positive');
   }
 
   function calibratePosition(state, token, quote, now = Date.now()) {
@@ -879,7 +896,10 @@
       metadataSource, quantity: roundedNextQuantity, costBasisNative: roundedNextCost,
       averageEntryPriceUsd: roundedAverageEntryPriceUsd,
       averageEntryMarketCap: roundedAverageEntryMarketCap, realizedPnlNative: existingRealizedPnlNative,
-      lastPriceUsd: observedPriceUsd, lastMarketCapUsd: quoteMarketCapUsd,
+      lastPriceUsd: observedPriceUsd, lastMarketCapUsd: coherentPositionMarketCap(
+        observedPriceUsd, quoteMarketCapUsd, executionTotalSupply,
+        { ...existing, valuationMode: positionValuationMode, supplySource: executionSupply.supplySource,
+          lastPriceProvenance: priceProvenance }),
       lastNativePriceUsd: nativePriceUsd, openedAt: existing?.openedAt || now,
       ...(positionQuoteObservedAt == null ? {} : { quoteObservedAt: positionQuoteObservedAt }),
       updatedAt: now, valuationMode: positionValuationMode,
@@ -921,11 +941,12 @@
     const originalPosition = state.positions?.[key];
     if (!originalPosition || !(Number(originalPosition.quantity) > 0)) throw new Error('noPosition');
     const executionSettings = validatedExecutionSettings(settings, chain);
-    const percent = Number(order?.percent || 0);
-    const requestedOrderQuantity = order?.quantity == null ? null : Number(order.quantity);
-    if (requestedOrderQuantity == null) {
+    const recoveringCost = order?.breakeven === true;
+    let percent = Number(order?.percent || 0);
+    const requestedOrderQuantity = recoveringCost || order?.quantity == null ? null : Number(order.quantity);
+    if (!recoveringCost && requestedOrderQuantity == null) {
       if (!finiteBetween(percent, Number.EPSILON, 100)) throw new Error('invalidAmount');
-    } else if (!finiteBetween(requestedOrderQuantity, Number.EPSILON, Number.MAX_VALUE)) {
+    } else if (!recoveringCost && !finiteBetween(requestedOrderQuantity, Number.EPSILON, Number.MAX_VALUE)) {
       throw new Error('invalidAmount');
     }
     const prepared = preparePositionForExecution(
@@ -935,6 +956,12 @@
     const existing = prepared.position;
     if (!existing || !(Number(existing.quantity) > 0)) throw new Error('noPosition');
     const account = chainAccount(workingState, chain);
+
+    if (recoveringCost) {
+      if (breakevenTargetNative(existing) === 0) throw new Error('breakevenRecovered');
+      percent = breakevenSellPercent(existing, order.quote, settings, now);
+      if (!(percent > 0 && percent <= 100)) throw new Error('breakevenUnavailable');
+    }
 
     const existingQuantity = checkedArithmetic(existing.quantity, 'positive');
     const fullClose = requestedOrderQuantity == null && percent === 100;
@@ -1076,7 +1103,9 @@
       nextState.positions[key] = {
         ...existing, quantity: roundedRemainingQuantity, costBasisNative: roundedRemainingCost,
         realizedPnlNative: roundedNextPositionRealizedPnlNative,
-        lastPriceUsd: observedPriceUsd, lastMarketCapUsd: quoteMarketCapUsd,
+        lastPriceUsd: observedPriceUsd, lastMarketCapUsd: coherentPositionMarketCap(
+          observedPriceUsd, quoteMarketCapUsd, executionTotalSupply,
+          { ...existing, supplySource: executionSupply.supplySource, lastPriceProvenance: priceProvenance }),
         lastNativePriceUsd: nativePriceUsd, updatedAt: now,
         ...(positionQuoteObservedAt == null ? {} : { quoteObservedAt: positionQuoteObservedAt }),
         lastPriceProvenance: priceProvenance,
@@ -1109,6 +1138,7 @@
       state: nextState,
       trade,
       position: nextState.positions[key] || null,
+      ...(recoveringCost ? { executedPercent: percent } : {}),
       calibration: prepared.calibrationStatus === 'CALIBRATED'
         ? workingState.calibrations[0] : null
     };
@@ -1126,7 +1156,7 @@
         continue;
       }
       try {
-        const result = executeSell(nextState, { ...order, quantity: undefined, percent: 100 }, settings, now);
+        const result = executeSell(nextState, { ...order, quantity: undefined, percent: 100, breakeven: false }, settings, now);
         nextState = result.state;
         trades.push(result.trade);
         if (result.calibration) calibrations.push(result.calibration);
@@ -1164,15 +1194,28 @@
     return { valueNative, unrealizedPnlNative, roi, priceUsd, nativePriceUsd, quantity };
   }
 
-  function breakevenSellPercent(position, quote, settings) {
-    if (!position || !(Number(position.quantity) > 0) || !validateQuote(quote, Date.now(), undefined, position).ok) return null;
+  function breakevenTargetNative(position) {
+    if (!position) return null;
+    const remainingCost = Number(position.costBasisNative);
+    const realized = Number(position.realizedPnlNative || 0);
+    const target = remainingCost - realized;
+    if (!Number.isFinite(remainingCost) || remainingCost < 0 || !Number.isFinite(realized) || !Number.isFinite(target)) return null;
+    // Ledger amounts have twelve decimal places; do not create dust recovery orders.
+    const normalizedTarget = Math.abs(target) <= Number.MAX_VALUE / 1e12 ? round(target, 12) : target;
+    return normalizedTarget <= 1e-12 ? 0 : normalizedTarget;
+  }
+
+  function breakevenSellPercent(position, quote, settings, now = Date.now()) {
+    const target = breakevenTargetNative(position);
+    if (!(target > 0) || !(Number(position.quantity) > 0) || !validateQuote(quote, now, undefined, position).ok) return null;
     const slippage = Number(settings.slippageBps || 0) / 10_000;
     const feeRate = Number(settings.platformFeeBps || 0) / 10_000;
-    const executionPriceUsd = effectiveQuotePrice(quote, position) * (1 - slippage);
-    const grossFullValueNative = Number(position.quantity) * executionPriceUsd / Number(quote.nativePriceUsd);
-    const targetGrossNative = (Number(position.costBasisNative) + Number(tradeSettings(settings, position.chain).networkFeeNative || 0)) / Math.max(1e-9, 1 - feeRate);
+    const projected = markPosition(position, quote, Number(quote.nativePriceUsd));
+    const executionPriceUsd = projected.priceUsd * (1 - slippage);
+    const grossFullValueNative = projected.quantity * executionPriceUsd / Number(quote.nativePriceUsd);
+    const targetGrossNative = (target + Number(tradeSettings(settings, position.chain).networkFeeNative || 0)) / Math.max(1e-9, 1 - feeRate);
     const percent = targetGrossNative / grossFullValueNative * 100;
-    return percent > 0 && percent <= 100 ? Math.min(100, round(percent, 4)) : null;
+    return Number.isFinite(percent) && percent > 0 && percent <= 100 ? percent : null;
   }
 
   function portfolioSummary(state, chain, currentNativePriceUsd) {
@@ -1268,7 +1311,10 @@
       && (existing.provisional === true || quote.provisional === true);
     nextState.positions[key] = {
       ...existing, lastPriceUsd: effectiveQuotePrice(quote, existing),
-      lastMarketCapUsd: Number(quote.marketCapUsd || existing.lastMarketCapUsd || 0),
+      lastMarketCapUsd: coherentPositionMarketCap(effectiveQuotePrice(quote, existing),
+        Number(quote.marketCapUsd || existing.lastMarketCapUsd || 0), Number(executionSupply.totalSupply),
+        { ...existing, supplySource: executionSupply.supplySource,
+          lastPriceProvenance: priceProvenanceForQuote(quote, existing, trustedMarketCap) }),
       lastNativePriceUsd: Number(quote.nativePriceUsd || existing.lastNativePriceUsd || 0),
       quoteObservedAt: safeDurableObservedAt(quote.observedAt, Number(now)) ?? Number(now), updatedAt: Number(now),
       lastPriceProvenance: priceProvenanceForQuote(quote, existing, trustedMarketCap),
@@ -1360,7 +1406,7 @@
   Tango.Engine = {
     round, positionKey, validateQuote, executeBuy, executeSell, executeCloseAll, markPosition,
     portfolioSummary, chainUsdSummary, globalUsdSummary, updatePositionQuote, updatePositionQuoteResult,
-    updatePositionMetadata, updatePositionMetadataBatch, breakevenSellPercent,
+    updatePositionMetadata, updatePositionMetadataBatch, breakevenSellPercent, breakevenTargetNative,
     usesMarketCapValuation, calibratePosition, ruleSupply
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Tango.Engine;

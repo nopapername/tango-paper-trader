@@ -425,7 +425,9 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 .tango-edit-all { color: #c7b8ff; }
 .tango-trade-meta { align-items: center; color: var(--muted); display: flex; flex-wrap: wrap; font-size: 10px; gap: 8px 10px; margin-top: 9px; }
 .tango-trade-meta .safe { color: #d7d9df; margin-left: auto; }
-.tango-breakeven-link { appearance: none; background: transparent; border: 0; color: #ffbe55; cursor: pointer; font-family: inherit; font-size: 10px; font-weight: 700; line-height: 1.2; padding: 0; }
+.tango-sell-market-actions { align-items: flex-end; display: flex; flex-direction: column; gap: 3px; margin-left: auto; }
+.tango-sell-market-actions .safe { margin-left: 0; white-space: nowrap; }
+.tango-breakeven-link { appearance: none; background: transparent; border: 0; color: #ffbe55; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 800; line-height: 1.3; min-height: 24px; padding: 2px 0; }
 .tango-breakeven-link:hover { color: #ffd78e; text-decoration: underline; }
 .tango-breakeven-link:disabled { color: #656874; cursor: not-allowed; text-decoration: none; }
 .tango-token-strip { align-items: center; display: flex; font-size: 10px; gap: 7px; min-width: 0; }

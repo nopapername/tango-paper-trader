@@ -603,6 +603,34 @@
     return overlay;
   }
 
+  function arrangeMarkerLabels(elements, bounds) {
+    const entries = [...elements.values()].map(entry => ({ ...entry, y: parseFloat(entry.line.style.top) }))
+      .sort((left, right) => left.y - right.y);
+    if (!entries.length) return;
+    const minimum = bounds.top + 12;
+    const maximum = Math.max(minimum, bounds.bottom - 12);
+    const gap = entries.length > 1 ? Math.min(26, (maximum - minimum) / (entries.length - 1)) : 26;
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index];
+      entry.center = Math.max(minimum, Math.min(maximum, entry.y), index ? entries[index - 1].center + gap : minimum);
+    }
+    if (entries.at(-1).center > maximum) {
+      entries.at(-1).center = maximum;
+      for (let index = entries.length - 2; index >= 0; index--) {
+        entries[index].center = Math.min(entries[index].center, entries[index + 1].center - gap);
+      }
+    }
+    for (const { line, label, connector, y, center } of entries) {
+      const offset = center - y;
+      label.style.top = `${offset - 12}px`;
+      Object.assign(connector.style, {
+        borderLeft: `1px solid ${line.style.color}`, position: 'absolute', right: '4px',
+        top: `${Math.min(0, offset)}px`, height: `${Math.abs(offset)}px`,
+        opacity: '.7', pointerEvents: 'none', display: Math.abs(offset) > 1 ? 'block' : 'none'
+      });
+    }
+  }
+
   let lastDiagnosticKey = ''; let lastDiagnosticAt = 0;
   function renderMarkers() {
     if (document.hidden) return;
@@ -758,12 +786,14 @@
       Object.assign(label.style, {
         background: 'rgba(12,13,18,.95)', border: `1px solid ${color}`, borderRadius: '5px', color,
         alignItems: 'center', display: 'flex', font: '800 10px/1.2 Inter,system-ui,sans-serif', gap: '5px',
-        padding: '3px 4px 3px 6px', pointerEvents: 'auto', position: 'absolute', right: '5px', top: '-11px', whiteSpace: 'nowrap'
+        padding: '3px 4px 3px 6px', pointerEvents: 'auto', position: 'absolute', right: '5px', top: '-12px', whiteSpace: 'nowrap',
+        boxSizing: 'border-box', height: '24px'
       });
       const text = existing?.text || document.createElement('span');
       const nextText = `${marker.label} · ${compactUsd(scale.type === 'MARKET_CAP' ? marker.marketCap : marker.price)}`;
       if (text.textContent !== nextText) text.textContent = nextText;
       const close = existing?.close || document.createElement('button');
+      const connector = existing?.connector || document.createElement('span');
       close.type = 'button';
       if (!existing) close.textContent = '×';
       close.title = marker.closeLabel || 'Hide line';
@@ -782,10 +812,12 @@
         });
         label.append(text, close);
         line.appendChild(label);
+        line.appendChild(connector);
       }
-      nextElements.set(elementKey, { line, label, text, close });
+      nextElements.set(elementKey, { line, label, text, close, connector });
       nodes.push(line);
     });
+    arrangeMarkerLabels(nextElements, scale.plotBounds);
     markerElements.clear();
     nextElements.forEach((elements, key) => markerElements.set(key, elements));
     const currentNodes = Array.from(root.children);

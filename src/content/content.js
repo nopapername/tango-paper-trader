@@ -1733,7 +1733,8 @@
       if (!(percent > 0 && percent <= 100)) {
         return showToast(t(clickContext.breakeven === true ? 'breakevenUnavailable' : 'invalidAmount'), 'error');
       }
-      return sell(percent, { token: clickContext.token, quote }, routeCapture);
+      return sell(percent, { token: clickContext.token, quote,
+        ...(clickContext.breakeven === true ? { breakeven: true } : {}) }, routeCapture);
     }
     if (clickContext.side && clickContext.side !== 'BUY') return showToast(t('invalidAmount'), 'error');
     await buy(amountNative, clickContext, routeCapture);
@@ -1884,6 +1885,7 @@
     primeTradeAudio();
     if (!routeCaptureIsCurrent(routeCapture)) return;
     const order = { token: context?.token, quote: null, percent: Number(percent), sourceUrl: location.href };
+    if (context?.breakeven === true) order.breakeven = true;
     try {
       if (activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
       const key = Tango.Engine.positionKey(order.token?.chain, order.token?.address);
@@ -1903,10 +1905,12 @@
         const valuationRow = displaysMarketCapValuation(order.quote)
           ? [t('marketCap'), Tango.Format.usd(order.quote.marketCapUsd, language(), true)]
           : [t('observedPrice'), Tango.Format.usd(order.quote.priceUsd, language())];
+        const provisionalNote = order.quote.provisional === true ? t('provisionalQuote') : undefined;
         runtime.modal = {
           type: 'confirm', title: t('simulatedSell'),
-          rows: [[t('token'), order.token.symbol], [t('amount'), `${percent}%`], valuationRow],
-          note: order.quote.provisional === true ? t('provisionalQuote') : undefined,
+          rows: [[t('token'), order.token.symbol], [t('amount'), `${order.breakeven ? Tango.Format.number(percent, language(), 2) : percent}%`], valuationRow],
+          note: [provisionalNote,
+            order.breakeven ? t('breakevenRecalculated') : ''].filter(Boolean).join(' ') || undefined,
           allowSessionSuppress: true,
           action: () => commitSell(order, routeCapture)
         };
@@ -1943,7 +1947,9 @@
       publishChartMarkers(true);
       runtime.modal = null;
       playTradeSound('SELL');
-      showToast(`${t('sellSuccess')} · ${order.percent}% ${order.token.symbol}`, 'success');
+      const displayedPercent = order.breakeven && Number.isFinite(result.executedPercent)
+        ? Tango.Format.number(result.executedPercent, language(), 2) : order.percent;
+      showToast(`${t('sellSuccess')} · ${displayedPercent}% ${order.token.symbol}`, 'success');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
     finally { runtime.tradePending = false; }
   }
@@ -2031,12 +2037,13 @@
     const routeCapture = captureRoute();
     const position = currentPosition();
     if (!position) return showToast(t('noPosition'), 'error');
+    if (Tango.Engine.breakevenTargetNative?.(position) === 0) return showToast(t('breakevenRecovered'), 'success');
     const quote = resolvePaperTradeQuote(runtime.current?.token, runtime.current?.quote, { position });
     if (!quote) return showToast(t('invalidQuote'), 'error');
     refreshPaperQuoteInBackground(runtime.current.token);
     const percent = Tango.Engine.breakevenSellPercent(position, quote, runtime.settings);
     if (!(percent > 0 && percent <= 100)) return showToast(t('breakevenUnavailable'), 'error');
-    await sell(percent);
+    await sell(percent, { ...runtime.current, breakeven: true }, routeCapture);
   }
 
   function showToast(message, type) {
@@ -2362,8 +2369,10 @@
     );
     const totalProfit = realizedPnl + Number(mark?.unrealizedPnlNative || 0);
     const feePercent = Number(runtime.settings.platformFeeBps || 0) / 100;
-    const breakevenPercent = Tango.Engine.breakevenSellPercent(position, paperQuote, runtime.settings);
-    const breakevenLabel = breakevenPercent ? `${t('breakeven')} ${Tango.Format.number(breakevenPercent, language(), 1)}%` : t('breakeven');
+    const breakevenRecovered = position && Tango.Engine.breakevenTargetNative?.(position) === 0;
+    const breakevenPercent = breakevenRecovered ? null : Tango.Engine.breakevenSellPercent(position, paperQuote, runtime.settings);
+    const breakevenLabel = breakevenRecovered ? t('breakevenRecovered')
+      : breakevenPercent ? `${t('breakeven')} ${Tango.Format.number(breakevenPercent, language(), 2)}%` : t('breakeven');
     return `<div class="tango-panel tango-card ${runtime.settings.panelCollapsed ? 'collapsed' : ''}" style="${panelStyle()}">
       <div class="tango-header" data-drag-handle>
         <div class="tango-token-strip"><span class="tango-paper-logo">T</span><strong>TANGO</strong><span class="tango-paper-badge">${t('paper')}</span><span>${esc(symbol)}</span></div>
@@ -2378,7 +2387,7 @@
         <section class="tango-trade-block">
           <div class="tango-trade-title sell-title"><span>${t('sell')} %</span><span class="tango-title-balance">${position ? `${Tango.Format.compact(position.quantity, language(), 2)} ${esc(symbol)}` : `0 ${esc(symbol)}`}</span></div>
           <div class="tango-preset-grid">${renderPresetGrid('sell', runtime.settings.sellPresets)}</div>
-          <div class="tango-trade-meta"><span>⌁ ${runtime.settings.fastMode ? 'FAST' : t('auto')}</span><span>♜ ${Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())}</span><button class="tango-breakeven-link" data-action="breakeven" ${breakevenPercent ? '' : 'disabled'} title="${esc(breakevenPercent ? breakevenLabel : t('breakevenUnavailable'))}">${esc(breakevenLabel)}</button><span class="safe">${t('currentMc')} ${Tango.Format.usd(current.quote.marketCapUsd, language(), true)}</span></div>
+          <div class="tango-trade-meta"><span>⌁ ${runtime.settings.fastMode ? 'FAST' : t('auto')}</span><span>♜ ${Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())}</span><div class="tango-sell-market-actions"><span class="safe">${t('currentMc')} ${Tango.Format.usd(current.quote.marketCapUsd, language(), true)}</span><button class="tango-breakeven-link" data-action="breakeven" ${breakevenPercent ? '' : 'disabled'} title="${esc(breakevenRecovered ? t('breakevenRecovered') : breakevenPercent ? breakevenLabel : t('breakevenUnavailable'))}">${esc(breakevenLabel)}</button></div></div>
         </section>
         <div class="tango-summary-grid">
           <div class="tango-summary-item tango-paper-balance-summary"><span>${t('paperBalance')}</span><strong>${accountMoney(account.cashBalanceNative)}</strong></div>

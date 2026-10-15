@@ -106,6 +106,10 @@
       && value - Date.now() <= MAX_FUTURE_SKEW_MS;
   }
 
+  function freshGmgnObservation(source, time) {
+    return source.startsWith('GMGN') && Date.now() - time <= Number(Tango.QUOTE_STALE_MS || 15_000);
+  }
+
   function newerPositive(previous, next, valueField, timeField, sourceField, fallbackTime) {
     const previousValue = Number(previous?.[valueField] || 0);
     const nextValue = Number(next?.[valueField] || 0);
@@ -122,7 +126,12 @@
       && (valueField !== 'priceUsd' || factualPriceObservation(next));
     const previousTime = previousValid ? previousTimeValue : 0;
     const nextTime = nextValid ? nextTimeValue : 0;
-    const useNext = nextValid && (!previousValid || nextTime >= previousTime);
+    const preferPreviousGmgn = previousValid && nextSource === 'DEXSCREENER'
+      && freshGmgnObservation(previousSource, previousTime);
+    const preferNextGmgn = nextValid && previousSource === 'DEXSCREENER'
+      && freshGmgnObservation(nextSource, nextTime);
+    const useNext = nextValid && (!previousValid || preferNextGmgn
+      || (!preferPreviousGmgn && nextTime >= previousTime));
     const selected = useNext ? next : previous;
     const value = useNext ? nextValue : previousValid ? previousValue : 0;
     return {

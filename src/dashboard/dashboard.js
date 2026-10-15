@@ -114,9 +114,9 @@
       const input = app.querySelector(`#${draft.id}`);
       if (input) { input.value = draft.value; input.checked = draft.checked; }
     });
-    const input = focusId && app.querySelector(`#${focusId}`);
-    input?.focus();
-    if (input && Number.isInteger(selection[0])) input.setSelectionRange?.(...selection);
+    const input = focusId ? app.querySelector(`#${focusId}`) : null;
+    if (typeof input?.focus === 'function') input.focus();
+    if (input && Number.isInteger(selection[0]) && typeof input.setSelectionRange === 'function') input.setSelectionRange(...selection);
   }
 
   let priceRenderQueued = false;

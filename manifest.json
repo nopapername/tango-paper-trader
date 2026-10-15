@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tango Paper Trader",
-  "version": "0.3.9",
+  "version": "0.3.11",
   "description": "Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics.",
   "permissions": ["storage"],
   "host_permissions": ["https://gmgn.ai/*", "https://api.coingecko.com/*", "https://api.dexscreener.com/*"],
