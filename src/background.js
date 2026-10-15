@@ -140,9 +140,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, error: 'Invalid GMGN token URL' });
       return false;
     }
-    chrome.tabs.create({ url: url.href })
-      .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    const sourceWindowId = Number.isInteger(sender?.tab?.windowId) && sender.tab.windowId >= 0
+      ? sender.tab.windowId : null;
+    const createProperties = { url: url.href, active: true };
+    if (sourceWindowId !== null) createProperties.windowId = sourceWindowId;
+    Promise.resolve().then(() => chrome.tabs.create(createProperties))
+      .then((tab) => {
+        const opening = {
+          sourceWindowKnown: sourceWindowId !== null,
+          returnedWindowKnown: Number.isInteger(tab?.windowId),
+          returnedTab: Boolean(tab && typeof tab === 'object'),
+          hasTabId: Number.isInteger(tab?.id) && tab.id >= 0,
+          sameWindow: sourceWindowId !== null && Number.isInteger(tab?.windowId)
+            ? tab.windowId === sourceWindowId : null,
+          active: typeof tab?.active === 'boolean' ? tab.active : null
+        };
+        if (!opening.hasTabId) {
+          sendResponse({ ok: false, error: 'Browser did not return a created token tab', opening });
+        } else if (opening.sameWindow === false) {
+          sendResponse({ ok: false, error: 'Browser created the token tab in a different window', opening });
+        } else {
+          sendResponse({ ok: true, opening });
+        }
+      })
+      .catch((error) => sendResponse({ ok: false, error: error?.message || 'Browser could not create the token tab' }));
     return true;
   }
   if (message?.type === 'TANGO_GET_NATIVE_PRICE') {

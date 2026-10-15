@@ -39,6 +39,7 @@
 
   const host = document.createElement('div');
   host.id = 'tango-paper-trader-host';
+  host.setAttribute('data-tango-token-open-status', 'idle');
   const shadow = host.attachShadow({ mode: 'open' });
   const stylesheet = document.createElement('link');
   stylesheet.rel = 'stylesheet';
@@ -1674,10 +1675,24 @@
     return Tango.Chains.tokenUrl(position.chain, position.tokenAddress);
   }
 
-  function openPosition(position) {
-    chrome.runtime.sendMessage({ type: 'TANGO_OPEN_TOKEN', url: positionUrl(position) })
-      .then((response) => { if (!response?.ok) showToast(t('openTokenFailed'), 'error'); })
-      .catch(() => showToast(t('openTokenFailed'), 'error'));
+  async function openPosition(position) {
+    host.setAttribute('data-tango-token-open-status', 'requested');
+    host.setAttribute('data-tango-token-open-result', '');
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'TANGO_OPEN_TOKEN', url: positionUrl(position) });
+      if (response?.opening && typeof response.opening === 'object') {
+        const opening = Object.fromEntries(['sourceWindowKnown', 'returnedWindowKnown', 'returnedTab', 'hasTabId', 'sameWindow', 'active'].map((key) => [
+          key, typeof response.opening[key] === 'boolean' ? response.opening[key] : null
+        ]));
+        host.setAttribute('data-tango-token-open-result', JSON.stringify(opening));
+      }
+      if (!response?.ok) throw new Error(response?.error || '');
+      host.setAttribute('data-tango-token-open-status', 'accepted');
+    } catch (error) {
+      host.setAttribute('data-tango-token-open-status', 'failed');
+      const detail = String(error?.message || '').trim().slice(0, 300);
+      showToast(detail ? `${t('openTokenFailed')}: ${detail}` : t('openTokenFailed'), 'error');
+    }
   }
 
   async function handleQuickBuy(context) {
@@ -2796,7 +2811,9 @@
     shell.querySelectorAll('[data-position-open]').forEach((button) => button.addEventListener('click', (event) => {
       if (!requireTrustedUserEvent(event)) return;
       const position = runtime.state.positions[button.dataset.key];
-      if (position) openPosition(position);
+      if (position) return openPosition(position);
+      host.setAttribute('data-tango-token-open-status', 'missing-position');
+      showToast(t('noPosition'), 'error');
     }));
     shell.querySelectorAll('[data-position-sell]').forEach((button) => button.addEventListener('click', (event) => {
       if (!requireTrustedUserEvent(event)) return;
