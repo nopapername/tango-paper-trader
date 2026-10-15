@@ -1278,7 +1278,7 @@
     const address = binding?.address;
     const href = binding?.href;
     const amountNative = binding?.amountNative;
-    if (!replacement || !expectedActionId || !card || !bindingNonce
+    if (binding?.invalidAmount || !replacement || !expectedActionId || !card || !bindingNonce
       || !Number.isInteger(generation) || generation <= 0
       || !['resolving-identity', 'ready', 'in-flight'].includes(state)) {
       Tango.NativeQuickBuyGuard?.revokePaperAction?.(replacement);
@@ -1412,6 +1412,7 @@
     pruneExpiredQuickBuyIdentityIntents(now);
     if (!binding?.slot || binding.slot.__tangoQuickBuyBinding !== binding
       || binding.state !== 'resolving-identity' || !binding.replacement?.isConnected
+      || !(Number(binding.amountNative) > 0) || !liveQuickBuyIdentityMatches(binding)
       || typeof context.onQuickBuy !== 'function'
       || binding.paperLabel !== context.paperLabel || binding.policyKey !== context.policyKey
       || !quickBuyBirthMatchesBinding(binding.birth, binding)) return null;
@@ -1476,7 +1477,7 @@
   function liveQuickBuyIdentityMatches(binding) {
     const slot = binding?.slot;
     const card = binding?.card;
-    if (!binding || !slot?.isConnected || !card?.isConnected || !binding.replacement?.isConnected
+    if (!binding || binding.invalidAmount || !slot?.isConnected || !card?.isConnected || !binding.replacement?.isConnected
       || slot.__tangoQuickBuyBinding !== binding
       || slot.__tangoReplacementQuickBuy !== binding.replacement
       || slot.__tangoQuickBuyCard !== card
@@ -1485,6 +1486,7 @@
       || !isTrenchPage() || chainFromUrl() !== binding.chain
       || cardGeneration(card) !== binding.generation
       || (binding.tradeAction?.key || 'BUY') !== quickBuyTradeAction(slot).key) return false;
+    if (Number(cardQuickBuyAmount(card, nativeQuickBuyControl(slot), slot, binding.amountNative)) !== Number(binding.amountNative)) return false;
     if (binding.state === 'resolving-identity') {
       return !binding.birth || quickBuyBirthMatchesBinding(binding.birth, binding);
     }
@@ -1575,6 +1577,11 @@
 
   function setPaperState(slot, binding, state) {
     if (!slot || slot.__tangoQuickBuyBinding !== binding || !binding?.replacement) return false;
+    if (binding.invalidAmount) {
+      binding.replacement.disabled = true;
+      Tango.NativeQuickBuyGuard?.revokePaperAction?.(binding.replacement);
+      return false;
+    }
     binding.state = state;
     binding.pendingOnly = false;
     binding.replacement.disabled = false;
@@ -1754,8 +1761,18 @@
   }
 
   function selectQuickBuyAmount(columnValue, nativeText, previousAmount, defaultAmount) {
-    return parseQuickBuyAmount(columnValue) || parseQuickBuyAmount(nativeText)
-      || Number(previousAmount) || Number(defaultAmount);
+    if (columnValue != null) {
+      const value = String(columnValue).replaceAll(',', '').trim();
+      if (value) {
+        if (!/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(value)) return 0;
+        const amount = Number(value);
+        return Number.isFinite(amount) && amount > 0 ? amount : 0;
+      }
+      // An empty column uses GMGN's preset amount; only an explicit invalid
+      // value overrides that evidence and must fail closed.
+    }
+    if (/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/.test(String(nativeText || ''))) return parseQuickBuyAmount(nativeText);
+    return Number(previousAmount) || Number(defaultAmount);
   }
 
   function quickBuyTradeAction(slot) {
@@ -1784,7 +1801,7 @@
     const rootText = Array.from(slot?.childNodes || [])
       .filter((node) => node.nodeType === 3).map((node) => node.textContent || '').join(' ');
     const nativeText = nativeControl?.textContent || rootText;
-    return selectQuickBuyAmount(secondary ? '' : columnInput?.value,
+    return selectQuickBuyAmount(secondary ? undefined : columnInput?.value,
       nativeText, slot.dataset.tangoAmountSol, defaultAmountSol);
   }
 
@@ -1957,7 +1974,7 @@
     });
     const nextBinding = Object.assign({}, binding, {
       slot, key: bindingKey, chain, address, href, card, actionId, bindingNonce, generation,
-      amountNative, paperLabel, state: 'ready',
+      amountNative, paperLabel, state: 'ready', invalidAmount: false,
       tradeAction: quickBuyTradeAction(slot),
       policyKey, onQuickBuy, chainDefinition,
       cardGenerationIdentity: cardGenerationIdentity(card),
@@ -2274,6 +2291,24 @@
       }
       const amountSol = cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol);
       const pendingAmount = amountSol > 0 ? amountSol : (Number(defaultAmountSol) || 0.1);
+      if (!(amountSol > 0) && quickBuyTradeAction(slot).side === 'BUY') {
+        if (holdQuickBuyPending(slot, existingBinding, nativeControl)
+          || createPendingQuickBuy(slot, card, nativeControl, chain, chainDefinition, 0, paperLabel, birth, onQuickBuy, policyKey)) {
+          const invalid = slot.__tangoQuickBuyBinding;
+          cancelQuickBuyIdentityIntent(invalid, 'invalid-amount');
+          invalid.invalidAmount = true;
+          invalid.replacement.disabled = true;
+          invalid.replacement.setAttribute?.('aria-disabled', 'true');
+          invalid.replacement.title = 'Tango Paper Buy — enter a positive amount';
+          invalid.replacement.setAttribute?.('aria-label', invalid.replacement.title);
+          invalid.replacement.dataset.tangoPaperState = 'invalid-amount';
+          slot.dataset.tangoPaperState = 'invalid-amount';
+          slot.dataset.tangoAmountSol = '0';
+          renderQuickBuyContent(invalid.replacement, paperLabel, '—', chainDefinition.nativeSymbol);
+          Tango.NativeQuickBuyGuard?.revokePaperAction?.(invalid.replacement);
+        }
+        continue;
+      }
       if (existingBinding?.state === 'resolving-identity'
         && (existingBinding.chain !== chain
           || Number(existingBinding.amountNative) !== Number(pendingAmount)

@@ -1831,6 +1831,41 @@ test('trench column amount takes priority over the replaced native button amount
   assert.equal(GMGN._selectQuickBuyAmount('', '', '2', 0.1), 2);
 });
 
+test('explicit invalid column amounts never fall back to a stale button or cached amount', () => {
+  for (const input of ['0', '-1', '.', 'abc', '1abc', 'Infinity']) {
+    assert.equal(GMGN._selectQuickBuyAmount(input, '1 BNB', '1', 0.1), 0, input);
+  }
+  assert.equal(GMGN._selectQuickBuyAmount('', '0.5 BNB', '2', 0.1), 0.5, 'blank GMGN inputs retain their native preset semantics');
+});
+
+test('zero amount immediately rejects an old callback, disables its label, and recovers after editing', async () => {
+  const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
+  harness.setColumnAmount('1');
+  await withQuickBuyGlobals(harness, {}, async () => {
+    const orders = [];
+    const onBuy = order => { orders.push(order); };
+    GMGN.discoverTokenCards(onBuy);
+    const oldAction = harness.slot.__tangoQuickBuyBinding.action.invoke;
+    harness.setColumnAmount('0.37');
+    await oldAction();
+    assert.equal(orders.length, 0, 'a different positive input also invalidates the old callback immediately');
+    harness.setColumnAmount('0');
+    await oldAction();
+    assert.equal(orders.length, 0, 'the event-to-reconcile gap cannot execute the old amount');
+    GMGN.discoverTokenCards(onBuy);
+    assert.equal(harness.replacement.disabled, true);
+    assert.match(harness.replacement.children.at(-1).children.at(-1).innerHTML, /—/);
+    await oldAction();
+    assert.equal(orders.length, 0);
+    harness.setColumnAmount('1');
+    GMGN.discoverTokenCards(onBuy);
+    assert.equal(harness.replacement.disabled, false);
+    await harness.slot.__tangoQuickBuyBinding.action.invoke();
+    assert.equal(orders.length, 1);
+    assert.equal(orders[0].amountNative, 1);
+  });
+});
+
 test('October trench icon-labelled MC produces a factual quote and clears when the field disappears', async () => {
   const harness = quickBuyHarness({ chain: 'bsc', address: EVM_ADDRESS });
   harness.card.innerText = `${EVM_ADDRESS}\nTEST\nTest Token\n$4.1K\n$90K`;
@@ -4724,6 +4759,23 @@ test('benign addressless rediscovery preserves one intent and its binding nonce'
     assert.equal(scenario.harness.intentCount, 1);
     assert.equal(scenario.harness.replacement.dataset.tangoBindingNonce, nonce);
   });
+});
+
+test('an addressless click with a stale or invalid amount cannot become a later order', async () => {
+  for (const amount of ['0', '-1', '0.37']) {
+    const scenario = addresslessIntentScenario(`invalid-before-ready-${amount}`, { born: true });
+    await scenario.run(async () => {
+      const oldAction = scenario.harness.slot.__tangoQuickBuyBinding.action.invoke;
+      scenario.harness.setColumnAmount(amount);
+      await scenario.harness.invokePaperAction();
+      await oldAction();
+      assert.equal(scenario.harness.intentCount, 0, 'no intent may be recorded before reconciliation');
+      scenario.harness.setColumnAmount('0.1');
+      scenario.exposeApprovedHref();
+      await scenario.reconcileFastHrefMutation();
+      assert.equal(scenario.orders.length, 0, 'restoring the amount does not revive an invalid click');
+    });
+  }
 });
 
 test('an addressless amount mutation permanently cancels the old intent', async () => {

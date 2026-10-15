@@ -7051,3 +7051,29 @@ test('trusted page shortcut works while disabled and rejects synthetic, repeat, 
   assert.equal(prevented, 1);
   assert.equal(loaded.messages.filter(m => m.type === 'TANGO_TOGGLE_SHORTCUT').length, 1);
 });
+
+test('saved floating positions stay visible on render and resize without overwriting user coordinates', () => {
+  for (const [selector, setting] of [['.tango-bar', 'barPosition'], ['.tango-panel', 'panelPosition'], ['.tango-drawer', 'drawerPosition']]) {
+    const loaded = loadContent();
+    loaded.api.runtime.settings[setting] = { x: 990, y: 1000 };
+    loaded.context.innerWidth = 800;
+    loaded.context.innerHeight = 600;
+    const element = { style: {}, addEventListener() {}, getBoundingClientRect: () => ({ width: 300, height: 100 }) };
+    loaded.shadowSingles.set(selector, element);
+    loaded.api.render();
+    assert.equal(element.style.left, '500px', `${selector} after initial render`);
+    assert.equal(element.style.top, '500px');
+    loaded.context.innerWidth = 1400;
+    loaded.context.innerHeight = 1200;
+    loaded.windowListeners.get('resize')();
+    assert.equal(element.style.left, '990px', 'expanding restores the saved preferred position');
+    assert.equal(element.style.top, '1000px');
+    loaded.context.innerWidth = 250;
+    loaded.context.innerHeight = 80;
+    loaded.windowListeners.get('resize')();
+    assert.equal(element.style.left, '0px');
+    assert.equal(element.style.top, '0px');
+    assert.deepEqual(JSON.parse(JSON.stringify(loaded.api.runtime.settings[setting])), { x: 990, y: 1000 });
+    assert.equal(loaded.calls.patches.length, 0, 'viewport changes must not persist new positions');
+  }
+});

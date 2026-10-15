@@ -2358,6 +2358,29 @@
     return `left:${Math.max(0, position.x)}px;top:${Math.max(0, position.y)}px;right:auto;bottom:auto;transform:none;`;
   }
 
+  function constrainFloatingElements() {
+    if (!runtime.settings?.enabled || !runtime.state?.initialized) return;
+    for (const [selector, settingKey] of [
+      ['.tango-bar', 'barPosition'], ['.tango-panel', 'panelPosition'], ['.tango-drawer', 'drawerPosition']
+    ]) {
+      const position = runtime.settings[settingKey];
+      if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
+      const element = shadow.querySelector(selector);
+      if (!element?.getBoundingClientRect) continue;
+      const rect = element.getBoundingClientRect();
+      if (!(rect.width > 0) || !(rect.height > 0)) continue;
+      // Clamp display coordinates only. A larger viewport should restore the
+      // user's saved position without a settings write on every resize.
+      element.style.left = `${Math.min(Math.max(0, innerWidth - rect.width), Math.max(0, position.x))}px`;
+      element.style.top = `${Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, position.y))}px`;
+      element.style.right = 'auto';
+      element.style.bottom = 'auto';
+      element.style.transform = 'none';
+    }
+  }
+  window.addEventListener('resize', constrainFloatingElements);
+  stylesheet.addEventListener('load', constrainFloatingElements);
+
   function renderDrawer(summary) {
     if (!runtime.drawerOpen) return '';
     const positions = Tango.ChainView.positions(runtime.state, activeChain().id);
@@ -2614,6 +2637,7 @@
       runtime.renderedMarkup = markup;
       bindEvents();
     }
+    constrainFloatingElements();
     syncChartMarkers();
   }
 
