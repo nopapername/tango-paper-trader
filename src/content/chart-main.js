@@ -31,6 +31,8 @@
   let renderedSignature = '';
   const hiddenMarkerIds = new Set();
   const markerPositions = new Map();
+  const markerElements = new Map();
+  let axisRepaintQueued = false;
   const markerEconomicCoordinates = new Map();
   const CHART_AXIS_HINTS = new Set(['MARKET_CAP', 'PRICE', 'UNKNOWN']);
   const CHART_PROBE_ID_MAX_CHARS = 128;
@@ -198,12 +200,27 @@
     const ownedRecords = id ? labelsByCanvas.get(id) : null;
     const ownedScale = Boolean(id && stableScale?.sourceId === id);
     const relevantUnselectedSource = !stableScale && Boolean(ownedRecords?.records?.size);
-    const workerReplacedActiveRenderer = reason === 'WORKER_ONLY' && Boolean(stableScale);
+    const workerReplacedActiveRenderer = reason === 'WORKER_ONLY'
+      && Boolean(stableScale || (axisRepaintQueued && overlay?.childElementCount));
     if (id) labelsByCanvas.delete(id);
-    if (ownedScale || workerReplacedActiveRenderer) clearScaleAndPlacementCaches();
+    // Axis clears and replacement ticks normally arrive in one paint task.
+    // Revalidate before the next paint instead of flashing an empty overlay.
+    const deferOverlayClear = reason === 'STALE_GENERATION'
+      && Boolean(overlay?.childElementCount)
+      && typeof window.requestAnimationFrame === 'function';
+    if (ownedScale || workerReplacedActiveRenderer) clearScaleAndPlacementCaches(deferOverlayClear);
     if (ownedScale || relevantUnselectedSource || workerReplacedActiveRenderer) {
       lastScaleInvalidationReason = reason;
       setChartDiagnostic(reason);
+      if (deferOverlayClear && !axisRepaintQueued) {
+        axisRepaintQueued = true;
+        try {
+          window.requestAnimationFrame(() => { axisRepaintQueued = false; renderMarkers(); });
+        } catch {
+          axisRepaintQueued = false;
+          clearScaleAndPlacementCaches();
+        }
+      }
     }
   }
 
@@ -578,6 +595,7 @@
 
   function ensureOverlay() {
     if (overlay?.isConnected) return overlay;
+    markerElements.clear();
     overlay = document.createElement('div');
     overlay.id = 'tango-chart-axis-markers';
     Object.assign(overlay.style, { position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: '2147482000' });
@@ -607,20 +625,22 @@
           axisSequenceFloor: markerAxisSequenceFloor,
           axisHint: chartDiagnostic.axisHint,
           frameGeneration: chartDiagnostic.frameGeneration,
-          sources: [...labelsByCanvas.values()].slice(0, 4).map((entry) => ({
-            rect: finiteRect(entry.canvas),
-            backingWidth: Number(entry.canvas.width),
-            backingHeight: Number(entry.canvas.height),
-            clearedGeneration: Number(canvasClearedAt.get(entry.canvas) || 0),
-            points: [...entry.records.values()].slice(-100).map((point) => ({
-              value: point.value, x: point.x, y: point.y,
-              generation: point.generation, sequence: point.sequence,
-              ageMs: Math.max(0, Date.now() - point.updatedAt),
-              currentGeometry: point.sourceObservationSignature === sourceObservationSignature(
-                finiteRect(entry.canvas), entry.canvas
-              )
-            }))
-          }))
+          sources: [...labelsByCanvas.values()].slice(0, 4).map((entry) => {
+            const rect = finiteRect(entry.canvas);
+            const observationSignature = sourceObservationSignature(rect, entry.canvas);
+            return {
+              rect,
+              backingWidth: Number(entry.canvas.width),
+              backingHeight: Number(entry.canvas.height),
+              clearedGeneration: Number(canvasClearedAt.get(entry.canvas) || 0),
+              points: [...entry.records.values()].slice(-100).map((point) => ({
+                value: point.value, x: point.x, y: point.y,
+                generation: point.generation, sequence: point.sequence,
+                ageMs: Math.max(0, Date.now() - point.updatedAt),
+                currentGeometry: point.sourceObservationSignature === observationSignature
+              }))
+            };
+          })
         }));
       }
     }
@@ -640,11 +660,13 @@
     const visibleMarkers = markers.filter((marker) => !hiddenMarkerIds.has(marker.id));
     if (!visibleMarkers.length) {
       if (root.childElementCount) root.replaceChildren();
+      markerElements.clear();
       renderedSignature = '';
       return;
     }
     if (!frameContextMatchesObservedProbe(activeFrameContext)) {
       if (root.childElementCount) root.replaceChildren();
+      markerElements.clear();
       renderedSignature = '';
       return;
     }
@@ -658,6 +680,7 @@
     const scale = selectScale(visibleMarkers);
     if (!scale) {
       if (root.childElementCount) root.replaceChildren();
+      markerElements.clear();
       renderedSignature = '';
       return;
     }
@@ -672,6 +695,8 @@
       `${marker.id}:${marker.side}:${marker.marketCap}:${marker.price}:${marker.label}:${marker.closeLabel || ''}`).join('|')}`;
     if (renderedSignature === nextSignature) return;
     const nodes = [];
+    const nextElements = new Map();
+    const occurrences = new Map();
     visibleMarkers.forEach((marker) => {
       const rawValue = scale.type === 'MARKET_CAP'
         ? Number(marker.marketCap) / scale.factor / scale.quoteUsd
@@ -705,7 +730,11 @@
         : targetY;
       markerPositions.set(marker.id, y);
       markerEconomicCoordinates.set(marker.id, placementContext);
-      const line = document.createElement('div');
+      const occurrence = occurrences.get(marker.id) || 0;
+      occurrences.set(marker.id, occurrence + 1);
+      const elementKey = JSON.stringify([marker.id, occurrence]);
+      const existing = markerElements.get(elementKey);
+      const line = existing?.line || document.createElement('div');
       const color = marker.side === 'SELL' ? '#ff6673' : '#42e797';
       Object.assign(line.style, {
         borderTop: `1px dashed ${color}`,
@@ -716,35 +745,44 @@
         top: `${Math.round(y)}px`,
         opacity: '.94'
       });
-      const label = document.createElement('span');
+      const label = existing?.label || document.createElement('span');
       Object.assign(label.style, {
         background: 'rgba(12,13,18,.95)', border: `1px solid ${color}`, borderRadius: '5px', color,
         alignItems: 'center', display: 'flex', font: '800 10px/1.2 Inter,system-ui,sans-serif', gap: '5px',
         padding: '3px 4px 3px 6px', pointerEvents: 'auto', position: 'absolute', right: '5px', top: '-11px', whiteSpace: 'nowrap'
       });
-      const text = document.createElement('span');
-      text.textContent = `${marker.label} · ${compactUsd(scale.type === 'MARKET_CAP' ? marker.marketCap : marker.price)}`;
-      const close = document.createElement('button');
+      const text = existing?.text || document.createElement('span');
+      const nextText = `${marker.label} · ${compactUsd(scale.type === 'MARKET_CAP' ? marker.marketCap : marker.price)}`;
+      if (text.textContent !== nextText) text.textContent = nextText;
+      const close = existing?.close || document.createElement('button');
       close.type = 'button';
-      close.textContent = '×';
+      if (!existing) close.textContent = '×';
       close.title = marker.closeLabel || 'Hide line';
       close.setAttribute('aria-label', close.title);
       Object.assign(close.style, {
         appearance: 'none', background: 'rgba(255,255,255,.08)', border: '0', borderRadius: '3px', color,
         cursor: 'pointer', font: '900 12px/14px Inter,system-ui,sans-serif', height: '15px', padding: '0', width: '15px'
       });
-      close.addEventListener('pointerdown', (event) => event.stopPropagation());
-      close.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        hiddenMarkerIds.add(marker.id);
-        renderMarkers();
-      });
-      label.append(text, close);
-      line.appendChild(label);
+      if (!existing) {
+        close.addEventListener('pointerdown', (event) => event.stopPropagation());
+        close.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          hiddenMarkerIds.add(marker.id);
+          renderMarkers();
+        });
+        label.append(text, close);
+        line.appendChild(label);
+      }
+      nextElements.set(elementKey, { line, label, text, close });
       nodes.push(line);
     });
-    root.replaceChildren(...nodes);
+    markerElements.clear();
+    nextElements.forEach((elements, key) => markerElements.set(key, elements));
+    const currentNodes = Array.from(root.children);
+    if (currentNodes.length !== nodes.length || nodes.some((node, index) => currentNodes[index] !== node)) {
+      root.replaceChildren(...nodes);
+    }
     renderedSignature = nextSignature;
     if (nodes.length) {
       lastScaleInvalidationReason = '';
@@ -865,14 +903,17 @@
     };
   }
 
-  function clearScaleAndPlacementCaches() {
+  function clearScaleAndPlacementCaches(preserveOverlayUntilPaint = false) {
     lastScaleMode = null;
     stableScale = null;
     stableSignature = '';
     renderedSignature = '';
     markerPositions.clear();
     markerEconomicCoordinates.clear();
-    if (overlay?.childElementCount) overlay.replaceChildren();
+    if (!preserveOverlayUntilPaint) {
+      markerElements.clear();
+      if (overlay?.childElementCount) overlay.replaceChildren();
+    }
   }
 
   function applyFrameContext(next) {

@@ -1,18 +1,29 @@
 (function initFormat(global) {
   const Tango = global.Tango = global.Tango || {};
+  const numberFormatters = new Map();
+
+  function numberFormatter(language, digits, compactMode = false) {
+    const locale = language === 'zh-CN' ? 'zh-CN' : 'en-US';
+    // Two locales, two styles and21 precisions bound this cache to84 entries.
+    // Other inputs still go through Intl's original coercion and validation.
+    const cacheable = typeof digits === 'number' && Number.isInteger(digits) && digits >= 0 && digits <= 20;
+    const key = cacheable ? `${locale}:${compactMode}:${digits}` : null;
+    if (cacheable && numberFormatters.has(key)) return numberFormatters.get(key);
+    const formatter = new Intl.NumberFormat(locale, compactMode
+      ? { notation: 'compact', maximumFractionDigits: digits }
+      : { maximumFractionDigits: digits });
+    if (cacheable) numberFormatters.set(key, formatter);
+    return formatter;
+  }
 
   function compact(value, language, maximumFractionDigits = 2) {
     if (!Number.isFinite(Number(value))) return '--';
-    return new Intl.NumberFormat(language === 'zh-CN' ? 'zh-CN' : 'en-US', {
-      notation: 'compact', maximumFractionDigits
-    }).format(Number(value));
+    return numberFormatter(language, maximumFractionDigits, true).format(Number(value));
   }
 
   function number(value, language, digits = 4) {
     if (!Number.isFinite(Number(value))) return '--';
-    return new Intl.NumberFormat(language === 'zh-CN' ? 'zh-CN' : 'en-US', {
-      maximumFractionDigits: digits
-    }).format(Number(value));
+    return numberFormatter(language, digits).format(Number(value));
   }
 
   function native(value, symbol, language, signed = false) {

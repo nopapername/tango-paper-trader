@@ -1178,22 +1178,34 @@
   function portfolioSummary(state, chain, currentNativePriceUsd) {
     const account = chainAccount(state, chain);
     const positions = Object.values(state.positions || {}).filter((position) => position.chain === chain);
-    const trades = (state.trades || []).filter((trade) => trade.chain === chain);
     const marks = positions.map((position) => markPosition(position, undefined, currentNativePriceUsd));
     const positionsValueNative = marks.reduce((sum, mark) => sum + mark.valueNative, 0);
     const unrealizedPnlNative = marks.reduce((sum, mark) => sum + mark.unrealizedPnlNative, 0);
     const equityNative = Number(account.cashBalanceNative) + positionsValueNative;
     const totalPnlNative = equityNative - Number(account.initialBalanceNative);
-    const closed = trades.filter((trade) => trade.side === 'SELL');
-    const wins = closed.filter((trade) => Number(trade.realizedPnlNative) > 0);
-    const grossProfit = wins.reduce((sum, trade) => sum + Number(trade.realizedPnlNative), 0);
-    const grossLoss = Math.abs(closed.filter((trade) => Number(trade.realizedPnlNative) < 0).reduce((sum, trade) => sum + Number(trade.realizedPnlNative), 0));
+    let totalTrades = 0;
+    let closedTrades = 0;
+    let winCount = 0;
+    let grossProfit = 0;
+    let negativePnl = 0;
+    // Preserve each category's original addition order without allocating
+    // filtered copies of the retained history on every UI refresh.
+    (state.trades || []).forEach((trade) => {
+      if (trade.chain !== chain) return;
+      totalTrades += 1;
+      if (trade.side !== 'SELL') return;
+      closedTrades += 1;
+      const pnl = Number(trade.realizedPnlNative);
+      if (pnl > 0) { winCount += 1; grossProfit += pnl; }
+      else if (pnl < 0) negativePnl += pnl;
+    });
+    const grossLoss = Math.abs(negativePnl);
     return {
       cashBalanceNative: Number(account.cashBalanceNative), positionsValueNative, equityNative,
       realizedPnlNative: Number(account.realizedPnlNative || 0), unrealizedPnlNative, totalPnlNative,
       todayPnlNative: Number(state.dailyRealizedByChain?.[chain]?.[localDateKey(Date.now())]?.native || 0),
-      positionCount: positions.length, totalTrades: trades.length, closedTrades: closed.length,
-      winRate: closed.length ? wins.length / closed.length * 100 : 0,
+      positionCount: positions.length, totalTrades, closedTrades,
+      winRate: closedTrades ? winCount / closedTrades * 100 : 0,
       profitFactor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0
     };
   }
