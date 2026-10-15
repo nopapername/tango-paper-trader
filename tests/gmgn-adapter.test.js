@@ -1137,7 +1137,7 @@ function detailDocument({
   totalSupply = '0', launchpad = '', launchMode = '', linked = true,
   launchpadAddress = address, launchpadHref = '', tokenName = 'Test Token',
   marketCapTitle = null, infoItems = null, baseInfo = true, unstructuredItems = [], chart = true,
-  chartFrame = null
+  chartFrame = null, canonicalAddress = null
 }) {
   const infoItem = (title, value) => ({
     querySelector(selector) {
@@ -1198,6 +1198,10 @@ function detailDocument({
       return selector === '[data-sentry-component="BaseInfoPriceView"]' && baseInfo ? priceView : null;
     },
     querySelectorAll(selector) {
+      if (selector === '[data-sentry-component="BaseInfoPriceView"]') return baseInfo ? [priceView] : [];
+      if (selector === '#token-base-address[data-addr]') return canonicalAddress == null ? [] : [{
+        getAttribute: (name) => name === 'data-addr' ? canonicalAddress : null
+      }];
       if (selector === '[data-sentry-component="TokenHeader"]') return [header];
       if (selector.includes('a[href')) return scopedLinks;
       if (selector.includes('[data-launch-mode]') && launchModeBadge) return [launchModeBadge];
@@ -4792,6 +4796,90 @@ test('detail DOM price and supply stay untrusted until the current-route chart f
   }
 });
 
+test('coherent explicit USD detail quotes stay live without a chart after canonical address verification', async () => {
+  const original = { document: global.document, location: global.location };
+  const detail = detailDocument({
+    chain: 'bsc', address: EVM_ADDRESS, canonicalAddress: EVM_ADDRESS,
+    priceUsd: '$0.00000815', marketCapUsd: 8_150, marketCapTitle: 'MC', totalSupply: '1B', chart: false
+  });
+  global.document = detail.document;
+  global.location = { href: `https://gmgn.ai/bsc/token/${EVM_ADDRESS}`, origin: 'https://gmgn.ai' };
+  GMGN._clearChartTrust();
+  try {
+    const initial = await GMGN.readCurrentToken();
+    assert.equal(initial.quote.priceUsd, 0.00000815);
+    assert.equal(initial.quote.totalSupply, 1_000_000_000);
+    detail.setQuote({ priceUsd: '$0.00000432', marketCapUsd: 4_320 });
+    const snapshot = GMGN.readVerifiedCurrentTokenSnapshot({ chain: 'bsc', address: EVM_ADDRESS });
+    assert.equal(snapshot?.quote.priceUsd, 0.00000432);
+    assert.equal(snapshot.quote.marketCapUsd, 4_320);
+    assert.equal(snapshot.quote.priceProvenance, 'OBSERVED_PRICE');
+    assert.ok(snapshot.quote.priceObservedAt > 0);
+    assert.equal(snapshot.quote.supplySource, 'GMGN_EXACT');
+    assert.equal((await GMGN.readCurrentToken()).quote.priceUsd, 0.00000432,
+      'normal polling also observes the changed no-chart quote');
+    const replacement = detailDocument({ chain: 'bsc', address: EVM_ADDRESS, canonicalAddress: EVM_ADDRESS,
+      priceUsd: '$0.00000432', marketCapUsd: 4_320, marketCapTitle: 'MC', totalSupply: '1B', chart: false });
+    global.document = replacement.document;
+    assert.equal(GMGN.readVerifiedCurrentTokenSnapshot({ chain: 'bsc', address: EVM_ADDRESS }), null,
+      'a same-identity replacement must first complete normal verification');
+    global.document = detail.document;
+    detail.header.querySelector = () => ({ textContent: 'CHANGED', getAttribute: () => 'CHANGED' });
+    assert.equal(GMGN.readVerifiedCurrentTokenSnapshot({ chain: 'bsc', address: EVM_ADDRESS }), null,
+      'canonical quotes do not bypass the verified identity fingerprint');
+  } finally {
+    global.document = original.document; global.location = original.location;
+  }
+});
+
+test('no-chart detail requires a complete unambiguous canonical USD valuation within one percent', async () => {
+  const original = { document: global.document, location: global.location };
+  const scenarios = [
+    { name: 'bare price', priceUsd: '0.00000432' },
+    { name: 'non USD price', priceUsd: '0.00000432 BNB' },
+    { name: 'malformed USD', priceUsd: '$0.00000432 garbage' },
+    { name: 'missing supply', totalSupply: '0' },
+    { name: 'malformed supply', totalSupply: '1B garbage' },
+    { name: 'malformed commas', totalSupply: '1,,000M' },
+    { name: 'non USD cap', marketCapUsd: '4320 BNB' },
+    { name: 'cap too high', marketCapUsd: 4_400 },
+    { name: 'cap too low', marketCapUsd: 4_200 },
+    { name: 'no full canonical address', canonicalAddress: null },
+    { name: 'conflicting canonical address', canonicalAddress: EVM_ADDRESS_2 },
+    { name: 'unbound chain', linked: false },
+    { name: 'duplicate price view', duplicatePriceView: true },
+    { name: 'conflicting explicit and unlabeled cap', infoItems: [
+      { title: 'MC', value: '$4320' }, { title: null, value: '$8150' },
+      { title: 'Price', value: '$0.00000432' }, { title: 'Total Supply', value: '1B' }
+    ] },
+    { name: 'duplicate unlabeled values', infoItems: [
+      { title: null, value: '$4320' }, { title: null, value: '$4320' },
+      { title: 'Price', value: '$0.00000432' }, { title: 'Total Supply', value: '1B' }
+    ] }
+  ];
+  try {
+    for (const scenario of scenarios) {
+      const detail = detailDocument({
+        chain: 'bsc', address: EVM_ADDRESS, canonicalAddress: EVM_ADDRESS,
+        priceUsd: '$0.00000432', marketCapUsd: 4_320, marketCapTitle: 'MC', totalSupply: '1B', chart: false, ...scenario
+      });
+      if (scenario.duplicatePriceView) {
+        const queryAll = detail.bar.querySelectorAll;
+        detail.bar.querySelectorAll = (selector) => {
+          const nodes = queryAll(selector);
+          return selector === '[data-sentry-component="BaseInfoPriceView"]' ? [...nodes, ...nodes] : nodes;
+        };
+      }
+      global.document = detail.document;
+      global.location = { href: `https://gmgn.ai/bsc/token/${EVM_ADDRESS}`, origin: 'https://gmgn.ai' };
+      const current = await GMGN.readCurrentToken();
+      assert.equal(current.quote.priceUsd, 0, scenario.name);
+      assert.equal(current.quote.totalSupply, 0, scenario.name);
+      assert.equal(GMGN.readVerifiedCurrentTokenSnapshot({ chain: 'bsc', address: EVM_ADDRESS }), null, scenario.name);
+    }
+  } finally { global.document = original.document; global.location = original.location; }
+});
+
 test('verified detail snapshot synchronously reads a newer quote from the same bound DOM nodes', async () => {
   const original = { document: global.document, location: global.location };
   const detail = detailDocument({
@@ -6085,12 +6173,23 @@ test('captured SI BaseInfoBar with ZEC quote resolves its current token and live
     const scripts = ['src/core/chains.js', 'src/core/supply.js', 'src/adapters/gmgn.js'].map((file) =>
       fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
     const pagePath = path.join(tempRoot, 'header.html');
-    fs.writeFileSync(pagePath, `<!doctype html><title>${HEADLESS_LAYOUT_PENDING_TITLE}</title>${captured}<script>
+    fs.writeFileSync(pagePath, `<!doctype html><base href="https://gmgn.ai/"><title>${HEADLESS_LAYOUT_PENDING_TITLE}</title>${captured}<script>
       const fake = { location: { href: 'https://gmgn.ai/bsc/token/0xcb30fae09a08314ebabe750ef123213e458d7777', origin: 'https://gmgn.ai' }, Tango: {} };
       ${scripts.map((script) => `Function('globalThis', ${JSON.stringify(script)})(fake);`).join('\n')}
       fake.Tango.GMGN.readCurrentToken().then(async (current) => {
         document.querySelector('.info-item-value').textContent = '$14.1K';
         const refreshed = await fake.Tango.GMGN.readCurrentToken();
+        const incoherentSnapshot = fake.Tango.GMGN.readVerifiedCurrentTokenSnapshot(current.token);
+        document.querySelector('.info-item-value').textContent = '$4.32K';
+        const priceItem = [...document.querySelectorAll('[data-sentry-component="InfoItem"]')]
+          .find(item => item.querySelector('.info-item-title')?.textContent.trim() === '价格');
+        priceItem.querySelector('.info-item-value').textContent = '$0.00000432';
+        const noChartSnapshot = fake.Tango.GMGN.readVerifiedCurrentTokenSnapshot(current.token);
+        const devLink = document.querySelector('a[href*="tab=dev_token"]');
+        const previousHref = devLink.getAttribute('href');
+        devLink.setAttribute('href', '/eth/token/' + current.token.address + '?tab=dev_token');
+        const wrongOuterChain = await fake.Tango.GMGN.readCurrentToken();
+        devLink.setAttribute('href', previousHref);
         const identityNode = document.querySelector('[data-addr]');
         identityNode.setAttribute('data-addr', '0x1111111111111111111111111111111111111111');
         const conflicting = await fake.Tango.GMGN.readCurrentToken();
@@ -6101,7 +6200,7 @@ test('captured SI BaseInfoBar with ZEC quote resolves its current token and live
         const ancestry = []; for (let node = header; node && ancestry.length < 8; node = node.parentElement)
           ancestry.push({ tag: node.tagName, descendants: node.querySelectorAll('*').length, textLength: node.textContent.length,
             addr: [...node.querySelectorAll('[data-addr]')].map(n => n.getAttribute('data-addr')) });
-        document.title = ${JSON.stringify(HEADLESS_LAYOUT_COMPLETE_PREFIX)} + btoa(unescape(encodeURIComponent(JSON.stringify({ current, refreshed, conflicting, quoteOnly, ancestry }))));
+        document.title = ${JSON.stringify(HEADLESS_LAYOUT_COMPLETE_PREFIX)} + btoa(unescape(encodeURIComponent(JSON.stringify({ current, refreshed, incoherentSnapshot, noChartSnapshot, wrongOuterChain, conflicting, quoteOnly, ancestry }))));
       });
     </script>`, 'utf8');
     const result = spawnSync(localChromeExecutable(), ['--headless', '--disable-gpu', '--no-sandbox', '--no-first-run',
@@ -6112,7 +6211,19 @@ test('captured SI BaseInfoBar with ZEC quote resolves its current token and live
     const report = decodeHeadlessLayoutTelemetry(result.stdout.match(/<title>([^<]+)<\/title>/i)?.[1]);
     assert.equal(report.current.token.metadataVerified, true, JSON.stringify(report));
     assert.equal(report.current.quote.marketCapUsd, 10610, JSON.stringify(report));
+    assert.equal(report.current.quote.priceUsd, 0.0000106,
+      'the real canonical header accepts coherent rounded subscript USD price without a chart');
+    assert.equal(report.current.quote.totalSupply, 1_000_000_000);
     assert.equal(report.refreshed.quote.marketCapUsd, 14100, 'fresh reads follow the captured header value');
+    assert.equal(report.refreshed.quote.priceObservedAt, 0,
+      'a partially updated incoherent price/cap reading cannot become a factual price');
+    assert.equal(report.incoherentSnapshot, null);
+    assert.equal(report.noChartSnapshot?.quote.priceUsd, 0.00000432,
+      'the final-submit snapshot sees the current explicit USD price despite the missing chart');
+    assert.equal(report.noChartSnapshot.quote.marketCapUsd, 4320);
+    assert.equal(report.wrongOuterChain.token.metadataVerified, false,
+      'the outer BaseInfoBar chain fallback must reject a mismatched chain link');
+    assert.deepEqual(report.wrongOuterChain.quote, {});
     assert.equal(report.conflicting.token.metadataVerified, false, 'conflicting canonical address is rejected');
     assert.deepEqual(report.conflicting.quote, {});
     assert.equal(report.quoteOnly.token.metadataVerified, false, 'quote asset data-addr cannot prove current token identity');

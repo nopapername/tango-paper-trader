@@ -18,6 +18,38 @@ const BSC_ADDRESS = '0x1111111111111111111111111111111111111111';
 const BSC_OTHER_ADDRESS = '0x2222222222222222222222222222222222222222';
 const labels = { entry: 'Paper Buy', exit: 'Paper Sell', hide: 'Hide line' };
 
+test('overlay exposes bounded rendering diagnostics without trade identifiers', () => {
+  const chart = loadChartBridge();
+  const payload = {
+    chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 0, currentMarketCap: 6_000,
+    markers: [{ id: 'private-trade-id', side: 'BUY', marketCap: 6_000, price: 0, label: 'Paper Buy' }]
+  };
+  chart.markers(payload);
+  let status = JSON.parse(chart.api.overlayDiagnostic());
+  assert.equal(status.reason, 'NO_TEXT_CALLS');
+  assert.equal(status.markerCount, 1);
+  assert.equal(status.renderedCount, 0);
+  for (const [text, y] of [['$5K', 400], ['$6K', 300], ['$7K', 200]]) {
+    chart.api.record(chart.canvasContext, text, 950, y);
+  }
+  chart.api.render();
+  status = JSON.parse(chart.api.overlayDiagnostic());
+  assert.equal(status.reason, 'RENDERED');
+  assert.equal(status.renderedCount, 1);
+  assert.equal(status.anchorCount, 3);
+  assert.equal(status.sources.length, 1);
+  assert.deepEqual(status.sources[0].points.map(point => point.value).sort((a, b) => a - b), [5000, 6000, 7000]);
+  assert.equal(status.sources[0].points.every(point => Number.isFinite(point.y)
+    && Number.isFinite(point.ageMs) && Number.isFinite(point.generation)), true);
+  chart.api.hideMarker('private-trade-id');
+  status = JSON.parse(chart.api.overlayDiagnostic());
+  assert.equal(status.reason, 'HIDDEN');
+  assert.equal(status.renderedCount, 0);
+  assert.equal(status.visibleCount, 0);
+  assert.equal(chart.api.overlayDiagnostic().includes('private-trade-id'), false);
+  assert.equal(chart.api.overlayDiagnostic().includes(BSC_ADDRESS), false);
+});
+
 function durableUnknownFallback(overrides = {}) {
   return {
     chain: 'base', tokenAddress: BSC_ADDRESS, side: 'BUY', id: 'fallback',
@@ -61,6 +93,7 @@ function loadChartBridge({
     fillText() {}
     strokeText() {}
     clearRect() {}
+    fillRect() { return 'native-fill-result'; }
     getTransform() {
       const { a, b, c, d, e, f } = this.transform;
       return {
@@ -86,6 +119,7 @@ function loadChartBridge({
   }
   const makeElement = () => {
     const children = [];
+    const attributes = new Map();
     const eventListeners = new Map();
     return {
       id: '', isConnected: true, style: {}, children,
@@ -100,7 +134,8 @@ function loadChartBridge({
       dispatchEvent(event) {
         for (const listener of eventListeners.get(event.type) || []) listener(event);
       },
-      setAttribute() {}
+      setAttribute(name, value) { attributes.set(name, String(value)); },
+      getAttribute(name) { return attributes.get(name) ?? null; }
     };
   };
   const instrumented = chartSource.replace(
@@ -131,6 +166,7 @@ function loadChartBridge({
       },
       trackedCanvasCount() { return labelsByCanvas.size; },
       overlayNodes() { return overlay?.children || []; },
+      overlayDiagnostic() { return overlay?.getAttribute('data-tango-chart-diagnostic'); },
       hideMarker(id) { hiddenMarkerIds.add(id); renderMarkers(); },
       record(context, text, x, y) { recordLabel(context, text, x, y); },
       seedAxisRecords(context, samples) {
@@ -2120,6 +2156,28 @@ test('a PRICE marker missing its factual coordinate cannot be synthesized from t
   }, frameContext);
   assert.equal(chart.api.snapshot().overlayChildren, 1);
   assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+});
+
+test('background fills retire old axis ticks before a changed scale can render', () => {
+  const chart = loadChartBridge();
+  const draw = (values) => values.forEach(([text, y]) => chart.api.record(chart.canvasContext, text, 950, y));
+  draw([['$5K', 400], ['$6K', 300], ['$7K', 200]]);
+  chart.markers({ chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 0, currentMarketCap: 6000,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 6000, price: 0, label: 'Paper Buy' }] });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+  assert.equal(chart.canvasContext.fillRect(0, 0, 1000, 700), 'native-fill-result');
+  draw([['$4K', 400], ['$6K', 250]]);
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayChildren, 0, 'two fresh ticks cannot borrow the old third tick');
+  draw([['$8K', 100]]);
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayTops[0], '250px');
+  const status = JSON.parse(chart.api.overlayDiagnostic());
+  assert.equal(status.anchorCount, 3);
+  assert.ok(status.sources[0].clearedGeneration > 0);
+  chart.canvasContext.fillRect(900, 240, 100, 20);
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayTops[0], '250px', 'small live-price badge fills do not clear the tick scale');
 });
 
 test('a separate right-axis canvas spans only its sibling chart pane and rejects ambiguous panes', () => {

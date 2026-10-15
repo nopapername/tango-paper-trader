@@ -603,13 +603,49 @@
     return '';
   }
 
+  function coherentCanonicalUsdQuote(detail, chain, address, items) {
+    const scope = detail?.quoteScope;
+    if (detail?.chainBound !== true
+      || scope?.getAttribute?.('data-sentry-component') !== 'BaseInfoBar') return null;
+    if (Array.from(scope.querySelectorAll?.('[data-sentry-component="BaseInfoPriceView"]') || []).length !== 1) return null;
+    const canonical = Array.from(scope.querySelectorAll?.('#token-base-address[data-addr]') || []);
+    const fullAddress = canonical.length === 1 && !isQuoteTokenIdentityNode(canonical[0])
+      ? canonical[0].getAttribute('data-addr') : '';
+    if (!Tango.Chains.validateAddress(chain, fullAddress)
+      || Tango.Chains.normalizeAddress(chain, fullAddress) !== address) return null;
+    const title = (item) => item.querySelector('.info-item-title')?.textContent?.trim() || '';
+    const value = (item) => String(item.querySelector('.info-item-value')?.textContent || '').trim();
+    const prices = items.filter((item) => /^(价格|price)$/i.test(title(item)));
+    const supplies = items.filter((item) => /^(total supply|总供应量)$/i.test(title(item)));
+    const caps = items.filter((item) => /^(mc|mcap|market cap|市值)$/i.test(title(item)));
+    const unlabeled = items.filter((item) => !title(item));
+    // The live BaseInfoPriceView renders its primary MC item without a title.
+    // Accept that specific slot only when it is the sole unlabeled item.
+    const cap = caps.length === 1 && unlabeled.length === 0 ? caps[0]
+      : caps.length === 0 && unlabeled.length === 1 && items[0] === unlabeled[0] ? unlabeled[0] : null;
+    if (prices.length !== 1 || supplies.length !== 1 || !cap) return null;
+    const numeric = '(?:0\\.0[\u2080-\u2089]\\d+|(?:(?:\\d+|\\d{1,3}(?:,\\d{3})+)(?:\\.\\d+)?|\\.\\d+)(?:[eE][-+]?\\d+)?\\s*[KMBT]?)';
+    const usdPattern = new RegExp(`^(?:US)?\\$\\s*${numeric}$`, 'i');
+    const supplyPattern = new RegExp(`^${numeric}$`, 'i');
+    if (!usdPattern.test(value(prices[0])) || !usdPattern.test(value(cap))
+      || !supplyPattern.test(value(supplies[0]))) return null;
+    const priceUsd = parseUsdMoney(value(prices[0]));
+    const totalSupply = parseMoney(value(supplies[0]));
+    const marketCapUsd = parseUsdMoney(value(cap));
+    const impliedMarketCap = priceUsd * totalSupply;
+    if (![priceUsd, totalSupply, marketCapUsd, impliedMarketCap].every((number) => Number.isFinite(number) && number > 0)
+      || Math.abs(impliedMarketCap - marketCapUsd) > Math.min(impliedMarketCap, marketCapUsd) * 0.01) return null;
+    return { priceUsd, totalSupply };
+  }
+
   function detailQuote(detail, chain, address) {
     const quoteScope = detail?.quoteScope || detail?.bindingScope || detail?.scope;
     if (!quoteScope) return null;
     const hasKline = hasTrustedChart(chain, address);
-    const priceUsd = hasKline ? findPrice(quoteScope) : 0;
     const baseInfo = baseInfoPriceView(quoteScope);
     const baseItems = baseInfo ? Array.from(baseInfo.querySelectorAll('[data-sentry-component="InfoItem"]')) : [];
+    const canonicalUsd = !hasKline ? coherentCanonicalUsdQuote(detail, chain, address, baseItems) : null;
+    const priceUsd = hasKline ? findPrice(quoteScope) : Number(canonicalUsd?.priceUsd || 0);
     const itemTitle = (item) => item?.querySelector('.info-item-title')?.textContent?.trim() || '';
     const itemValue = (item) => item?.querySelector('.info-item-value')?.textContent || '';
     const explicitMarketCap = parseUsdMoney(itemValue(baseItems.find((item) =>
@@ -624,7 +660,7 @@
       || scanLabeledValue(['liq', 'liquidity', '流动性', '池子', 'pool'], quoteScope);
     const declaredSupply = parseMoney(itemValue(baseItems.find((item) => /^(total supply|\u603b\u4f9b\u5e94\u91cf)$/i
       .test(itemTitle(item)))));
-    const exactSupply = hasKline ? declaredSupply : 0;
+    const exactSupply = hasKline ? declaredSupply : Number(canonicalUsd?.totalSupply || 0);
     const fullyDilutedValue = priceUsd > 0 && exactSupply > 0 ? priceUsd * exactSupply : 0;
     const marketCapUsd = fullyDilutedValue > 0 && marketCapCandidate > fullyDilutedValue * FDV_MARKET_CAP_TOLERANCE
       ? 0 : marketCapCandidate;
@@ -722,8 +758,7 @@
 
     const verified = lastVerifiedDetail;
     if (!verified || verified.chain !== chain || verified.address !== address
-      || verified.routeKey !== chartRouteKey(chain, address) || verified.chainBound !== true
-      || !hasTrustedChart(chain, address)) return null;
+      || verified.routeKey !== chartRouteKey(chain, address) || verified.chainBound !== true) return null;
 
     const detail = findTokenDetailScope(address, chain, false);
     if (!detail || detail.chainBound !== true) return null;

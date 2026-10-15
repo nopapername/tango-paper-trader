@@ -212,6 +212,7 @@
     const originalFillText = proto.fillText;
     const originalStrokeText = proto.strokeText;
     const originalClearRect = proto.clearRect;
+    const originalFillRect = proto.fillRect;
     proto.fillText = function tangoFillText(text, x, y, ...rest) {
       recordLabel(this, text, x, y);
       return originalFillText.call(this, text, x, y, ...rest);
@@ -228,6 +229,17 @@
         invalidateCanvasSource(this.canvas, 'STALE_GENERATION');
       }
       return originalClearRect.call(this, x, y, width, height);
+    };
+    // TradingView also repaints an axis with a background fill. Those pixels
+    // replace the old ticks just as a clear does; retaining them mixes scales.
+    if (originalFillRect) proto.fillRect = function tangoFillRect(x, y, width, height) {
+      if (this.canvas && clearsAxisSnapshot(this, x, y, width, height)) {
+        const clearedAt = ++clearSequence;
+        canvasClearedAt.set(this.canvas, clearedAt);
+        canvasConsumedClearAt.set(this.canvas, clearedAt);
+        invalidateCanvasSource(this.canvas, 'STALE_GENERATION');
+      }
+      return originalFillRect.call(this, x, y, width, height);
     };
   }
 
@@ -562,6 +574,47 @@
   }
 
   function renderMarkers() {
+    try {
+      renderMarkerOverlay();
+    } finally {
+      if (overlay?.isConnected) {
+        const markers = markerState?.markers || [];
+        const visibleCount = markers.filter((marker) => !hiddenMarkerIds.has(marker.id)).length;
+        const reason = !markers.length ? 'EMPTY_MARKERS'
+          : !visibleCount ? 'HIDDEN'
+            : !frameContextMatchesObservedProbe(activeFrameContext) ? 'FRAME_CONTEXT_MISMATCH'
+              : chartDiagnostic.reason;
+        // Public DOM diagnostics contain only rendering state, never token or trade identifiers.
+        overlay.setAttribute('data-tango-chart-diagnostic', JSON.stringify({
+          reason,
+          markerCount: markers.length,
+          visibleCount,
+          renderedCount: overlay.childElementCount,
+          anchorCount: [...labelsByCanvas.values()].reduce((sum, entry) => sum + entry.records.size, 0),
+          axisSequence: axisLabelSequence,
+          axisSequenceFloor: markerAxisSequenceFloor,
+          axisHint: chartDiagnostic.axisHint,
+          frameGeneration: chartDiagnostic.frameGeneration,
+          sources: [...labelsByCanvas.values()].slice(0, 4).map((entry) => ({
+            rect: finiteRect(entry.canvas),
+            backingWidth: Number(entry.canvas.width),
+            backingHeight: Number(entry.canvas.height),
+            clearedGeneration: Number(canvasClearedAt.get(entry.canvas) || 0),
+            points: [...entry.records.values()].slice(-100).map((point) => ({
+              value: point.value, x: point.x, y: point.y,
+              generation: point.generation, sequence: point.sequence,
+              ageMs: Math.max(0, Date.now() - point.updatedAt),
+              currentGeometry: point.sourceObservationSignature === sourceObservationSignature(
+                finiteRect(entry.canvas), entry.canvas
+              )
+            }))
+          }))
+        }));
+      }
+    }
+  }
+
+  function renderMarkerOverlay() {
     discardDisconnectedCanvasRecords();
     const root = ensureOverlay();
     const markers = markerState?.markers || [];
