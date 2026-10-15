@@ -2180,6 +2180,36 @@ test('background fills retire old axis ticks before a changed scale can render',
   assert.equal(chart.api.snapshot().overlayTops[0], '250px', 'small live-price badge fills do not clear the tick scale');
 });
 
+test('a volume badge rejected by the axis fit cannot select a thousand-fold market-cap unit', () => {
+  const chart = loadChartBridge();
+  for (const value of [5200, 6000, 6800, 7600, 8400]) {
+    chart.api.record(chart.canvasContext, String(value), 950, 900 - value * 0.07);
+  }
+  chart.api.record(chart.canvasContext, '7', 950, 600);
+  const payload = {
+    chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 0.000007, currentMarketCap: 7000,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 6940, price: 0.00000694, label: 'Paper Buy' }]
+  };
+  chart.markers(payload);
+  assert.equal(chart.api.snapshot().overlayChildren, 1);
+  assert.equal(chart.api.snapshot().stableScale.factor, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '414px');
+  chart.markers({ ...payload, currentMarketCap: 7920, currentPrice: 0.00000792 });
+  assert.equal(chart.api.snapshot().overlayTops[0], '414px');
+});
+
+test('captured Alice ticks keep the entry inside the plot despite the volume label 7', () => {
+  const chart = loadChartBridge();
+  const points = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/gmgn-alice-axis-with-volume.json'), 'utf8'));
+  for (const { value, y } of points) chart.api.record(chart.canvasContext, String(value), 950, y);
+  chart.markers({
+    chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 0.000007, currentMarketCap: 7000,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 6940, price: 0.00000694, label: 'Paper Buy' }]
+  });
+  assert.equal(chart.api.snapshot().stableScale.factor, 1);
+  assert.equal(chart.api.snapshot().overlayTops[0], '402px');
+});
+
 test('a separate right-axis canvas spans only its sibling chart pane and rejects ambiguous panes', () => {
   const chart = loadChartBridge({
     canvasRect: { left: 843, top: 0, width: 56, height: 538 },

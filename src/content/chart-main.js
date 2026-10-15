@@ -297,7 +297,8 @@
     const inliers = prepared
       .filter((point) => Math.abs(point.y - (slope * point.x + intercept)) <= tolerance)
       .map((point) => point.point);
-    return inliers.length >= 3 ? linearFit(inliers, logarithmic) : null;
+    const fit = inliers.length >= 3 ? linearFit(inliers, logarithmic) : null;
+    return fit ? { ...fit, inliers } : null;
   }
 
   function discardDisconnectedCanvasRecords() {
@@ -451,11 +452,14 @@
         const linear = robustFit(group.points, false);
         const logarithmic = robustFit(group.points, true);
         const fit = !linear ? logarithmic : !logarithmic ? linear : linear.error <= logarithmic.error ? linear : logarithmic;
-        const tickSpacing = median(group.points.slice(1)
-          .map((point, index) => Math.abs(point.y - group.points[index].y)));
+        const points = fit?.inliers || [];
+        const tickSpacing = median(points.slice(1)
+          .map((point, index) => Math.abs(point.y - points[index].y)));
         if (!fit || fit.error > Math.max(4, tickSpacing * 0.18)) return { ...group, fit: null };
-        const geometry = currentSourceGeometry(group.canvas, group.points, tickSpacing);
-        return { ...group, fit, tickSpacing, geometry };
+        // Unit selection and plot bounds must use the same accepted ticks as
+        // the fit, rather than volume/current-price badges rejected as outliers.
+        const geometry = currentSourceGeometry(group.canvas, points, tickSpacing);
+        return { ...group, points, fit, tickSpacing, geometry };
       }).filter((group) => group.fit && group.geometry);
     if (!groups.length) {
       setChartDiagnostic('REJECTED_FIT');
