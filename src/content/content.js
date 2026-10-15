@@ -2195,7 +2195,7 @@
       monthPnl += pnl;
       if (pnl !== 0) activeDays += 1;
       const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
-      cells.push(`<div class="tango-calendar-day ${pnl > 0 ? 'win' : pnl < 0 ? 'loss' : ''} ${isToday ? 'today' : ''}"><span>${day}</span><strong class="${pnlClass(pnl)}">${pnl ? accountMoney(pnl, true) : '—'}</strong></div>`);
+      cells.push(`<button type="button" data-action="daily-report" data-date="${key}" title="${esc(Tango.DailyReport.labels(language()).title)}" class="tango-calendar-day ${pnl > 0 ? 'win' : pnl < 0 ? 'loss' : ''} ${isToday ? 'today' : ''}"><span>${day}</span><strong class="${pnlClass(pnl)}">${pnl ? accountMoney(pnl, true) : '—'}</strong></button>`);
     }
     return `<div class="tango-calendar tango-card">
       <div class="tango-calendar-header"><div><span class="tango-paper-badge">${t('paper')}</span><strong>${t('pnlCalendar')}</strong></div><button class="tango-icon-button" data-action="close-calendar">×</button></div>
@@ -2784,8 +2784,28 @@
     finally { input.value = ''; }
   }
 
+  function openDailyReport(date) {
+    const chain=activeChain();
+    if(!chain) return;
+    try { runtime.modal={type:'daily-report',report:Tango.DailyReport.summarize(runtime.state,chain.id,date),currency:'NATIVE'}; render(); }
+    catch { showToast(t('imageExportFailed'),'error'); }
+  }
+  async function reportAction(action) {
+    const modal=runtime.modal;
+    if(modal?.type!=='daily-report' || modal.busy) return;
+    if(action==='close'){runtime.modal=null;render();return;}
+    if(action==='native'||action==='usd'){modal.currency=action==='usd'?'USD':'NATIVE';render();return;}
+    if(action==='history'){runtime.modal=null;render();await openDashboard({tab:'history',chain:modal.report.chain,date:modal.report.date});return;}
+    if(action!=='download'&&action!=='copy')return;
+    modal.busy=true;render();
+    try {const result=await Tango.DailyReport.exportImage(modal.report,modal.currency,language(),action);showToast(t(result==='copied'?'copyImage':result==='fallback'?'imageCopyFallback':'downloadPng'),'success');}
+    catch {showToast(t('imageExportFailed'),'error');}
+    finally {modal.busy=false;render();}
+  }
+
   function renderModal() {
     if (!runtime.modal) return '';
+    if(runtime.modal.type==='daily-report') return Tango.DailyReport.dialog(runtime.modal.report,runtime.modal.currency,language(),runtime.modal.busy);
     if (runtime.modal.type === 'dashboard-error') {
       return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3><div class="tango-warning">${esc(runtime.modal.note)}</div><div class="tango-modal-actions"><button class="tango-button" data-action="cancel-modal">${t('cancel')}</button><button class="tango-button primary" data-action="export-backup">${t('exportJson')}</button><label>${t('importJson')}<input id="tango-import-backup" type="file" accept=".json,application/json" style="display:block;max-width:100%"></label></div></div></div>`;
     }
@@ -2862,7 +2882,7 @@
     if (runtime.renderedMarkup !== markup) {
       const template = document.createElement('template');
       if (template.content) template.innerHTML = markup;
-      const patched = template.content && !runtime.modal && !runtime.presetEditing
+      const patched = template.content && (!runtime.modal || runtime.modal.type === 'daily-report') && !runtime.presetEditing
         && patchShellText(markup, template);
       if (!patched) {
         if (template.content && shell.replaceChildren) shell.replaceChildren(template.content);
@@ -2877,6 +2897,7 @@
   }
 
   function bindEvents() {
+    shell.querySelectorAll('[data-report-action]').forEach(button=>button.addEventListener('click',async event=>{if(!requireTrustedUserEvent(event))return;event.stopPropagation();await reportAction(button.dataset.reportAction);}));
     shell.querySelectorAll('[data-buy]').forEach((button) => button.addEventListener('click', (event) => {
       if (!requireTrustedUserEvent(event)) return;
       return buy(Number(button.dataset.buy));
@@ -2920,6 +2941,7 @@
       }
       if (action === 'breakeven') await sellBreakeven();
       if (action === 'close-all') requestCloseAll();
+      if (action === 'daily-report') openDailyReport(element.dataset.date);
       if (action === 'close-calendar') { runtime.calendarOpen = false; render(); }
       if (action === 'calendar-prev') { runtime.calendarMonth = new Date(runtime.calendarMonth.getFullYear(), runtime.calendarMonth.getMonth() - 1, 1); render(); }
       if (action === 'calendar-next') { runtime.calendarMonth = new Date(runtime.calendarMonth.getFullYear(), runtime.calendarMonth.getMonth() + 1, 1); render(); }

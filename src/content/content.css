@@ -475,3 +475,6 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   .tango-drawer { width: min(360px,100vw); }
   .tango-calendar { right: 8px; top: 72px; width: min(430px,calc(100vw - 16px)); }
 }
+
+button.tango-calendar-day { appearance:none; color:inherit; font:inherit; width:100%; cursor:pointer; text-align:left; }
+button.tango-calendar-day:focus-visible { outline:2px solid var(--brand); outline-offset:1px; }

@@ -116,12 +116,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const allowedTabs = new Set(['overview', 'positions', 'history', 'calendar', 'settings']);
     const requestedTab = message.tab == null ? '' : String(message.tab);
     const requestedChain = message.chain == null ? '' : String(message.chain);
+    const requestedDate = message.date == null ? '' : String(message.date);
+    const parsedDate = new Date(requestedDate + 'T12:00:00Z');
+    if(requestedDate && (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || !Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0,10)!==requestedDate)){sendResponse({ok:false,error:'Invalid Dashboard route'});return false;}
     if ((requestedTab && !allowedTabs.has(requestedTab)) || (requestedChain && !Chains.get(requestedChain))) {
       sendResponse({ ok: false, error: 'Invalid Dashboard route' });
       return false;
     }
     const baseUrl = chrome.runtime.getURL('dashboard.html');
-    const dashboardUrl = `${baseUrl}${requestedChain ? `?chain=${encodeURIComponent(requestedChain)}` : ''}${requestedTab ? `#${encodeURIComponent(requestedTab)}` : ''}`;
+    const params = [requestedChain ? `chain=${encodeURIComponent(requestedChain)}` : '', requestedDate ? `date=${encodeURIComponent(requestedDate)}` : ''].filter(Boolean).join('&');
+    const dashboardUrl = `${baseUrl}${params ? '?' + params : ''}${requestedTab ? `#${encodeURIComponent(requestedTab)}` : ''}`;
     // Use the same tab route for every entry point; embedded browsers may not
     // provide an options-page surface even when openOptionsPage resolves.
     Promise.resolve().then(() => chrome.tabs.create({ url: dashboardUrl }))

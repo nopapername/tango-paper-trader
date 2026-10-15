@@ -24,7 +24,8 @@
     nativePriceRefreshTimer: null,
     tab: initialTab,
     month: new Date(),
-    filters: { search: '', side: 'ALL', result: 'ALL', date: '' },
+    filters: { search: '', side: 'ALL', result: 'ALL', date: Tango.DailyReport.validDate(searchParams.get('date')) ? searchParams.get('date') : '' },
+    dailyReport:null, reportCurrency:'NATIVE', reportBusy:false,
     historyPage: 0,
     onboardingActive: searchParams.get('onboarding') === '1',
     onboardingComplete: false,
@@ -196,6 +197,7 @@
     const selected = Tango.Chains.get(chainId);
     if (!selected) return Promise.resolve(runtime.settings);
     const revision = ++runtime.selectedChainRevision;
+    runtime.dailyReport = null;
     runtime.selectedChain = selected.id;
     runtime.historyPage = 0;
     render();
@@ -334,7 +336,7 @@
       <div class="topbar-actions"><label class="chain-select"><span>${label('Selected chain', '已选链')}</span><select id="dashboard-chain">${chainOptions}</select></label>
       <button class="button primary" data-action="open-gmgn">GMGN ↗</button></div></div>
       ${nativePriceStatus()}${renderTab(view)}
-    </main></div>${runtime.toast ? `<div class="toast">${esc(runtime.toast)}</div>` : ''}`;
+    </main></div>${runtime.dailyReport ? Tango.DailyReport.dialog(runtime.dailyReport,runtime.reportCurrency,lang(),runtime.reportBusy) : ''}${runtime.toast ? `<div class="toast">${esc(runtime.toast)}</div>` : ''}`;
     const template = document.createElement('template');
     if (template.content) template.innerHTML = markup;
     const nextBaseline = template.content ? settingsFormSnapshot(template.content) : null;
@@ -535,6 +537,23 @@
       ${compact ? historyResults(view, true) : `<div id="history-results">${historyResults(view)}</div>`}</section>`;
   }
 
+  function openDailyReport(date) {
+    try {runtime.dailyReport=Tango.DailyReport.summarize(runtime.state,runtime.selectedChain,date);runtime.reportCurrency='NATIVE';render();}
+    catch {showToast(t('imageExportFailed'));}
+  }
+  async function reportAction(action) {
+    const report=runtime.dailyReport;
+    if(!report||runtime.reportBusy)return;
+    if(action==='close'){runtime.dailyReport=null;render();return;}
+    if(action==='native'||action==='usd'){runtime.reportCurrency=action==='usd'?'USD':'NATIVE';render();return;}
+    if(action==='history'){runtime.filters={search:'',side:'ALL',result:'ALL',date:report.date};runtime.historyPage=0;runtime.tab='history';runtime.dailyReport=null;render();return;}
+    if(action!=='download'&&action!=='copy')return;
+    runtime.reportBusy=true;render();
+    try {const result=await Tango.DailyReport.exportImage(report,runtime.reportCurrency,lang(),action);showToast(t(result==='copied'?'copyImage':result==='fallback'?'imageCopyFallback':'downloadPng'));}
+    catch {showToast(t('imageExportFailed'));}
+    finally {runtime.reportBusy=false;render();}
+  }
+
   function calendarPanel(view) {
     const date = runtime.month;
     const year = date.getFullYear();
@@ -601,9 +620,10 @@
   }
 
   function bind() {
+    app.querySelectorAll('[data-report-action]').forEach(button=>button.addEventListener('click',()=>reportAction(button.dataset.reportAction)));
     app.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => { runtime.tab = button.dataset.tab; render(); }));
     app.querySelectorAll('[data-month]').forEach((button) => button.addEventListener('click', () => { runtime.month = new Date(runtime.month.getFullYear(), runtime.month.getMonth() + Number(button.dataset.month), 1); render(); }));
-    app.querySelectorAll('[data-calendar-date]').forEach((button) => button.addEventListener('click', () => { runtime.filters.date = button.dataset.calendarDate; runtime.historyPage = 0; runtime.tab = 'history'; render(); }));
+    app.querySelectorAll('[data-calendar-date]').forEach((button) => button.addEventListener('click', () => { openDailyReport(button.dataset.calendarDate); }));
     app.querySelectorAll('[data-account-chain]').forEach((button) => button.addEventListener('click', () => saveSelectedChain(button.dataset.accountChain)));
     bindShareButtons(app);
     bindHistoryPages(app);
