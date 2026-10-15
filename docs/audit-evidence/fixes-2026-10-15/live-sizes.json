@@ -1,0 +1,94 @@
+[
+  {
+    "size": "小号",
+    "buttons": [
+      {
+        "dx": 0,
+        "height": 36,
+        "hit": true,
+        "inside": true,
+        "overflow": false,
+        "rightDelta": 0,
+        "text": "模拟盘\n0.5 BNB"
+      },
+      {
+        "dx": 0,
+        "height": 36,
+        "hit": true,
+        "inside": true,
+        "overflow": false,
+        "rightDelta": 0,
+        "text": "模拟盘\n1 BNB"
+      }
+    ]
+  },
+  {
+    "size": "大号",
+    "buttons": [
+      {
+        "dx": 0,
+        "height": 36,
+        "hit": true,
+        "inside": true,
+        "overflow": false,
+        "rightDelta": 0,
+        "text": "模拟盘\n0.5 BNB"
+      },
+      {
+        "dx": 0,
+        "height": 36,
+        "hit": true,
+        "inside": true,
+        "overflow": false,
+        "rightDelta": 0,
+        "text": "模拟盘\n1 BNB"
+      }
+    ]
+  },
+  {
+    "size": "超大号",
+    "buttons": [
+      {
+        "dx": 0,
+        "height": 36,
+        "hit": true,
+        "inside": true,
+        "overflow": false,
+        "rightDelta": 0,
+        "text": "模拟盘\n0.5 BNB"
+      },
+      {
+        "dx": 0,
+        "height": 36,
+        "hit": true,
+        "inside": true,
+        "overflow": false,
+        "rightDelta": 0,
+        "text": "模拟盘\n1 BNB"
+      }
+    ]
+  },
+  {
+    "size": "巨型",
+    "buttons": [
+      {
+        "dx": 0,
+        "height": 36,
+        "hit": true,
+        "inside": true,
+        "overflow": false,
+        "rightDelta": 0,
+        "text": "模拟盘\n0.5 BNB"
+      },
+      {
+        "dx": 0,
+        "height": 36,
+        "hit": true,
+        "inside": true,
+        "overflow": false,
+        "rightDelta": 0,
+        "text": "模拟盘\n1 BNB"
+      }
+    ]
+  }
+]

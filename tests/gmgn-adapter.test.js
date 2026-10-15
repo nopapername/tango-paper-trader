@@ -569,6 +569,13 @@ ${contentCss}
     amount.textContent = '0.1 ETH';
     content.append(hint, amount);
     paper.append(content);
+    // Current GMGN leaves its icon and raw amount text in the action host.
+    // They must not consume flex space beside the full-width paper control.
+    const nativeIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    nativeIcon.setAttribute('width', '12');
+    nativeIcon.setAttribute('height', '12');
+    nativeIcon.style.flexShrink = '0';
+    host.append(nativeIcon, document.createTextNode(' 0.5 BNB'));
     host.append(paper);
     if (overflow) {
       overflow.append(host);

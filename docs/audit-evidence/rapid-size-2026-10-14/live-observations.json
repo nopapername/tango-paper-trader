@@ -1,0 +1,241 @@
+{
+  "sizes": [
+    {
+      "size": "小号",
+      "buttons": [
+        {
+          "font": "12px",
+          "hit": true,
+          "overflow": false,
+          "rect": {
+            "height": 36,
+            "width": 139.625,
+            "x": 402.4583435058594,
+            "y": 690.6666870117188
+          },
+          "slot": {
+            "height": 36,
+            "width": 139.625,
+            "x": 369.1875,
+            "y": 690.6666870117188
+          },
+          "text": "模拟盘\n0.5 BNB"
+        },
+        {
+          "font": "12px",
+          "hit": true,
+          "overflow": false,
+          "rect": {
+            "height": 36,
+            "width": 139.625,
+            "x": 546.0625,
+            "y": 690.6666870117188
+          },
+          "slot": {
+            "height": 36,
+            "width": 139.625,
+            "x": 512.8125,
+            "y": 690.6666870117188
+          },
+          "text": "模拟盘\n0.1 BNB"
+        }
+      ],
+      "card": {
+        "height": 144,
+        "width": 383.1041870117187,
+        "x": 273.3333435058594,
+        "y": 596
+      },
+      "hosts": [
+        {
+          "class": "relative w-fit group/btn text-primary rounded-[6px] bg-btn-secondary-buy py-1.5 px-3 text-base font-semibold flex items-center gap-1 whitespace-nowrap justify-center cursor-pointer min-w-12 hover:text-text-hightlightbtn QuickBuy_btnForLoading__GcvLL !h-[24px] !px-[6px] !text-[12px] !bg-[var(--customize-button2-bg-color)] !text-[var(--customize-button2-text-color)] hover:!bg-[var(--customize-button2-bg-hover-color)] hover:!text-[var(--customize-button2-text-hover-color)] group-active/btn:opacity-[0.15] pointer-events-auto overflow-hidden BuyButton-continer tango-native-buy-overridden tango-quick-buy-action-host",
+          "rect": {
+            "height": 36,
+            "width": 139.625,
+            "x": 369.1875,
+            "y": 690.6666870117188
+          }
+        },
+        {
+          "class": "relative w-fit group/btn text-primary rounded-[6px] bg-btn-secondary-buy py-1.5 px-3 text-base font-semibold flex items-center gap-1 whitespace-nowrap justify-center cursor-pointer min-w-12 hover:text-text-hightlightbtn QuickBuy_btnForLoading__GcvLL !h-[24px] !px-[6px] !text-[12px] !bg-[var(--customize-button-bg-color)] !text-[var(--customize-button-text-color)] hover:!bg-[var(--customize-button-bg-hover-color)] hover:!text-[var(--customize-button-text-hover-color)] group-active/btn:opacity-[0.15] pointer-events-auto overflow-hidden BuyButton-continer tango-native-buy-overridden tango-quick-buy-action-host",
+          "rect": {
+            "height": 36,
+            "width": 139.625,
+            "x": 512.8125,
+            "y": 690.6666870117188
+          }
+        }
+      ]
+    },
+    {
+      "size": "大号",
+      "selectedSize": [
+        " 5大号"
+      ],
+      "buttons": [
+        {
+          "font": "12px",
+          "hit": true,
+          "overflow": false,
+          "rect": {
+            "height": 36,
+            "width": 139.625,
+            "x": 402.4583435058594,
+            "y": 690.6666870117188
+          },
+          "slot": {
+            "height": 36,
+            "width": 139.625,
+            "x": 369.1875,
+            "y": 690.6666870117188
+          },
+          "text": "模拟盘\n0.5 BNB"
+        },
+        {
+          "font": "12px",
+          "hit": true,
+          "overflow": false,
+          "rect": {
+            "height": 36,
+            "width": 139.625,
+            "x": 546.0625,
+            "y": 690.6666870117188
+          },
+          "slot": {
+            "height": 36,
+            "width": 139.625,
+            "x": 512.8125,
+            "y": 690.6666870117188
+          },
+          "text": "模拟盘\n0.1 BNB"
+        }
+      ],
+      "card": {
+        "height": 144,
+        "width": 383.1041870117187,
+        "x": 273.3333435058594,
+        "y": 596
+      }
+    },
+    {
+      "size": "超大号",
+      "selectedSize": [
+        " 5超大号"
+      ],
+      "buttons": [
+        {
+          "font": "13px",
+          "hit": true,
+          "overflow": false,
+          "rect": {
+            "height": 36,
+            "width": 144.4375,
+            "x": 395.25,
+            "y": 696.6666870117188
+          },
+          "slot": {
+            "height": 36,
+            "width": 144.4375,
+            "x": 359.5833435058594,
+            "y": 696.6666870117188
+          },
+          "text": "模拟盘\n0.5 BNB"
+        },
+        {
+          "font": "13px",
+          "hit": true,
+          "overflow": false,
+          "rect": {
+            "height": 36,
+            "width": 144.4166717529297,
+            "x": 543.6875,
+            "y": 696.6666870117188
+          },
+          "slot": {
+            "height": 36,
+            "width": 144.4166717529297,
+            "x": 508.0208435058594,
+            "y": 696.6666870117188
+          },
+          "text": "模拟盘\n0.1 BNB"
+        }
+      ],
+      "card": {
+        "height": 144,
+        "width": 383.1041870117187,
+        "x": 273.3333435058594,
+        "y": 596
+      }
+    },
+    {
+      "size": "巨型",
+      "selectedSize": [
+        " 5巨型"
+      ],
+      "buttons": [
+        {
+          "font": "12px",
+          "hit": true,
+          "overflow": false,
+          "rect": {
+            "height": 36,
+            "width": 139.625,
+            "x": 402.4583435058594,
+            "y": 696.6666870117188
+          },
+          "slot": {
+            "height": 36,
+            "width": 139.625,
+            "x": 369.1875,
+            "y": 696.6666870117188
+          },
+          "text": "模拟盘\n0.5 BNB"
+        },
+        {
+          "font": "12px",
+          "hit": true,
+          "overflow": false,
+          "rect": {
+            "height": 36,
+            "width": 139.625,
+            "x": 546.0625,
+            "y": 696.6666870117188
+          },
+          "slot": {
+            "height": 36,
+            "width": 139.625,
+            "x": 512.8125,
+            "y": 696.6666870117188
+          },
+          "text": "模拟盘\n0.1 BNB"
+        }
+      ],
+      "card": {
+        "height": 144,
+        "width": 383.1041870117187,
+        "x": 273.3333435058594,
+        "y": 596
+      }
+    }
+  ],
+  "rapid": {
+    "fresh": {
+      "href": "/bsc/token/0x42f34c0783068ddebf4f80fa57e6dced747cffff",
+      "mc": "$3.1K",
+      "text": "\n3\n\n0x42...ffff\n머슬캣\nMusclecat\n\n\nTax 4%\nSKHYB\nSKHYB\n0s\n\n​\n\n@genyrational\n\n48\n\n4.4K\n0\n0\n0/147\n1\n0/0%\n0\n$3.1K\n$0\nF\n\n0\n$0\n0\n0%\n0%\n0%\n\n0%\n0%\n0%\n0%"
+    },
+    "ageAtBuy": "\n3\n\n\n\n\n0x42...ffff\n머슬캣\nMusclecat\n\n\nTax 4%\nSKHYB\nSKHYB\n1s\n\n​\n\n@genyrational\n\n48\n\n4.4K\n0\n0\n0/147\n1\n0/0%\n0\n$3.1K\n$0\nF\n\n0\n$0\n0\n0%\n0%\n2d\n0%\n\n0%\n0%\n0%\n0%\n\n0.5 BNB\n模拟盘\n0.5 BNB\n\n0.1 BNB\n模拟盘\n0.1 BNB",
+    "buyTiming": {
+      "start": 1791983506398,
+      "done": 1791983506676
+    },
+    "beforeHalf": "T\nTANGO\n模拟盘\n머슬캣\n✎\n🔊\n⚙\n×\n买入\n◎ 9.8451 BNB\n0.1\n0.2\n0.5\n1\n2\n3\n5\n10\n⌁ 0.8%\n♜ 0.001 BNB\n♙ 1%\n入场市值 $3100\n卖出 %\n2310.91万 머슬캣\n10%\n25%\n50%\n100%\n5%\n15%\n35%\n75%\n⌁ 自动\n♜ 0.001 BNB\n一键回本\n当前市值 $0\n虚拟余额\n9.8451 BNB\n总买入\n0.1 BNB\n总卖出\n0 BNB\n总利润\n-0.0028 BNB\n入场市值 $3100\n当前市值 $0\n盈亏 -2.84%\n盈亏数额 -0.0028 BNB",
+    "afterHalf": "T\nTANGO\n模拟盘\n머슬캣\n✎\n🔊\n⚙\n×\n买入\n◎ 9.8451 BNB\n0.1\n0.2\n0.5\n1\n2\n3\n5\n10\n⌁ 0.8%\n♜ 0.001 BNB\n♙ 1%\n入场市值 $3100\n卖出 %\n2310.91万 머슬캣\n10%\n25%\n50%\n100%\n5%\n15%\n35%\n75%\n⌁ 自动\n♜ 0.001 BNB\n一键回本\n当前市值 $0\n虚拟余额\n9.8451 BNB\n总买入\n0.1 BNB\n总卖出\n0 BNB\n总利润\n-0.0028 BNB\n入场市值 $3100\n当前市值 $0\n盈亏 -2.84%\n盈亏数额 -0.0028 BNB",
+    "chart": {
+      "canvas": 0,
+      "children": 0,
+      "text": ""
+    },
+    "postReload": "\n      \n        \n          模拟盘\n          -0.0574 BNB盈亏\n        点击查看持仓 · 1\n      \n      －\n    \n      \n        TTANGO模拟盘머슬캣\n        ✎🔊⚙×\n      \n      \n        \n          买入◎ 9.8451 BNB\n          0.10.20.5123510\n          ⌁ 0.8%♜ 0.001 BNB♙ 1%入场市值 $3100\n        \n        \n          卖出 %2310.91万 머슬캣\n          10%25%50%100%5%15%35%75%\n          ⌁ 自动♜ 0.001 BNB一键回本当前市值 $0\n        \n        \n          虚拟余额9.8451 BNB\n          总买入0.1 BNB\n          总卖出0 BNB\n          总利润-0.0026 BNB\n        \n        \n          入场市值 $3100\n          当前市值 $0\n          盈亏 -2.6%\n          盈亏数额 -0.0026 BNB\n        \n        \n      \n    "
+  }
+}

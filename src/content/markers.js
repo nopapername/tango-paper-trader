@@ -94,6 +94,8 @@
       if (marketCapSource === 'TANGO_FALLBACK'
         || quoteSource === 'TANGO_FALLBACK'
         || source === 'TANGO_FALLBACK'
+        || quoteSource === 'TANGO_POSITION_HISTORY'
+        || source === 'TANGO_POSITION_HISTORY'
         || ['UNKNOWN_INITIAL_MARKET_CAP', 'LAUNCHPAD_INITIAL_MARKET_CAP'].includes(valuationSource)) {
         return true;
       }

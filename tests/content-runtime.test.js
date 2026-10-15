@@ -4721,6 +4721,110 @@ test('resolver excludes an old position cap from a new factual price ratio', () 
   assert.equal(quote.totalSupply, 100_000_000_000);
 });
 
+test('no-chart history survives coordinator partial sells and drawer/detail/close-all paths', async () => {
+  for (const totalSupply of [0, 1_000_000_000]) {
+    for (const exitPath of ['detail', 'drawer', 'close-all']) {
+      const loaded = loadContent({ href: `https://gmgn.ai/bsc/token/${ADDRESS_A}` });
+      const token = { chain: 'bsc', address: ADDRESS_A, symbol: 'NEW' };
+      loaded.api.rememberNativePrice('bsc', 700, loaded.clock.now);
+      const settings = RealState.normalizeSettings({ fastMode: false, confirmationEnabled: true,
+        slippageBps: 0, platformFeeBps: 0, chains: { bsc: { networkFeeNative: 0 } } });
+      const initial = RealState.createInitialState({ now: 1, initialBalances: { bsc: 10 } });
+      initial.initialized = true;
+      const values = { [global.Tango.STORAGE_KEY]: initial, [global.Tango.SETTINGS_KEY]: settings };
+      const coordinator = StateCoordinator.create({
+        async readRaw(keys) { return Object.fromEntries(keys.filter(k => k in values).map(k => [k, structuredClone(values[k])])); },
+        async writeRaw(next) { Object.assign(values, structuredClone(next)); },
+        now: () => loaded.clock.now
+      });
+      const entry = loaded.api.resolvePaperTradeQuote(token, { chain: 'bsc', address: ADDRESS_A,
+        priceUsd: 0.0000031, marketCapUsd: 0, totalSupply,
+        supplySource: totalSupply ? 'GMGN_EXACT' : '', source: 'GMGN_DETAIL',
+        observedAt: loaded.clock.now, priceObservedAt: loaded.clock.now });
+      const bought = await coordinator.mutate(structuredClone({ type: 'EXECUTE_BUY',
+        order: { token, quote: entry, amountNative: 0.1 } }));
+      loaded.api.runtime.state = bought.state;
+      loaded.api.runtime.settings = settings;
+      loaded.context.Tango.Engine = RealEngine;
+      loaded.context.Tango.ChainView = require('../src/content/chain-view.js');
+      loaded.context.Tango.Store.executeSell = order => coordinator.mutate(structuredClone({ type: 'EXECUTE_SELL', order }));
+      loaded.context.Tango.Store.executeCloseAll = (chain, orders) => coordinator.mutate(structuredClone({ type: 'EXECUTE_CLOSE_ALL', chain, orders }));
+      loaded.clock.now += 60_000;
+      const candidate = { chain: 'bsc', address: ADDRESS_A, priceUsd: 0, marketCapUsd: 0,
+        totalSupply, supplySource: totalSupply ? 'GMGN_EXACT' : '', source: 'GMGN_DETAIL',
+        observedAt: loaded.clock.now, priceObservedAt: 0 };
+      loaded.api.runtime.current = { token, quote: candidate };
+      // The preview can be factual, then expire while the confirmation is open.
+      loaded.api.runtime.current.quote = { ...entry, observedAt: loaded.clock.now,
+        priceObservedAt: loaded.clock.now, source: 'GMGN_DETAIL', syntheticTokenPrice: false };
+      const key = RealEngine.positionKey('bsc', ADDRESS_A);
+      await loaded.api.sell(50);
+      loaded.clock.now += 60_000;
+      loaded.api.runtime.current.quote = candidate;
+      await loaded.api.runtime.modal.action();
+      const remaining = loaded.api.runtime.state.positions[key];
+      assert.ok(Math.abs(remaining.quantity - bought.position.quantity / 2) < 1e-8, `${totalSupply}:${exitPath}: half quantity`);
+      assert.ok(Math.abs(loaded.api.runtime.state.accounts.bsc.cashBalanceNative - 9.95) < 1e-10);
+      const nextQuote = loaded.api.resolvePaperTradeQuote(token, candidate, { position: remaining });
+      assert.equal(nextQuote.priceUsd, entry.priceUsd, `${totalSupply}:${exitPath}: no invented price drift`);
+      if (exitPath === 'drawer') await loaded.api.sellPosition(remaining, 100);
+      else if (exitPath === 'close-all') await loaded.api.commitCloseAll();
+      else await loaded.api.sell(100);
+      if (exitPath !== 'close-all') {
+        loaded.clock.now += 60_000;
+        await loaded.api.runtime.modal.action();
+      }
+      const final = loaded.api.runtime.state;
+      assert.equal(Object.keys(final.positions).length, 0, `${totalSupply}:${exitPath}: closed`);
+      assert.ok(Math.abs(final.accounts.bsc.cashBalanceNative - 10) < 1e-10, `${totalSupply}:${exitPath}: exact proceeds`);
+      assert.doesNotThrow(() => RealState.normalizeState(structuredClone(final), settings, { strict: true }));
+      const sells = final.trades.filter(trade => trade.side === 'SELL');
+      assert.equal(sells.length, 2);
+      assert.ok(sells.every(trade => trade.syntheticTokenPrice === true), JSON.stringify({ totalSupply, exitPath, sells }));
+      assert.equal(RealMarkers.buildPayload({ current: { token, quote: nextQuote }, position: null,
+        trades: sells, labels: { entry: 'BUY', exit: 'SELL' } }).markers.length, 0);
+    }
+  }
+});
+
+test('no-chart zero-price observations can sell using explicitly provisional position history', () => {
+  const loaded = loadContent({ href: `https://gmgn.ai/bsc/token/${ADDRESS_A}` });
+  const token = { chain: 'bsc', address: ADDRESS_A, symbol: 'NEW' };
+  loaded.api.rememberNativePrice('bsc', 700, loaded.clock.now);
+  const settings = RealState.normalizeSettings({ slippageBps: 0, platformFeeBps: 0,
+    chains: { bsc: { networkFeeNative: 0 } } });
+  const initial = RealState.createInitialState({ now: 1, initialBalances: { bsc: 10 } });
+  initial.initialized = true;
+  const entryQuote = loaded.api.resolvePaperTradeQuote(token, {
+    chain: 'bsc', address: ADDRESS_A, priceUsd: 0.0000031, marketCapUsd: 0,
+    totalSupply: 1_000_000_000, supplySource: 'GMGN_EXACT', source: 'GMGN_DETAIL',
+    observedAt: loaded.clock.now, priceObservedAt: loaded.clock.now
+  });
+  const bought = RealEngine.executeBuy(initial, { token, quote: entryQuote, amountNative: 0.1 },
+    settings, loaded.clock.now);
+  loaded.api.runtime.state = bought.state;
+  loaded.clock.now += 60_000;
+  const candidate = { chain: 'bsc', address: ADDRESS_A, priceUsd: 0, marketCapUsd: 0,
+    totalSupply: 1_000_000_000, supplySource: 'GMGN_EXACT', source: 'GMGN_DETAIL',
+    observedAt: loaded.clock.now, priceObservedAt: 0 };
+  const quote = loaded.api.resolvePaperTradeQuote(token, candidate, { position: bought.position });
+  assert.equal(quote.valuationSource, 'POSITION_HISTORY');
+  const half = RealEngine.executeSell(bought.state, { token, quote, percent: 50 }, settings, loaded.clock.now);
+  assert.ok(Math.abs(half.position.quantity - bought.position.quantity / 2) < 1e-8);
+  assert.ok(Math.abs(half.trade.amountNative - 0.05) < 1e-10);
+  assert.equal(quote.syntheticTokenPrice, true, 'history must not masquerade as a fresh chart price');
+  assert.equal(quote.provisional, true);
+  loaded.api.runtime.state = half.state;
+  const nextQuote = loaded.api.resolvePaperTradeQuote(token, candidate, { position: half.position });
+  assert.equal(nextQuote.priceUsd, quote.priceUsd, 'separate sells must retain the same historical price');
+  const markers = RealMarkers.buildPayload({ current: { token, quote: nextQuote },
+    position: null, trades: [half.trade], labels: { entry: 'BUY', exit: 'SELL' } });
+  assert.equal(markers.markers.length, 0, 'historical fills must not fabricate chart coordinates');
+  const full = RealEngine.executeSell(half.state, { token, quote: nextQuote, percent: 100 }, settings, loaded.clock.now);
+  assert.equal(Object.keys(full.state.positions).length, 0);
+  assert.ok(Math.abs(full.state.accounts.bsc.cashBalanceNative - 10) < 1e-10);
+});
+
 test('position-only history cannot fabricate a GMGN ratio or trigger immediate calibration', () => {
   const key = `base:${ADDRESS_A}`;
   const loaded = loadContent({ href: `https://gmgn.ai/base/token/${ADDRESS_A}` });
@@ -6758,4 +6862,148 @@ test('trade confirmation displays market cap instead of a synthetic Pump token p
     ['marketCap', '$4000']
   ]);
   assert.equal(loaded.api.runtime.modal.rows.some(([key]) => key === 'observedPrice' || key === 'executionPrice'), false);
+});
+test('GMGN-03 logged-out Solana header renders one paper balance without wallet controls', () => {
+  const loaded = loadContent({ href: 'https://gmgn.ai/?chain=sol' });
+  const header = loaded.createDomNode();
+  header.textContent = 'Register Login';
+  loaded.documentSingles.set('header', header);
+  loaded.api.runtime.state.accounts.sol.cashBalanceNative = 8;
+
+  loaded.api.renderHeaderAccountSummary({});
+  loaded.api.renderHeaderAccountSummary({});
+
+  const summary = loaded.documentSingles.get('#tango-header-account-summary');
+  assert.ok(summary, 'logged-out header still exposes the paper account');
+  assert.equal(summary.parentElement, header);
+  assert.equal(header.children.filter((child) => child.id === summary.id).length, 1);
+  assert.match(summary.innerHTML, /8 SOL/);
+  summary.onclick({ isTrusted: true, preventDefault() {}, stopPropagation() {} });
+  assert.equal(loaded.api.runtime.calendarOpen, true);
+});
+
+test('GMGN-03 live Connect controls anchor the paper summary beside login before the whole header', () => {
+  const loaded = loadContent({ href: 'https://gmgn.ai/?chain=sol' });
+  const header = loaded.createDomNode();
+  const controls = loaded.createDomNode();
+  controls.textContent = 'Register Login';
+  loaded.documentSingles.set('header', header);
+  loaded.documentSingles.set('[data-sentry-component="Connect"]', controls);
+
+  loaded.api.renderHeaderAccountSummary({});
+
+  assert.equal(loaded.documentSingles.get('#tango-header-account-summary')?.parentElement, controls);
+});
+
+test('GMGN-04 invalid buy and sell drafts survive validation and later rerenders until cancel', async () => {
+  const loaded = loadContent();
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.presetEditing = 'all';
+  setPresetInputs(loaded, { buy: ['0', 2, 3, 4, 5, 6, 7, 8], sell: ['', 10, 15, 20, 25, 50, 75, 100] });
+
+  await loaded.api.savePresetEdits();
+  loaded.shadowLists.clear(); // Inputs are temporarily absent after a panel/route rerender.
+  loaded.api.render();
+
+  assert.equal(loaded.calls.patches.length, 0);
+  assert.equal(loaded.api.runtime.presetEditing, 'all');
+  assert.match(loaded.api.renderPanel(), /data-preset-side="buy" data-preset-index="0"[^>]*value="0"/);
+  assert.match(loaded.api.renderPanel(), /data-preset-side="sell" data-preset-index="0"[^>]*value=""/);
+  const cancel = eventElement({ dataset: { action: 'cancel-presets' } });
+  loaded.shellLists.set('[data-action]', [cancel]);
+  loaded.api.bindEvents();
+  await cancel.emit('click', { isTrusted: true, stopPropagation() {} });
+  assert.equal(loaded.api.runtime.presetEditing, null);
+  assert.match(loaded.api.renderPanel(), /data-buy="1"/);
+  assert.match(loaded.api.renderPanel(), /data-sell="100"/);
+});
+
+test('GMGN-04 save failure keeps editable drafts and a corrected retry persists them', async () => {
+  let fails = true;
+  const loaded = loadContent({ patchSettings: async (patch, settings) => {
+    if (fails) throw new Error('storage unavailable');
+    return RealState.normalizeSettings({ ...settings, ...patch });
+  } });
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.presetEditing = 'all';
+  setPresetInputs(loaded, { buy: ['0.75', 2, 3, 4, 5, 6, 7, 8] });
+
+  await loaded.api.savePresetEdits();
+
+  assert.equal(loaded.api.runtime.presetEditing, 'all');
+  assert.match(loaded.api.renderPanel(), /data-preset-side="buy" data-preset-index="0"[^>]*value="0.75"/);
+  fails = false;
+  setPresetInputs(loaded, { buy: ['0.8', 2, 3, 4, 5, 6, 7, 8] });
+  await loaded.api.savePresetEdits();
+  assert.equal(loaded.api.runtime.presetEditing, null);
+  assert.equal(loaded.api.runtime.settings.chains.eth.buyPresets[0], 0.8);
+});
+test('GMGN-04 pending save preserves newer typed buy and sell drafts before any rerender', async () => {
+  const write = deferred();
+  const loaded = loadContent({ patchSettings: async (patch) => {
+    await write.promise;
+    return mergeSettingsPatch(loaded.api.runtime.settings, patch);
+  } });
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.presetEditing = 'all';
+  setPresetInputs(loaded, { buy: ['0.75', 2, 3, 4, 5, 6, 7, 8] });
+  const saving = loaded.api.savePresetEdits();
+  setPresetInputs(loaded, { buy: ['0.85', 2, 3, 4, 5, 6, 7, 8], sell: ['7', 10, 15, 20, 25, 50, 75, 100] });
+
+  write.resolve();
+  await saving;
+
+  assert.equal(loaded.api.runtime.settings.chains.eth.buyPresets[0], 0.75);
+  assert.equal(loaded.api.runtime.presetEditing, 'all');
+  assert.match(loaded.api.renderPanel(), /data-preset-side="buy" data-preset-index="0"[^>]*value="0.85"/);
+  assert.match(loaded.api.renderPanel(), /data-preset-side="sell" data-preset-index="0"[^>]*value="7"/);
+});
+
+test('GMGN-04 pending save cannot close a new edit session even with identical draft values', async () => {
+  const write = deferred();
+  const loaded = loadContent({ patchSettings: async (patch) => {
+    await write.promise;
+    return mergeSettingsPatch(loaded.api.runtime.settings, patch);
+  } });
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.presetEditing = 'all';
+  setPresetInputs(loaded);
+  const saving = loaded.api.savePresetEdits();
+  const cancel = eventElement({ dataset: { action: 'cancel-presets' } });
+  const edit = eventElement({ dataset: { action: 'edit-presets' } });
+  loaded.shellLists.set('[data-action]', [cancel, edit]);
+  loaded.api.bindEvents();
+  const event = { isTrusted: true, stopPropagation() {} };
+  await cancel.emit('click', event);
+  await edit.emit('click', event);
+
+  write.resolve();
+  await saving;
+
+  assert.equal(loaded.api.runtime.presetEditing, 'all');
+  assert.match(loaded.api.renderPanel(), /data-preset-side="buy" data-preset-index="0"[^>]*value="1"/);
+});
+
+test('GMGN-04 pending previous-chain save preserves the new chain draft', async () => {
+  const write = deferred();
+  const loaded = loadContent({ patchSettings: async (patch) => {
+    await write.promise;
+    return mergeSettingsPatch(loaded.api.runtime.settings, patch);
+  } });
+  loaded.api.runtime.current = quoteContext();
+  loaded.api.runtime.presetEditing = 'all';
+  setPresetInputs(loaded, { buy: ['0.75', 2, 3, 4, 5, 6, 7, 8] });
+  const saving = loaded.api.savePresetEdits();
+  loaded.context.location.href = `https://gmgn.ai/base/token/${ADDRESS_B}`;
+  loaded.api.runtime.current = { ...quoteContext(ADDRESS_B), token: { chain: 'base', address: ADDRESS_B, symbol: 'BASE' } };
+  loaded.api.render();
+  setPresetInputs(loaded, { buy: ['0.85', 2, 3, 4, 5, 6, 7, 8] });
+
+  write.resolve();
+  await saving;
+
+  assert.equal(loaded.api.runtime.settings.chains.eth.buyPresets[0], 0.75);
+  assert.equal(loaded.api.runtime.settings.chains.base.buyPresets[0], 1);
+  assert.equal(loaded.api.runtime.presetEditing, 'all');
+  assert.match(loaded.api.renderPanel(), /data-preset-side="buy" data-preset-index="0"[^>]*value="0.85"/);
 });

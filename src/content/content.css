@@ -55,6 +55,23 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
   transform: none !important;
   width: 100% !important;
 }
+/* GMGN can use the slot itself as the native action host. Its raw text and
+   icon must not take flex space beside the paper button. Keep the original
+   nodes intact so disabling paper mode restores the current native control. */
+.BuyButton-continer.tango-native-buy-overridden.tango-quick-buy-action-host,
+.BuyButton-continer.tango-native-buy-overridden .tango-quick-buy-action-host {
+  font-size: 0 !important;
+  gap: 0 !important;
+  line-height: 0 !important;
+}
+.BuyButton-continer.tango-native-buy-overridden.tango-quick-buy-action-host > :not(.tango-list-quick-buy),
+.BuyButton-continer.tango-native-buy-overridden .tango-quick-buy-action-host > :not(.tango-list-quick-buy),
+.BuyButton-continer.tango-native-buy-overridden.tango-quick-buy-action-host::before,
+.BuyButton-continer.tango-native-buy-overridden.tango-quick-buy-action-host::after,
+.BuyButton-continer.tango-native-buy-overridden .tango-quick-buy-action-host::before,
+.BuyButton-continer.tango-native-buy-overridden .tango-quick-buy-action-host::after {
+  display: none !important;
+}
 .tango-list-quick-buy {
   --tango-quick-buy-accent: #7dd3fc;
   --tango-quick-buy-display-text: 14px;

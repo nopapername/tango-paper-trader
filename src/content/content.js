@@ -6,7 +6,7 @@
   const runtime = {
     state: null, settings: null, current: null, drawerOpen: false, modal: null,
     toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
-    presetEditing: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
+    presetEditing: null, presetDraft: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
     nativePrices: new Map(), nativePriceObservedAt: new Map(), nativePricePromises: new Map(),
     persistentNativePrices: new Map(), persistentNativePriceObservedAt: new Map(),
     quoteRequests: new Map(), quoteRetryAt: new Map(),
@@ -1331,7 +1331,7 @@
     const marketCapUsd = Number(local.marketCapUsd);
     const safeMarketCapUsd = Number.isFinite(marketCapUsd) && marketCapUsd > 0 ? marketCapUsd : 0;
     const observedPrice = Number(local.priceUsd);
-    const safeObservedPrice = Tango.GMGNQuotes.isFactualPriceObservation(local)
+    const safeObservedPrice = mergedHasFactualPrice && Tango.GMGNQuotes.isFactualPriceObservation(local)
       && Number.isFinite(observedPrice) && observedPrice > 0 ? observedPrice : 0;
     const legacyPumpSupply = chain.id === 'sol' && /pump$/i.test(normalizedAddress)
       && boundPosition?.marketCapProvenance === 'SOLANA_PUMP_TRENCH_V1'
@@ -1419,8 +1419,9 @@
       : 0;
     const derivedPrice = Number.isFinite(calculatedPrice) && calculatedPrice > 0 ? calculatedPrice : 0;
     const historicalValue = Number(boundPosition?.lastPriceUsd || boundPosition?.averageEntryPriceUsd || 0);
-    const historicalPrice = boundPosition?.syntheticTokenPrice !== true
-      && boundPosition?.provisionalTokenPrice !== true
+    const historicalPrice = ((boundPosition?.syntheticTokenPrice !== true
+      && boundPosition?.provisionalTokenPrice !== true)
+      || boundPosition?.quoteSource === 'TANGO_POSITION_HISTORY')
       && Number.isFinite(historicalValue) && historicalValue > 0 ? historicalValue : 0;
     const fallback = Tango.Supply.fallbackValuation({
       chain: chain.id, launchpad: resolvedLaunchpad, launchMode: resolvedLaunchMode
@@ -1438,10 +1439,16 @@
     const native = lastKnownNativeObservation(chain.id, local, boundPosition, persistenceOnly);
     const nativePriceUsd = Number(native.price || 1);
     const now = Date.now();
-    const syntheticTokenPrice = !(safeObservedPrice > 0 || derivedPrice > 0 || historicalPrice > 0);
+    // Position history is a paper execution fallback, not a fresh observation.
+    // In particular, a no-chart detail snapshot may carry priceObservedAt: 0.
+    // Do not validate that missing timestamp as the time of the historical price,
+    // or publish the historical fallback as a factual chart coordinate.
+    const syntheticTokenPrice = !(safeObservedPrice > 0 || derivedPrice > 0);
+    const usesPositionHistory = syntheticTokenPrice && historicalPrice > 0;
     const syntheticNativePrice = !(native.price > 0);
     const fallbackSupply = derivedPrice > 0 && supply?.confidence === 'fallback';
-    const provisionalSupply = (syntheticTokenPrice || (syntheticMarketCap && safeObservedPrice > 0))
+    const provisionalSupply = !usesPositionHistory
+      && (syntheticTokenPrice || (syntheticMarketCap && safeObservedPrice > 0))
       && !['GMGN_EXACT', 'GMGN_RATIO'].includes(String(supply?.source || ''))
       ? Number(executionSupply) : 0;
     const internalUnknownFallbackSupply = (syntheticTokenPrice || (syntheticMarketCap && safeObservedPrice > 0))
@@ -1469,7 +1476,7 @@
       provisionalSupply,
       priceUsd,
       marketCapUsd: executionMarketCap,
-      marketCapSource: syntheticMarketCap
+      marketCapSource: syntheticMarketCap || (historicalPrice > 0 && syntheticTokenPrice)
         ? 'TANGO_FALLBACK' : String(local.marketCapSource || local.source || ''),
       marketCapObservedAt: syntheticMarketCap ? 0 : marketCapObservationTime,
       marketCapObservationId: syntheticMarketCap ? '' : marketCapObservationId,
@@ -1480,11 +1487,14 @@
       nativePriceObservedAt: now,
       originalObservedAt: Number(local.observedAt || 0),
       nativeOriginalObservedAt: Number(native.observedAt || 0),
-      source: syntheticTokenPrice ? 'TANGO_FALLBACK' : String(local.source || 'GMGN_LAST_KNOWN'),
-      valuationMode: safeObservedPrice > 0 ? 'PRICE'
+      source: syntheticTokenPrice
+        ? historicalPrice > 0 ? 'TANGO_POSITION_HISTORY' : 'TANGO_FALLBACK'
+        : String(local.source || 'GMGN_LAST_KNOWN'),
+      valuationMode: safeObservedPrice > 0 || usesPositionHistory ? 'PRICE'
         : derivedPrice > 0 || internalUnknownFallbackSupply
         ? 'MARKET_CAP' : 'PRICE',
-      priceProvenance: syntheticTokenPrice ? 'FALLBACK_INITIAL_MARKET_CAP'
+      priceProvenance: usesPositionHistory ? 'POSITION_HISTORY'
+        : syntheticTokenPrice ? 'FALLBACK_INITIAL_MARKET_CAP'
         : derivedPrice > 0 ? 'MARKET_CAP_DERIVED' : 'OBSERVED_PRICE',
       totalSupply: Number(executionSupply),
       marketCapDivisor: Number(executionSupply),
@@ -1723,7 +1733,18 @@
 
   function resolveCommitPaperTradeQuote(order, position, routeCapture) {
     if (!routeCaptureIsCurrent(routeCapture)) return null;
-    const fallback = order?.quote || resolvePaperTradeQuote(order?.token, order?.quote, { position });
+    const preview = paperExecutableQuote(order?.token, order?.quote, position);
+    const baseContext = executionValidationBaseContext(order?.token);
+    const previewValid = Tango.Engine.validateQuote(
+      preview, Date.now(), undefined, baseContext,
+      executionValidationTrustContext(baseContext, order?.token)
+    ).ok;
+    // A sell confirmation can outlive a factual quote. Resolve the position's
+    // paper exit again instead of pinning an expired preview. Buys retain their
+    // existing stale-preview protection; provisional estimates keep their value.
+    const fallback = position && !previewValid
+      ? resolvePaperTradeQuote(order?.token, order?.quote, { position })
+      : order?.quote || resolvePaperTradeQuote(order?.token, order?.quote, { position });
     if (!routeMatchesDetailToken(order?.token)) return fallback;
     const snapshot = Tango.GMGN.readVerifiedCurrentTokenSnapshot?.(order.token);
     if (!routeCaptureIsCurrent(routeCapture)) return null;
@@ -2140,7 +2161,11 @@
 
   function renderHeaderAccountSummary(summary) {
     const anchor = document.querySelector('[data-testid="wallet-connected"]')
-      || document.querySelector('[data-testid="header-actions"]');
+      || document.querySelector('[data-testid="header-actions"]')
+      || document.querySelector('[data-sentry-component="Connect"]')
+      || document.querySelector('header')
+      || document.querySelector('[role="banner"]')
+      || document.querySelector('[data-sentry-component="Header"]');
     const chain = activeChain();
     const account = activeAccount();
     if (!anchor || !summary || !chain || !account) {
@@ -2182,15 +2207,31 @@
     node.title = t('pnlCalendar');
   }
 
+  function capturePresetDraft() {
+    if (runtime.presetEditing !== 'all') return;
+    const chain = activeChain()?.id;
+    if (runtime.presetDraft && runtime.presetDraft.chain !== chain) {
+      runtime.presetDraft = { chain };
+      return;
+    }
+    if (!runtime.presetDraft) runtime.presetDraft = { chain };
+    for (const side of ['buy', 'sell']) {
+      const inputs = [...shadow.querySelectorAll(`[data-preset-side="${side}"]`)];
+      if (inputs.length) runtime.presetDraft[side] = inputs.map((input) => String(input.value));
+    }
+  }
+
   function renderPresetGrid(side, values) {
     if (runtime.presetEditing === 'all') {
-      return values.map((value, index) => `<input class="tango-preset-editor ${side}" data-preset-side="${side}" data-preset-index="${index}" type="number" min="0.0001" ${side === 'sell' ? 'max="100"' : ''} step="any" value="${esc(value)}">`).join('');
+      const draft = runtime.presetDraft?.chain === activeChain()?.id ? runtime.presetDraft[side] : null;
+      return (draft || values).map((value, index) => `<input class="tango-preset-editor ${side}" data-preset-side="${side}" data-preset-index="${index}" type="number" min="0.0001" ${side === 'sell' ? 'max="100"' : ''} step="any" value="${esc(value)}">`).join('');
     }
     const attribute = side === 'buy' ? 'data-buy' : 'data-sell';
     return values.map((value) => `<button class="tango-button tango-preset ${side}-preset" ${attribute}="${value}">${value}${side === 'sell' ? '%' : ''}</button>`).join('');
   }
 
   async function savePresetEdits() {
+    capturePresetDraft();
     const readValues = (side) => [...shadow.querySelectorAll(`[data-preset-side="${side}"]`)].map((input) => Number(input.value));
     const buyValues = readValues('buy');
     const sellValues = readValues('sell');
@@ -2199,12 +2240,19 @@
     if (!validBuy || !validSell) return showToast(t('invalidPresets'), 'error');
     const chain = activeChain();
     if (!chain || !chainSettings()) return showToast(t('unsupportedChain'), 'error');
-    runtime.presetEditing = null;
+    const savingDraft = runtime.presetDraft;
+    const savingValues = JSON.stringify(savingDraft);
     try {
       runtime.settings = await Tango.Store.patchSettings({
         chains: { [chain.id]: { buyPresets: buyValues } },
         sellPresets: sellValues
       });
+      capturePresetDraft();
+      if (runtime.presetEditing === 'all' && activeChain()?.id === chain.id
+        && runtime.presetDraft === savingDraft && JSON.stringify(runtime.presetDraft) === savingValues) {
+        runtime.presetEditing = null;
+        runtime.presetDraft = null;
+      }
       showToast(t('presetsSaved'), 'success');
     } catch {
       showToast(t('settingsSaveFailed'), 'error');
@@ -2239,7 +2287,7 @@
     return `<div class="tango-panel tango-card ${runtime.settings.panelCollapsed ? 'collapsed' : ''}" style="${panelStyle()}">
       <div class="tango-header" data-drag-handle>
         <div class="tango-token-strip"><span class="tango-paper-logo">T</span><strong>TANGO</strong><span class="tango-paper-badge">${t('paper')}</span><span>${esc(symbol)}</span></div>
-        <div class="tango-header-actions"><button class="tango-icon-button tango-edit-all" data-action="${runtime.presetEditing === 'all' ? 'save-presets' : 'edit-presets'}" title="${t(runtime.presetEditing === 'all' ? 'savePresets' : 'editPresets')}">${runtime.presetEditing === 'all' ? '✓' : '✎'}</button><button class="tango-icon-button" data-action="toggle-sound" title="${t('sound')}">${runtime.settings.soundEnabled ? '🔊' : '🔇'}</button><button class="tango-icon-button" data-action="dashboard">⚙</button><button class="tango-icon-button" data-action="collapse-panel">${runtime.settings.panelCollapsed ? '＋' : '×'}</button></div>
+        <div class="tango-header-actions"><button class="tango-icon-button tango-edit-all" data-action="${runtime.presetEditing === 'all' ? 'save-presets' : 'edit-presets'}" title="${t(runtime.presetEditing === 'all' ? 'savePresets' : 'editPresets')}">${runtime.presetEditing === 'all' ? '✓' : '✎'}</button>${runtime.presetEditing === 'all' ? `<button class="tango-icon-button" data-action="cancel-presets" title="${t('cancel')}">↶</button>` : ''}<button class="tango-icon-button" data-action="toggle-sound" title="${t('sound')}">${runtime.settings.soundEnabled ? '🔊' : '🔇'}</button><button class="tango-icon-button" data-action="dashboard">⚙</button><button class="tango-icon-button" data-action="collapse-panel">${runtime.settings.panelCollapsed ? '＋' : '×'}</button></div>
       </div>
       ${runtime.settings.panelCollapsed ? '' : `<div class="tango-trade-body">
         <section class="tango-trade-block">
@@ -2515,6 +2563,7 @@
   }
 
   function render() {
+    capturePresetDraft();
     const chain = activeChain();
     if (!chain) {
       clearChainContext();
@@ -2596,8 +2645,9 @@
       if (action === 'close-calendar') { runtime.calendarOpen = false; render(); }
       if (action === 'calendar-prev') { runtime.calendarMonth = new Date(runtime.calendarMonth.getFullYear(), runtime.calendarMonth.getMonth() - 1, 1); render(); }
       if (action === 'calendar-next') { runtime.calendarMonth = new Date(runtime.calendarMonth.getFullYear(), runtime.calendarMonth.getMonth() + 1, 1); render(); }
-      if (action === 'edit-presets') { runtime.presetEditing = 'all'; render(); }
+      if (action === 'edit-presets') { runtime.presetDraft = null; runtime.presetEditing = 'all'; render(); }
       if (action === 'save-presets') await savePresetEdits();
+      if (action === 'cancel-presets') { runtime.presetEditing = null; runtime.presetDraft = null; render(); }
       if (action === 'cancel-modal') { runtime.modal = null; render(); }
       if (action === 'confirm-modal') {
         if (paperExecutionDisabled()) return;
@@ -2626,6 +2676,12 @@
       else trustedSessionSuppressInputs.delete(sessionSuppressInput);
     });
     shell.querySelectorAll('.tango-preset-editor').forEach((input) => input.addEventListener('keydown', async (event) => {
+      if (event.key === 'Escape' && requireTrustedUserEvent(event)) {
+        runtime.presetEditing = null;
+        runtime.presetDraft = null;
+        render();
+        return;
+      }
       if (event.key !== 'Enter' || !requireTrustedUserEvent(event)) return;
       await savePresetEdits();
     }));
