@@ -165,8 +165,8 @@ function nativeQuickBuyGuardErrors(contentScripts) {
 
 function releaseContractErrors({ manifest, constantsSource, backgroundSource, adapterSource } = {}) {
   const errors = [];
-  if (manifest?.commands?.['toggle-paper-trading']?.suggested_key?.default !== 'Alt+Shift+P') {
-    errors.push('Master shortcut must be Alt+Shift+P');
+  if (manifest?.commands?.['toggle-paper-trading-master']?.suggested_key?.default !== 'Alt+Shift+Y') {
+    errors.push('Master shortcut must be Alt+Shift+Y');
   }
   if (!String(constantsSource || '').includes(
     "Tango.GMGN_ENTRY_URL = 'https://gmgn.ai/r/X9cuc5jd?chain=bsc'"

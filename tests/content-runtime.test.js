@@ -58,6 +58,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+
 function defaultState() {
   return {
     initialized: true,
@@ -7033,4 +7034,20 @@ test('GMGN-04 pending previous-chain save preserves the new chain draft', async 
   assert.equal(loaded.api.runtime.settings.chains.base.buyPresets[0], 1);
   assert.equal(loaded.api.runtime.presetEditing, 'all');
   assert.match(loaded.api.renderPanel(), /data-preset-side="buy" data-preset-index="0"[^>]*value="0.85"/);
+});
+
+test('trusted page shortcut works while disabled and rejects synthetic, repeat, and modified keys', async () => {
+  const loaded = loadContent();
+  loaded.api.runtime.settings.enabled = false;
+  const listener = loaded.windowListeners.get('keydown');
+  assert.equal(typeof listener, 'function');
+  let prevented = 0;
+  const base = { isTrusted: true, altKey: true, shiftKey: true, code: 'KeyY', key: 'Y', preventDefault() { prevented += 1; } };
+  for (const patch of [{ isTrusted: false }, { repeat: true }, { isComposing: true }, { ctrlKey: true }, { metaKey: true }, { altKey: false }, { shiftKey: false }, { code: 'KeyQ', key: 'Q' }, { code: 'KeyP', key: 'P' }]) {
+    await listener({ ...base, ...patch });
+  }
+  assert.equal(loaded.messages.filter(m => m.type === 'TANGO_TOGGLE_SHORTCUT').length, 0);
+  await listener(base);
+  assert.equal(prevented, 1);
+  assert.equal(loaded.messages.filter(m => m.type === 'TANGO_TOGGLE_SHORTCUT').length, 1);
 });

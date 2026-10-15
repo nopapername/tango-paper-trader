@@ -25,6 +25,28 @@ const positiveFinite = (value) => Number.isFinite(Number(value)) && Number(value
 const nonnegativeFiniteOrZero = (value) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
 let onboardingOpened = false;
 let commandTail = Promise.resolve();
+let shortcutNotifications = [];
+
+function toggleFromShortcut(source) {
+  const now = Date.now();
+  // A browser may deliver both its extension command and the page keydown.
+  // Pair opposite-source notifications without suppressing repeated presses
+  // from the same source (including browsers that deliver only one source).
+  shortcutNotifications = shortcutNotifications.filter(entry => now - entry.at >= 0 && now - entry.at <= 250);
+  const duplicate = shortcutNotifications.findIndex(entry => entry.source !== source);
+  if (duplicate >= 0) {
+    shortcutNotifications.splice(duplicate, 1);
+    return commandTail;
+  }
+  shortcutNotifications.push({ source, at: now });
+  shortcutNotifications = shortcutNotifications.slice(-32);
+  const toggle = commandTail.then(async () => {
+    const snapshot = await stateCoordinator.getAll();
+    await stateCoordinator.mutate({ type: 'PATCH_SETTINGS', patch: { enabled: !snapshot.settings.enabled } });
+  });
+  commandTail = toggle.catch(error => console.error('[Tango Paper Trader] shortcut toggle failed', error));
+  return toggle;
+}
 
 function coordinatorFailureResponse(error) {
   const response = {
@@ -54,21 +76,23 @@ chrome.runtime.onInstalled.addListener(async ({ reason } = {}) => {
 });
 
 chrome.commands.onCommand.addListener((command) => {
-  if (command !== 'toggle-paper-trading') return Promise.resolve();
-  const toggle = commandTail.then(async () => {
-    const snapshot = await stateCoordinator.getAll();
-    await stateCoordinator.mutate({
-      type: 'PATCH_SETTINGS',
-      patch: { enabled: !snapshot.settings.enabled }
-    });
-  });
-  commandTail = toggle.catch((error) => {
-    console.error('[Tango Paper Trader] shortcut toggle failed', error);
-  });
-  return toggle;
+  if (command !== 'toggle-paper-trading-master') return Promise.resolve();
+  return toggleFromShortcut('command');
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'TANGO_TOGGLE_SHORTCUT') {
+    let origin;
+    try { origin = new URL(sender?.url || sender?.tab?.url).origin; } catch {}
+    if (origin !== 'https://gmgn.ai' || !sender?.tab) {
+      sendResponse({ ok: false, error: 'Invalid shortcut sender' });
+      return false;
+    }
+    toggleFromShortcut('page')
+      .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse(coordinatorFailureResponse(error)));
+    return true;
+  }
   if (message?.type === 'TANGO_STORE_GET_ALL') {
     stateCoordinator.getAll()
       .then((result) => sendResponse({ ok: true, result }))

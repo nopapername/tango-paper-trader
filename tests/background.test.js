@@ -132,9 +132,9 @@ function loadBackground(
   return { context, api: context.module.exports, listeners, installListeners, commandListeners, clock, fetchCalls, openedTabs, storageValues };
 }
 
-function send(loaded, message) {
+function send(loaded, message, sender = null) {
   return new Promise((resolve) => {
-    const handled = loaded.listeners[0](message, null, resolve);
+    const handled = loaded.listeners[0](message, sender, resolve);
     if (!handled) resolve({ ok: false, error: 'unhandled' });
   });
 }
@@ -285,9 +285,9 @@ test('generic GMGN entry opens only the shared referral URL', async () => {
   assert.deepEqual(loaded.openedTabs, [loaded.context.Tango.GMGN_ENTRY_URL]);
 });
 
-test('Alt+Shift+P command toggles only the enabled setting in serialized order', async () => {
+test('Alt+Shift+Y command toggles only the enabled setting in serialized order', async () => {
   const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../manifest.json'), 'utf8'));
-  assert.equal(manifest.commands?.['toggle-paper-trading']?.suggested_key?.default, 'Alt+Shift+P');
+  assert.equal(manifest.commands?.['toggle-paper-trading-master']?.suggested_key?.default, 'Alt+Shift+Y');
   const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
   const settingsKey = loaded.context.Tango.SETTINGS_KEY;
   loaded.storageValues[settingsKey] = loaded.context.Tango.State.normalizeSettings({ enabled: true, selectedChain: 'base' });
@@ -296,13 +296,40 @@ test('Alt+Shift+P command toggles only the enabled setting in serialized order',
   await loaded.commandListeners[0]('unknown-command');
   assert.equal(loaded.storageValues[settingsKey].enabled, true);
   await Promise.all([
-    loaded.commandListeners[0]('toggle-paper-trading'),
-    loaded.commandListeners[0]('toggle-paper-trading')
+    loaded.commandListeners[0]('toggle-paper-trading-master'),
+    loaded.commandListeners[0]('toggle-paper-trading-master')
   ]);
   assert.equal(loaded.storageValues[settingsKey].enabled, true);
   assert.equal(loaded.storageValues[settingsKey].selectedChain, 'base');
-  await loaded.commandListeners[0]('toggle-paper-trading');
+  await loaded.commandListeners[0]('toggle-paper-trading-master');
   assert.equal(loaded.storageValues[settingsKey].enabled, false);
+});
+
+test('page shortcut toggles without native command delivery and pairs duplicate command notifications', async () => {
+  for (const order of ['page-first', 'command-first']) {
+    const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+    const key = loaded.context.Tango.SETTINGS_KEY;
+    loaded.storageValues[key] = loaded.context.Tango.State.normalizeSettings({ enabled: true });
+    const page = () => send(loaded, { type: 'TANGO_TOGGLE_SHORTCUT' }, { tab: { url: 'https://gmgn.ai/?chain=bsc' } });
+    const command = () => loaded.commandListeners[0]('toggle-paper-trading-master');
+    await page();
+    assert.equal(loaded.storageValues[key].enabled, false);
+    loaded.clock.now += 1000;
+    await page();
+    assert.equal(loaded.storageValues[key].enabled, true, 'page fallback can turn the disabled extension on');
+    loaded.clock.now += 1000;
+    await Promise.all(order === 'page-first' ? [page(), command()] : [command(), page()]);
+    assert.equal(loaded.storageValues[key].enabled, false, 'two notifications for one press toggle only once');
+    await Promise.all(order === 'page-first' ? [page(), command(), page(), command()] : [command(), page(), command(), page()]);
+    assert.equal(loaded.storageValues[key].enabled, false, 'two rapid subsequent physical presses still toggle twice');
+  }
+});
+
+test('page shortcut messages outside GMGN cannot toggle settings', async () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const response = await send(loaded, { type: 'TANGO_TOGGLE_SHORTCUT' }, { tab: { url: 'https://example.com/' } });
+  assert.equal(response.ok, false);
+  assert.equal(Object.keys(loaded.storageValues).length, 0);
 });
 
 test('plain Dashboard requests open a tab even when the options-page API silently does nothing', async () => {

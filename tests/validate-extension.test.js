@@ -39,17 +39,17 @@ test('extension host permissions remain limited to supported market data hosts',
 test('release contracts require the exact master shortcut and shared GMGN referral entry', () => {
   assert.equal(typeof validation.releaseContractErrors, 'function');
   const valid = validation.releaseContractErrors({
-    manifest: { commands: { 'toggle-paper-trading': { suggested_key: { default: 'Alt+Shift+P' } } } },
+    manifest: { commands: { 'toggle-paper-trading-master': { suggested_key: { default: 'Alt+Shift+Y' } } } },
     constantsSource: "Tango.GMGN_ENTRY_URL = 'https://gmgn.ai/r/X9cuc5jd?chain=bsc';",
     backgroundSource: "if (message.type === 'TANGO_OPEN_GMGN') chrome.tabs.create({ url: globalThis.Tango.GMGN_ENTRY_URL });",
     adapterSource: "removeAttribute(name); replacement.type = 'button'; event.stopImmediatePropagation();"
   });
   assert.deepEqual(valid, []);
   assert.match(validation.releaseContractErrors({
-    manifest: { commands: { 'toggle-paper-trading': { suggested_key: { default: 'Alt+Shift+R' } } } },
+    manifest: { commands: { 'toggle-paper-trading-master': { suggested_key: { default: 'Alt+Shift+R' } } } },
     constantsSource: "Tango.GMGN_ENTRY_URL = 'https://gmgn.ai/?chain=bsc';",
     backgroundSource: '', adapterSource: ''
-  }).join('\n'), /Alt\+Shift\+P|referral|TANGO_OPEN_GMGN|inert/i);
+  }).join('\n'), /Alt\+Shift\+Y|referral|TANGO_OPEN_GMGN|inert/i);
 });
 
 test('paper-only static validator rejects representative wallet, RPC, approval, swap, and broadcast paths', () => {

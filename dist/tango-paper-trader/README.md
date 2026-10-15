@@ -10,6 +10,7 @@ Tango Paper Trader is a bilingual, local-first Chrome extension for paper tradin
 - All six independent chain accounts receive that chosen numeric amount in their own native asset; the amount is shared numerically, not converted into a shared USD balance
 - First install opens the onboarding dashboard once; extension updates do not reopen onboarding
 - Master enable/disable switch that removes all GMGN overlays and quick-buy replacements
+- Alt+Shift+Y toggles paper trading; GMGN pages include a trusted-key fallback for embedded browsers. The previous Alt+Shift+P binding is retired.
 - Trading and chain-scoped portfolio operations are current-chain-only: balance, PnL, positions, history, calendar, CSV export, and close actions stay on the selected chain
 - Only the active chain supplies the balance, positions, history, and header asset; chain changes do not merge portfolios or show another chain's native asset as the active balance
 - JSON import and export form a full six-chain backup

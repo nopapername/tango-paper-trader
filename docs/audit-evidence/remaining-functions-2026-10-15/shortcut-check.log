@@ -1,0 +1,1549 @@
+TAP version 13
+# Subtest: service worker returns typed storageFull byte details from its coordinator
+ok 1 - service worker returns typed storageFull byte details from its coordinator
+  ---
+  duration_ms: 7.4636
+  type: 'test'
+  ...
+# Subtest: service worker emits typed storage details only for valid matching coordinator failures
+ok 2 - service worker emits typed storage details only for valid matching coordinator failures
+  ---
+  duration_ms: 0.7934
+  type: 'test'
+  ...
+# Subtest: first install opens onboarding exactly once while updates never open it
+ok 3 - first install opens onboarding exactly once while updates never open it
+  ---
+  duration_ms: 1.0757
+  type: 'test'
+  ...
+# Subtest: packaged MV3 worker executes its real worker-relative import sequence before registering
+ok 4 - packaged MV3 worker executes its real worker-relative import sequence before registering
+  ---
+  duration_ms: 1.8118
+  type: 'test'
+  ...
+# Subtest: token tab messages accept every registered GMGN chain and reject non-token routes
+ok 5 - token tab messages accept every registered GMGN chain and reject non-token routes
+  ---
+  duration_ms: 1.2894
+  type: 'test'
+  ...
+# Subtest: generic GMGN entry opens only the shared referral URL
+ok 6 - generic GMGN entry opens only the shared referral URL
+  ---
+  duration_ms: 0.7542
+  type: 'test'
+  ...
+# Subtest: Alt+Shift+Y command toggles only the enabled setting in serialized order
+ok 7 - Alt+Shift+Y command toggles only the enabled setting in serialized order
+  ---
+  duration_ms: 2.2494
+  type: 'test'
+  ...
+# Subtest: page shortcut toggles without native command delivery and pairs duplicate command notifications
+ok 8 - page shortcut toggles without native command delivery and pairs duplicate command notifications
+  ---
+  duration_ms: 4.0495
+  type: 'test'
+  ...
+# Subtest: page shortcut messages outside GMGN cannot toggle settings
+ok 9 - page shortcut messages outside GMGN cannot toggle settings
+  ---
+  duration_ms: 0.8455
+  type: 'test'
+  ...
+# Subtest: plain Dashboard requests open a tab even when the options-page API silently does nothing
+ok 10 - plain Dashboard requests open a tab even when the options-page API silently does nothing
+  ---
+  duration_ms: 0.8409
+  type: 'test'
+  ...
+# Subtest: Dashboard opening reports both asynchronous rejections and synchronous API failures
+ok 11 - Dashboard opening reports both asynchronous rejections and synchronous API failures
+  ---
+  duration_ms: 1.5263
+  type: 'test'
+  ...
+# Subtest: Dashboard deep links validate and carry the requested tab and current chain
+ok 12 - Dashboard deep links validate and carry the requested tab and current chain
+  ---
+  duration_ms: 1.0292
+  type: 'test'
+  ...
+# Subtest: wrong-byte Solana identities cannot open routes or start quote requests
+ok 13 - wrong-byte Solana identities cannot open routes or start quote requests
+  ---
+  duration_ms: 1.0033
+  type: 'test'
+  ...
+# Subtest: the service worker owns one serialized mutation coordinator for every extension context
+ok 14 - the service worker owns one serialized mutation coordinator for every extension context
+  ---
+  duration_ms: 5.0494
+  type: 'test'
+  ...
+# Subtest: ETH native requests coalesce across Ethereum and Base
+ok 15 - ETH native requests coalesce across Ethereum and Base
+  ---
+  duration_ms: 1.2955
+  type: 'test'
+  ...
+# Subtest: shared ETH and Base native cache reuses through quote freshness and refreshes one millisecond later
+ok 16 - shared ETH and Base native cache reuses through quote freshness and refreshes one millisecond later
+  ---
+  duration_ms: 0.8088
+  type: 'test'
+  ...
+# Subtest: the same EVM address uses independent DEX requests per chain
+ok 17 - the same EVM address uses independent DEX requests per chain
+  ---
+  duration_ms: 0.8323
+  type: 'test'
+  ...
+# Subtest: token quote requests validate addresses before provider access and normalize mixed-case EVM identity
+ok 18 - token quote requests validate addresses before provider access and normalize mixed-case EVM identity
+  ---
+  duration_ms: 0.8219
+  type: 'test'
+  ...
+# Subtest: non-finite provider prices never enter native or token caches
+ok 19 - non-finite provider prices never enter native or token caches
+  ---
+  duration_ms: 1.5473
+  type: 'test'
+  ...
+# Subtest: a chain without verified DEX mapping fails closed without fetch
+ok 20 - a chain without verified DEX mapping fails closed without fetch
+  ---
+  duration_ms: 0.5788
+  type: 'test'
+  ...
+# Subtest: concurrent SOL requests share one fetch through the 15 second execution freshness boundary
+ok 21 - concurrent SOL requests share one fetch through the 15 second execution freshness boundary
+  ---
+  duration_ms: 1.3822
+  type: 'test'
+  ...
+# Subtest: a fully rejected SOL request clears its in-flight slot and can retry
+ok 22 - a fully rejected SOL request clears its in-flight slot and can retry
+  ---
+  duration_ms: 1.3004
+  type: 'test'
+  ...
+# Subtest: concurrent token requests share one fetch and choose the most liquid matching pair
+ok 23 - concurrent token requests share one fetch and choose the most liquid matching pair
+  ---
+  duration_ms: 0.7878
+  type: 'test'
+  ...
+# Subtest: different token addresses remain independent
+ok 24 - different token addresses remain independent
+  ---
+  duration_ms: 0.7692
+  type: 'test'
+  ...
+# Subtest: a failed token request clears its in-flight entry and can retry
+ok 25 - a failed token request clears its in-flight entry and can retry
+  ---
+  duration_ms: 0.7569
+  type: 'test'
+  ...
+# Subtest: CoinGecko failure still falls back to Wrapped SOL
+ok 26 - CoinGecko failure still falls back to Wrapped SOL
+  ---
+  duration_ms: 0.7422
+  type: 'test'
+  ...
+# Subtest: cached Wrapped SOL fallback preserves the DEX quote observation timestamp
+ok 27 - cached Wrapped SOL fallback preserves the DEX quote observation timestamp
+  ---
+  duration_ms: 1.3954
+  type: 'test'
+  ...
+# Subtest: expired token cache entries are removed while fresh entries remain
+ok 28 - expired token cache entries are removed while fresh entries remain
+  ---
+  duration_ms: 0.7319
+  type: 'test'
+  ...
+# Subtest: native fetch timeout aborts coalesced requests and allows a fresh retry
+ok 29 - native fetch timeout aborts coalesced requests and allows a fresh retry
+  ---
+  duration_ms: 0.9345
+  type: 'test'
+  ...
+# Subtest: stalled response JSON times out without caching a late quote or locking retry
+ok 30 - stalled response JSON times out without caching a late quote or locking retry
+  ---
+  duration_ms: 9.3426
+  type: 'test'
+  ...
+# Subtest: SOL fallback has a bounded timeout and releases both pending provider requests
+ok 31 - SOL fallback has a bounded timeout and releases both pending provider requests
+  ---
+  duration_ms: 1.827
+  type: 'test'
+  ...
+# Subtest: Engine fallback without Supply accepts only contextually valid explicit trusted sources
+ok 32 - Engine fallback without Supply accepts only contextually valid explicit trusted sources
+  ---
+  duration_ms: 6.2279
+  type: 'test'
+  ...
+# Subtest: Engine fallback without Supply rejects unknown direct supply provenance
+ok 33 - Engine fallback without Supply rejects unknown direct supply provenance
+  ---
+  duration_ms: 0.7057
+  type: 'test'
+  ...
+# Subtest: throwing contentDocument still receives its own sanitized MCAP frame context
+ok 34 - throwing contentDocument still receives its own sanitized MCAP frame context
+  ---
+  duration_ms: 4.4875
+  type: 'test'
+  ...
+# Subtest: an exact USD symbol produces a PRICE frame hint
+ok 35 - an exact USD symbol produces a PRICE frame hint
+  ---
+  duration_ms: 1.277
+  type: 'test'
+  ...
+# Subtest: invalid frame metadata yields UNKNOWN without changing canonical markers
+    # Subtest: duplicate symbol
+    ok 1 - duplicate symbol
+      ---
+      duration_ms: 1.1928
+      type: 'test'
+      ...
+    # Subtest: wrong token
+    ok 2 - wrong token
+      ---
+      duration_ms: 0.6908
+      type: 'test'
+      ...
+    # Subtest: ambiguous suffix
+    ok 3 - ambiguous suffix
+      ---
+      duration_ms: 0.6996
+      type: 'test'
+      ...
+    # Subtest: malformed percent encoding
+    ok 4 - malformed percent encoding
+      ---
+      duration_ms: 0.7506
+      type: 'test'
+      ...
+    # Subtest: oversized metadata
+    ok 5 - oversized metadata
+      ---
+      duration_ms: 0.7312
+      type: 'test'
+      ...
+    # Subtest: detached frame
+    ok 6 - detached frame
+      ---
+      duration_ms: 1.1102
+      type: 'test'
+      ...
+    1..6
+ok 36 - invalid frame metadata yields UNKNOWN without changing canonical markers
+  ---
+  duration_ms: 6.1191
+  type: 'test'
+  ...
+# Subtest: same frame re-reads an axis change without mutating or rebuilding canonical markers
+ok 37 - same frame re-reads an axis change without mutating or rebuilding canonical markers
+  ---
+  duration_ms: 0.953
+  type: 'test'
+  ...
+# Subtest: reused frame metadata for the previous route is UNKNOWN in the new route generation
+ok 38 - reused frame metadata for the previous route is UNKNOWN in the new route generation
+  ---
+  duration_ms: 2.6974
+  type: 'test'
+  ...
+# Subtest: reload advances frame generation and correlated READY replays only the latest token payload
+ok 39 - reload advances frame generation and correlated READY replays only the latest token payload
+  ---
+  duration_ms: 3.2365
+  type: 'test'
+  ...
+# Subtest: a directly TradingView-titled chart frame receives current-token markers
+ok 40 - a directly TradingView-titled chart frame receives current-token markers
+  ---
+  duration_ms: 1.0853
+  type: 'test'
+  ...
+# Subtest: current-route frame registration and loads probe for READY without marker-driven repeats
+ok 41 - current-route frame registration and loads probe for READY without marker-driven repeats
+  ---
+  duration_ms: 2.3258
+  type: 'test'
+  ...
+# Subtest: retained A stays cleaned while independently verified B receives B markers
+ok 42 - retained A stays cleaned while independently verified B receives B markers
+  ---
+  duration_ms: 1.8597
+  type: 'test'
+  ...
+# Subtest: delayed READY and load from retained A cannot replay B marker state
+ok 43 - delayed READY and load from retained A cannot replay B marker state
+  ---
+  duration_ms: 1.1666
+  type: 'test'
+  ...
+# Subtest: current B frame rejects a token-bearing marker payload for A
+ok 44 - current B frame rejects a token-bearing marker payload for A
+  ---
+  duration_ms: 0.7404
+  type: 'test'
+  ...
+# Subtest: an A-era chart frame cannot bind a later route after loading
+ok 45 - an A-era chart frame cannot bind a later route after loading
+  ---
+  duration_ms: 1.0929
+  type: 'test'
+  ...
+# Subtest: a chart iframe reused for a new route rebinds only after correlated current-token identity
+ok 46 - a chart iframe reused for a new route rebinds only after correlated current-token identity
+  ---
+  duration_ms: 2.2833
+  type: 'test'
+  ...
+# Subtest: a reused chart iframe rebinds across an SPA route without a load event
+ok 47 - a reused chart iframe rebinds across an SPA route without a load event
+  ---
+  duration_ms: 1.4835
+  type: 'test'
+  ...
+# Subtest: a registered chart frame safely rebinds after disappearing during route advance
+ok 48 - a registered chart frame safely rebinds after disappearing during route advance
+  ---
+  duration_ms: 1.4125
+  type: 'test'
+  ...
+# Subtest: a first-seen transition B frame stays quarantined until correlated B identity promotes it
+ok 49 - a first-seen transition B frame stays quarantined until correlated B identity promotes it
+  ---
+  duration_ms: 1.0833
+  type: 'test'
+  ...
+# Subtest: mutation reconciliation quarantines a late A frame first observed after the parent URL is B
+ok 50 - mutation reconciliation quarantines a late A frame first observed after the parent URL is B
+  ---
+  duration_ms: 2.222
+  type: 'test'
+  ...
+# Subtest: marker tick registration cannot let a late A frame be sealed to B on route advance
+ok 51 - marker tick registration cannot let a late A frame be sealed to B on route advance
+  ---
+  duration_ms: 1.5619
+  type: 'test'
+  ...
+# Subtest: adapter rejection keeps a child-identified transition frame quarantined
+ok 52 - adapter rejection keeps a child-identified transition frame quarantined
+  ---
+  duration_ms: 1.0986
+  type: 'test'
+  ...
+# Subtest: startup registers the initial chart frame before its first asynchronous pause
+ok 53 - startup registers the initial chart frame before its first asynchronous pause
+  ---
+  duration_ms: 1.0343
+  type: 'test'
+  ...
+# Subtest: startup READY probe recovers trust when the child document-start READY was missed
+ok 54 - startup READY probe recovers trust when the child document-start READY was missed
+  ---
+  duration_ms: 1.1974
+  type: 'test'
+  ...
+# Subtest: same-route chart additions register before a later route can adopt them
+ok 55 - same-route chart additions register before a later route can adopt them
+  ---
+  duration_ms: 1.6102
+  type: 'test'
+  ...
+# Subtest: a current-route chart READY before load survives that load only once
+ok 56 - a current-route chart READY before load survives that load only once
+  ---
+  duration_ms: 0.8115
+  type: 'test'
+  ...
+# Subtest: trench quick buy publishes its entry marker when detail-frame READY arrives before route discovery
+ok 57 - trench quick buy publishes its entry marker when detail-frame READY arrives before route discovery
+  ---
+  duration_ms: 3.9715
+  type: 'test'
+  ...
+# Subtest: a quick buy resolving after detail navigation replaces the early empty chart replay with its entry marker
+ok 58 - a quick buy resolving after detail navigation replaces the early empty chart replay with its entry marker
+  ---
+  duration_ms: 2.347
+  type: 'test'
+  ...
+# Subtest: detail buy and sell publish committed markers immediately
+ok 59 - detail buy and sell publish committed markers immediately
+  ---
+  duration_ms: 3.3487
+  type: 'test'
+  ...
+# Subtest: chart READY replays the latest payload only to the ready frame
+ok 60 - chart READY replays the latest payload only to the ready frame
+  ---
+  duration_ms: 1.0013
+  type: 'test'
+  ...
+# Subtest: marker sync stores the current payload before any chart frame exists
+ok 61 - marker sync stores the current payload before any chart frame exists
+  ---
+  duration_ms: 0.7123
+  type: 'test'
+  ...
+# Subtest: a replaced chart frame replays the stored payload without waiting for state reconstruction
+ok 62 - a replaced chart frame replays the stored payload without waiting for state reconstruction
+  ---
+  duration_ms: 1.2835
+  type: 'test'
+  ...
+# Subtest: the same chart iframe receives the latest marker payload again after its document loads
+ok 63 - the same chart iframe receives the latest marker payload again after its document loads
+  ---
+  duration_ms: 0.8685
+  type: 'test'
+  ...
+# Subtest: a factual same-token quote repositions provisional markers without rewriting executions
+ok 64 - a factual same-token quote repositions provisional markers without rewriting executions
+  ---
+  duration_ms: 1.7188
+  type: 'test'
+  ...
+# Subtest: disabling publishes empty markers before dropping the current token
+ok 65 - disabling publishes empty markers before dropping the current token
+  ---
+  duration_ms: 1.0459
+  type: 'test'
+  ...
+# Subtest: a replacement chart frame added while disabled receives only the empty payload
+ok 66 - a replacement chart frame added while disabled receives only the empty payload
+  ---
+  duration_ms: 1.2861
+  type: 'test'
+  ...
+# Subtest: a delayed quote tick cannot restore the old token after same-chain navigation
+ok 67 - a delayed quote tick cannot restore the old token after same-chain navigation
+  ---
+  duration_ms: 0.6462
+  type: 'test'
+  ...
+# Subtest: OFF-to-ON settings refresh restores the detail route content lifecycle once
+ok 68 - OFF-to-ON settings refresh restores the detail route content lifecycle once
+  ---
+  duration_ms: 14.6695
+  type: 'test'
+  ...
+# Subtest: first-install initialization refresh activates trench quick buy while the master switch stays on
+ok 69 - first-install initialization refresh activates trench quick buy while the master switch stays on
+  ---
+  duration_ms: 0.9613
+  type: 'test'
+  ...
+# Subtest: active language and preset refreshes rebuild quick buy without dropping the safety class
+ok 70 - active language and preset refreshes rebuild quick buy without dropping the safety class
+  ---
+  duration_ms: 1.6377
+  type: 'test'
+  ...
+# Subtest: show-list false-to-true refresh enables safety before rebuilding quick buy
+ok 71 - show-list false-to-true refresh enables safety before rebuilding quick buy
+  ---
+  duration_ms: 0.6462
+  type: 'test'
+  ...
+# Subtest: unknown startup state keeps native quick buy guarded and never restores a real-buy leaf
+ok 72 - unknown startup state keeps native quick buy guarded and never restores a real-buy leaf
+  ---
+  duration_ms: 0.5389
+  type: 'test'
+  ...
+# Subtest: failed settings refresh cannot let a later mutation reactivate quick buy from stale settings
+ok 73 - failed settings refresh cannot let a later mutation reactivate quick buy from stale settings
+  ---
+  duration_ms: 0.7153
+  type: 'test'
+  ...
+# Subtest: successful settings refresh immediately rebuilds quick buy after a guarded read failure
+ok 74 - successful settings refresh immediately rebuilds quick buy after a guarded read failure
+  ---
+  duration_ms: 0.6401
+  type: 'test'
+  ...
+# Subtest: a queued refresh failure stays inside the recoverable drain and schedules a guarded retry
+ok 75 - a queued refresh failure stays inside the recoverable drain and schedules a guarded retry
+  ---
+  duration_ms: 0.8435
+  type: 'test'
+  ...
+# Subtest: explicit OFF refresh removes quick-buy safety only when restoring trusted native controls
+ok 76 - explicit OFF refresh removes quick-buy safety only when restoring trusted native controls
+  ---
+  duration_ms: 0.9014
+  type: 'test'
+  ...
+# Subtest: authoritative explicit OFF restores native controls before onboarding initializes
+ok 77 - authoritative explicit OFF restores native controls before onboarding initializes
+  ---
+  duration_ms: 0.6832
+  type: 'test'
+  ...
+# Subtest: list quick-buy OFF stays fail-closed while the paper-trading master remains ON
+ok 78 - list quick-buy OFF stays fail-closed while the paper-trading master remains ON
+  ---
+  duration_ms: 1.1873
+  type: 'test'
+  ...
+# Subtest: content route reconciliation keeps BSC and Robinhood tab-scoped without selected-chain writes
+ok 79 - content route reconciliation keeps BSC and Robinhood tab-scoped without selected-chain writes
+  ---
+  duration_ms: 4.1318
+  type: 'test'
+  ...
+# Subtest: content preset edits patch only active-chain buys and global sells
+ok 80 - content preset edits patch only active-chain buys and global sells
+  ---
+  duration_ms: 1.3928
+  type: 'test'
+  ...
+# Subtest: content rejects a non-finite buy preset before patching
+ok 81 - content rejects a non-finite buy preset before patching
+  ---
+  duration_ms: 0.725
+  type: 'test'
+  ...
+# Subtest: content rejects a non-finite sell preset before patching
+ok 82 - content rejects a non-finite sell preset before patching
+  ---
+  duration_ms: 0.7063
+  type: 'test'
+  ...
+# Subtest: content contains preset patch rejection and shows the settings error UI
+ok 83 - content contains preset patch rejection and shows the settings error UI
+  ---
+  duration_ms: 0.7056
+  type: 'test'
+  ...
+# Subtest: synthetic shell events cannot buy sell close confirm or patch settings
+ok 84 - synthetic shell events cannot buy sell close confirm or patch settings
+  ---
+  duration_ms: 0.8602
+  type: 'test'
+  ...
+# Subtest: synthetic preset save drag and confirmation suppression cannot persist
+ok 85 - synthetic preset save drag and confirmation suppression cannot persist
+  ---
+  duration_ms: 0.805
+  type: 'test'
+  ...
+# Subtest: trusted click keyboard drag and confirmation suppression preserve existing behavior
+ok 86 - trusted click keyboard drag and confirmation suppression preserve existing behavior
+  ---
+  duration_ms: 0.8021
+  type: 'test'
+  ...
+# Subtest: shell capture gate blocks every synthetic mutation event and admits trusted events
+ok 87 - shell capture gate blocks every synthetic mutation event and admits trusted events
+  ---
+  duration_ms: 0.7776
+  type: 'test'
+  ...
+# Subtest: synthetic direct position and header handlers cannot mutate shell state
+ok 88 - synthetic direct position and header handlers cannot mutate shell state
+  ---
+  duration_ms: 0.8346
+  type: 'test'
+  ...
+# Subtest: trusted buy sell position header and drag handlers preserve shell behavior
+ok 89 - trusted buy sell position header and drag handlers preserve shell behavior
+  ---
+  duration_ms: 17.5596
+  type: 'test'
+  ...
+# Subtest: trusted confirmation cannot suppress the session without trusted checkbox provenance
+ok 90 - trusted confirmation cannot suppress the session without trusted checkbox provenance
+  ---
+  duration_ms: 0.7259
+  type: 'test'
+  ...
+# Subtest: content preset click contains persistence rejection
+ok 91 - content preset click contains persistence rejection
+  ---
+  duration_ms: 0.7634
+  type: 'test'
+  ...
+# Subtest: content collapse and sound controls contain rejected settings writes and restore authoritative settings
+ok 92 - content collapse and sound controls contain rejected settings writes and restore authoritative settings
+  ---
+  duration_ms: 1.8762
+  type: 'test'
+  ...
+# Subtest: content drag persistence rejection restores the authoritative position without escaping
+ok 93 - content drag persistence rejection restores the authoritative position without escaping
+  ---
+  duration_ms: 0.7421
+  type: 'test'
+  ...
+# Subtest: content USD aggregate and position renders use canonical token USD marks
+ok 94 - content USD aggregate and position renders use canonical token USD marks
+  ---
+  duration_ms: 3.1182
+  type: 'test'
+  ...
+# Subtest: content native aggregate and position renders remain native-denominated
+ok 95 - content native aggregate and position renders remain native-denominated
+  ---
+  duration_ms: 0.8657
+  type: 'test'
+  ...
+# Subtest: content render forwards the current native price to native summary and row marks
+ok 96 - content render forwards the current native price to native summary and row marks
+  ---
+  duration_ms: 0.7115
+  type: 'test'
+  ...
+# Subtest: content USD position values use token marks before a native USD quote arrives
+ok 97 - content USD position values use token marks before a native USD quote arrives
+  ---
+  duration_ms: 0.8659
+  type: 'test'
+  ...
+# Subtest: content preset Enter handler returns the contained save promise
+ok 98 - content preset Enter handler returns the contained save promise
+  ---
+  duration_ms: 0.6877
+  type: 'test'
+  ...
+# Subtest: panel trade totals keep Solana address identity case-sensitive
+ok 99 - panel trade totals keep Solana address identity case-sensitive
+  ---
+  duration_ms: 1.4014
+  type: 'test'
+  ...
+# Subtest: secondary quick sells route to existing same-token paper sells and reject unavailable positions
+ok 100 - secondary quick sells route to existing same-token paper sells and reject unavailable positions
+  ---
+  duration_ms: 7.2532
+  type: 'test'
+  ...
+# Subtest: quick buy with no market data commits immediately with a deterministic fallback quote
+ok 101 - quick buy with no market data commits immediately with a deterministic fallback quote
+  ---
+  duration_ms: 1.2354
+  type: 'test'
+  ...
+# Subtest: quick and detail buys resolve deterministic fallback valuations on every supported chain
+ok 102 - quick and detail buys resolve deterministic fallback valuations on every supported chain
+  ---
+  duration_ms: 6
+  type: 'test'
+  ...
+# Subtest: local quick-buy feedback completes under 100 ms without timer advancement
+ok 103 - local quick-buy feedback completes under 100 ms without timer advancement
+  ---
+  duration_ms: 5.3235
+  type: 'test'
+  ...
+# Subtest: new TokenItem roots enter quick-buy discovery in the same mutation turn
+ok 104 - new TokenItem roots enter quick-buy discovery in the same mutation turn
+  ---
+  duration_ms: 1.0838
+  type: 'test'
+  ...
+# Subtest: an added React wrapper discovers its TokenItem descendant in the same observer turn
+ok 105 - an added React wrapper discovers its TokenItem descendant in the same observer turn
+  ---
+  duration_ms: 0.8867
+  type: 'test'
+  ...
+# Subtest: one added React wrapper discovers every TokenItem descendant without a document scan
+ok 106 - one added React wrapper discovers every TokenItem descendant without a document scan
+  ---
+  duration_ms: 0.8466
+  type: 'test'
+  ...
+# Subtest: an added TokenItem remains the only discovery root when it contains a card and slot
+ok 107 - an added TokenItem remains the only discovery root when it contains a card and slot
+  ---
+  duration_ms: 1.3993
+  type: 'test'
+  ...
+# Subtest: BODY mutation targets never become synchronous quick-buy discovery roots
+ok 108 - BODY mutation targets never become synchronous quick-buy discovery roots
+  ---
+  duration_ms: 0.9664
+  type: 'test'
+  ...
+# Subtest: paper quick-buy mutations stay out of both immediate and deferred discovery
+ok 109 - paper quick-buy mutations stay out of both immediate and deferred discovery
+  ---
+  duration_ms: 0.8567
+  type: 'test'
+  ...
+# Subtest: paper control replaceWith mutations at a quick-buy slot create no discovery or timer
+ok 110 - paper control replaceWith mutations at a quick-buy slot create no discovery or timer
+  ---
+  duration_ms: 1.0063
+  type: 'test'
+  ...
+# Subtest: unrelated page class style and text mutations stay out of the fast discovery lane
+ok 111 - unrelated page class style and text mutations stay out of the fast discovery lane
+  ---
+  duration_ms: 0.7649
+  type: 'test'
+  ...
+# Subtest: a dynamically added header wrapper queues maintenance and attaches the paper balance
+ok 112 - a dynamically added header wrapper queues maintenance and attaches the paper balance
+  ---
+  duration_ms: 0.8573
+  type: 'test'
+  ...
+# Subtest: a wrapper containing a chart frame queues chart maintenance
+ok 113 - a wrapper containing a chart frame queues chart maintenance
+  ---
+  duration_ms: 1.1766
+  type: 'test'
+  ...
+# Subtest: card price and countdown child replacements create no discovery or timer
+ok 114 - card price and countdown child replacements create no discovery or timer
+  ---
+  duration_ms: 0.8585
+  type: 'test'
+  ...
+# Subtest: a native quick-buy control inserted or reinserted inside its slot stays fast
+ok 115 - a native quick-buy control inserted or reinserted inside its slot stays fast
+  ---
+  duration_ms: 0.8633
+  type: 'test'
+  ...
+# Subtest: external quick-buy card mutations defer one maintenance discovery without entering fast lane
+ok 116 - external quick-buy card mutations defer one maintenance discovery without entering fast lane
+  ---
+  duration_ms: 0.9018
+  type: 'test'
+  ...
+# Subtest: new TokenItem child and its first href mutation stay in the same fast observer turn
+ok 117 - new TokenItem child and its first href mutation stay in the same fast observer turn
+  ---
+  duration_ms: 0.9494
+  type: 'test'
+  ...
+# Subtest: an addressless TokenItem root publishes a resolving-identity paper action before maintenance
+ok 118 - an addressless TokenItem root publishes a resolving-identity paper action before maintenance
+  ---
+  duration_ms: 5.2351
+  type: 'test'
+  ...
+# Subtest: a real TokenItem removal invalidates its birth before same-node reinsertion
+ok 119 - a real TokenItem removal invalidates its birth before same-node reinsertion
+  ---
+  duration_ms: 1.8342
+  type: 'test'
+  ...
+# Subtest: same-batch TokenItem removal invalidates a birth even after React reinserts it
+ok 120 - same-batch TokenItem removal invalidates a birth even after React reinserts it
+  ---
+  duration_ms: 2.1132
+  type: 'test'
+  ...
+# Subtest: fresh add remove reinsert provenance keeps a clickable shell but cannot auto-claim an intent
+ok 121 - fresh add remove reinsert provenance keeps a clickable shell but cannot auto-claim an intent
+  ---
+  duration_ms: 10.137
+  type: 'test'
+  ...
+# Subtest: valid href removal and restoration in one ordered oldValue batch cannot auto-consume an intent
+ok 122 - valid href removal and restoration in one ordered oldValue batch cannot auto-consume an intent
+  ---
+  duration_ms: 2.3659
+  type: 'test'
+  ...
+# Subtest: one first valid href record promotes an eligible addressless birth without native callbacks
+ok 123 - one first valid href record promotes an eligible addressless birth without native callbacks
+  ---
+  duration_ms: 1.6613
+  type: 'test'
+  ...
+# Subtest: startup observes the first trench render before the initial token read
+ok 124 - startup observes the first trench render before the initial token read
+  ---
+  duration_ms: 0.8362
+  type: 'test'
+  ...
+# Subtest: startup observes the first trench render before loading persisted paper state
+ok 125 - startup observes the first trench render before loading persisted paper state
+  ---
+  duration_ms: 0.8369
+  type: 'test'
+  ...
+# Subtest: startup stays guarded and automatically retries a transient first storage read failure
+ok 126 - startup stays guarded and automatically retries a transient first storage read failure
+  ---
+  duration_ms: 1.2949
+  type: 'test'
+  ...
+# Subtest: local master OFF synchronously blocks stale paper execution while settings refresh is unresolved
+ok 127 - local master OFF synchronously blocks stale paper execution while settings refresh is unresolved
+  ---
+  duration_ms: 1.4061
+  type: 'test'
+  ...
+# Subtest: local master OFF prevents an already-open paper buy confirmation from committing
+ok 128 - local master OFF prevents an already-open paper buy confirmation from committing
+  ---
+  duration_ms: 1.0679
+  type: 'test'
+  ...
+# Subtest: pending settings and master OFF block every sell and close confirmation path
+    # Subtest: sell: settings update enabled=false
+    ok 1 - sell: settings update enabled=false
+      ---
+      duration_ms: 1.117
+      type: 'test'
+      ...
+    # Subtest: drawer: settings update enabled=false
+    ok 2 - drawer: settings update enabled=false
+      ---
+      duration_ms: 1.1921
+      type: 'test'
+      ...
+    # Subtest: breakeven: settings update enabled=false
+    ok 3 - breakeven: settings update enabled=false
+      ---
+      duration_ms: 1.5144
+      type: 'test'
+      ...
+    # Subtest: close: settings update enabled=false
+    ok 4 - close: settings update enabled=false
+      ---
+      duration_ms: 1.0528
+      type: 'test'
+      ...
+    # Subtest: sell: settings update enabled=true
+    ok 5 - sell: settings update enabled=true
+      ---
+      duration_ms: 1.0352
+      type: 'test'
+      ...
+    # Subtest: drawer: settings update enabled=true
+    ok 6 - drawer: settings update enabled=true
+      ---
+      duration_ms: 1.0272
+      type: 'test'
+      ...
+    # Subtest: breakeven: settings update enabled=true
+    ok 7 - breakeven: settings update enabled=true
+      ---
+      duration_ms: 1.1252
+      type: 'test'
+      ...
+    # Subtest: close: settings update enabled=true
+    ok 8 - close: settings update enabled=true
+      ---
+      duration_ms: 1.1448
+      type: 'test'
+      ...
+    1..8
+ok 129 - pending settings and master OFF block every sell and close confirmation path
+  ---
+  duration_ms: 9.6162
+  type: 'test'
+  ...
+# Subtest: malformed page-message batches are ignored and subsequent valid observations still work
+ok 130 - malformed page-message batches are ignored and subsequent valid observations still work
+  ---
+  duration_ms: 1.4485
+  type: 'test'
+  ...
+# Subtest: content theme follows explicit light/dark settings and auto system changes
+ok 131 - content theme follows explicit light/dark settings and auto system changes
+  ---
+  duration_ms: 0.7182
+  type: 'test'
+  ...
+# Subtest: USD arithmetic overflow degrades the overlay without hiding local account rendering
+ok 132 - USD arithmetic overflow degrades the overlay without hiding local account rendering
+  ---
+  duration_ms: 0.6138
+  type: 'test'
+  ...
+# Subtest: startup immediately installs a clickable resolving-identity paper shell for a staged first trench card
+ok 133 - startup immediately installs a clickable resolving-identity paper shell for a staged first trench card
+  ---
+  duration_ms: 1.1291
+  type: 'test'
+  ...
+# Subtest: content mutations promote changed card descendants into real GMGN live-slot reconciliation
+ok 134 - content mutations promote changed card descendants into real GMGN live-slot reconciliation
+  ---
+  duration_ms: 3.3738
+  type: 'test'
+  ...
+# Subtest: disabled quick-buy states clear once on transition and ignore repeated mutation batches
+ok 135 - disabled quick-buy states clear once on transition and ignore repeated mutation batches
+  ---
+  duration_ms: 1.6845
+  type: 'test'
+  ...
+# Subtest: market-cap-only quick buy derives price locally and never requests before commit
+ok 136 - market-cap-only quick buy derives price locally and never requests before commit
+  ---
+  duration_ms: 1.6158
+  type: 'test'
+  ...
+# Subtest: valid-address quick and detail buys commit the six-chain no-market fallback matrix
+ok 137 - valid-address quick and detail buys commit the six-chain no-market fallback matrix
+  ---
+  duration_ms: 25.0235
+  type: 'test'
+  ...
+# Subtest: position sell and close all use local position observations without quote waits
+ok 138 - position sell and close all use local position observations without quote waits
+  ---
+  duration_ms: 1.8598
+  type: 'test'
+  ...
+# Subtest: passive native prices update every chain sharing the symbol without merging accounts
+ok 139 - passive native prices update every chain sharing the symbol without merging accounts
+  ---
+  duration_ms: 0.5901
+  type: 'test'
+  ...
+# Subtest: page NATIVE_PRICES cannot schedule delayed calibration
+ok 140 - page NATIVE_PRICES cannot schedule delayed calibration
+  ---
+  duration_ms: 3.5842
+  type: 'test'
+  ...
+# Subtest: page NATIVE_PRICES stay display-only after the next real quote tick
+ok 141 - page NATIVE_PRICES stay display-only after the next real quote tick
+  ---
+  duration_ms: 1.3321
+  type: 'test'
+  ...
+# Subtest: page NATIVE_PRICES cannot suppress the background authority refresh
+ok 142 - page NATIVE_PRICES cannot suppress the background authority refresh
+  ---
+  duration_ms: 0.8014
+  type: 'test'
+  ...
+# Subtest: an older native observation cannot replace a newer cached price
+ok 143 - an older native observation cannot replace a newer cached price
+  ---
+  duration_ms: 0.5177
+  type: 'test'
+  ...
+# Subtest: malformed and far-future native messages cannot poison the cached price
+ok 144 - malformed and far-future native messages cannot poison the cached price
+  ---
+  duration_ms: 0.6308
+  type: 'test'
+  ...
+# Subtest: provisional copy is shown only for provisional panel and confirmation quotes
+ok 145 - provisional copy is shown only for provisional panel and confirmation quotes
+  ---
+  duration_ms: 2.2244
+  type: 'test'
+  ...
+# Subtest: local paper quotes normalize the target and bind an identityless candidate
+ok 146 - local paper quotes normalize the target and bind an identityless candidate
+  ---
+  duration_ms: 1.407
+  type: 'test'
+  ...
+# Subtest: local paper quotes discard an explicit cross-chain candidate identity
+ok 147 - local paper quotes discard an explicit cross-chain candidate identity
+  ---
+  duration_ms: 0.9124
+  type: 'test'
+  ...
+# Subtest: local paper quotes discard a same-chain candidate for another address
+ok 148 - local paper quotes discard a same-chain candidate for another address
+  ---
+  duration_ms: 0.6693
+  type: 'test'
+  ...
+# Subtest: content unknown fallback forms the internal market-cap supply contract used by Engine and State
+ok 149 - content unknown fallback forms the internal market-cap supply contract used by Engine and State
+  ---
+  duration_ms: 1.022
+  type: 'test'
+  ...
+# Subtest: factual price with a synthetic market cap cannot fabricate a GMGN ratio
+ok 150 - factual price with a synthetic market cap cannot fabricate a GMGN ratio
+  ---
+  duration_ms: 1.4681
+  type: 'test'
+  ...
+# Subtest: native-only fallback preserves a factual token price through resolver coordinator Engine and strict State
+ok 151 - native-only fallback preserves a factual token price through resolver coordinator Engine and strict State
+  ---
+  duration_ms: 2.2035
+  type: 'test'
+  ...
+# Subtest: paper resolver rejects contaminated live observations before falling back deterministically
+ok 152 - paper resolver rejects contaminated live observations before falling back deterministically
+  ---
+  duration_ms: 1.1459
+  type: 'test'
+  ...
+# Subtest: direct candidates cannot launder provisional or fallback prices as factual observations
+ok 153 - direct candidates cannot launder provisional or fallback prices as factual observations
+  ---
+  duration_ms: 1.2263
+  type: 'test'
+  ...
+# Subtest: page-message quote caching rejects untrusted and synthetic-derived observations
+ok 154 - page-message quote caching rejects untrusted and synthetic-derived observations
+  ---
+  duration_ms: 3.2859
+  type: 'test'
+  ...
+# Subtest: page-message cache cannot launder an explicit zero price timestamp through a fresh envelope
+ok 155 - page-message cache cannot launder an explicit zero price timestamp through a fresh envelope
+  ---
+  duration_ms: 2.7501
+  type: 'test'
+  ...
+# Subtest: page-message cache cannot launder an explicit empty price source through a fresh envelope
+ok 156 - page-message cache cannot launder an explicit empty price source through a fresh envelope
+  ---
+  duration_ms: 0.8206
+  type: 'test'
+  ...
+# Subtest: resolver refuses contaminated raw cache entries before they become authoritative
+ok 157 - resolver refuses contaminated raw cache entries before they become authoritative
+  ---
+  duration_ms: 2.9198
+  type: 'test'
+  ...
+# Subtest: unverified launchpad labels cannot select a registry fallback valuation
+ok 158 - unverified launchpad labels cannot select a registry fallback valuation
+  ---
+  duration_ms: 1.3266
+  type: 'test'
+  ...
+# Subtest: candidate direct supply with unknown provenance cannot become GMGN exact through the resolver or Engine
+ok 159 - candidate direct supply with unknown provenance cannot become GMGN exact through the resolver or Engine
+  ---
+  duration_ms: 0.8847
+  type: 'test'
+  ...
+# Subtest: resolver consumes a provisional 1B divisor without promoting it to trusted supply
+ok 160 - resolver consumes a provisional 1B divisor without promoting it to trusted supply
+  ---
+  duration_ms: 0.8266
+  type: 'test'
+  ...
+# Subtest: cached exact supply wins without making a cross-observation card price factual
+ok 161 - cached exact supply wins without making a cross-observation card price factual
+  ---
+  duration_ms: 0.901
+  type: 'test'
+  ...
+# Subtest: resolver preserves a launchpad rule for a market-cap-derived card price
+ok 162 - resolver preserves a launchpad rule for a market-cap-derived card price
+  ---
+  duration_ms: 1.1766
+  type: 'test'
+  ...
+# Subtest: resolver quotes preserve valid GMGN exact, ratio, and verified launchpad-rule supply
+ok 163 - resolver quotes preserve valid GMGN exact, ratio, and verified launchpad-rule supply
+  ---
+  duration_ms: 2.6017
+  type: 'test'
+  ...
+# Subtest: resolver does not promote a newer price and older market cap into a GMGN ratio
+ok 164 - resolver does not promote a newer price and older market cap into a GMGN ratio
+  ---
+  duration_ms: 0.8785
+  type: 'test'
+  ...
+# Subtest: resolver excludes an old position cap from a new factual price ratio
+ok 165 - resolver excludes an old position cap from a new factual price ratio
+  ---
+  duration_ms: 0.785
+  type: 'test'
+  ...
+# Subtest: no-chart history survives coordinator partial sells and drawer/detail/close-all paths
+ok 166 - no-chart history survives coordinator partial sells and drawer/detail/close-all paths
+  ---
+  duration_ms: 29.2912
+  type: 'test'
+  ...
+# Subtest: no-chart zero-price observations can sell using explicitly provisional position history
+ok 167 - no-chart zero-price observations can sell using explicitly provisional position history
+  ---
+  duration_ms: 1.4599
+  type: 'test'
+  ...
+# Subtest: position-only history cannot fabricate a GMGN ratio or trigger immediate calibration
+ok 168 - position-only history cannot fabricate a GMGN ratio or trigger immediate calibration
+  ---
+  duration_ms: 1.23
+  type: 'test'
+  ...
+# Subtest: a fresh Bankr supply-only observation cannot combine with historical 3200 USD into a factual price
+ok 169 - a fresh Bankr supply-only observation cannot combine with historical 3200 USD into a factual price
+  ---
+  duration_ms: 1.8226
+  type: 'test'
+  ...
+# Subtest: a fresh market-cap-only observation cannot borrow position-only GMGN exact supply provenance
+ok 170 - a fresh market-cap-only observation cannot borrow position-only GMGN exact supply provenance
+  ---
+  duration_ms: 1.3998
+  type: 'test'
+  ...
+# Subtest: polluted Bankr payload still buys and sells six ETH at the unchanged 3200 USD market cap
+ok 171 - polluted Bankr payload still buys and sells six ETH at the unchanged 3200 USD market cap
+  ---
+  duration_ms: 1.4688
+  type: 'test'
+  ...
+# Subtest: sanitized no-chart market-cap candidates preserve Bankr 100B and unknown 1B zero-fee round trips
+ok 172 - sanitized no-chart market-cap candidates preserve Bankr 100B and unknown 1B zero-fee round trips
+  ---
+  duration_ms: 2.8493
+  type: 'test'
+  ...
+# Subtest: zero-fee 3200 USD launchpad entries preserve deterministic 1B 2B and 100B quantities
+ok 173 - zero-fee 3200 USD launchpad entries preserve deterministic 1B 2B and 100B quantities
+  ---
+  duration_ms: 2.4462
+  type: 'test'
+  ...
+# Subtest: a newer DEX price keeps an older exact GMGN supply and its field provenance
+ok 174 - a newer DEX price keeps an older exact GMGN supply and its field provenance
+  ---
+  duration_ms: 0.9049
+  type: 'test'
+  ...
+# Subtest: header native balance attaches to connected wallet or stable header-actions fallback
+ok 175 - header native balance attaches to connected wallet or stable header-actions fallback
+  ---
+  duration_ms: 1.6712
+  type: 'test'
+  ...
+# Subtest: SPA chain change immediately renders the new chain native balance on a trench page
+ok 176 - SPA chain change immediately renders the new chain native balance on a trench page
+  ---
+  duration_ms: 2.1304
+  type: 'test'
+  ...
+# Subtest: every valid detail route renders a placeholder panel and buys at the deterministic fallback without chart or market data
+ok 177 - every valid detail route renders a placeholder panel and buys at the deterministic fallback without chart or market data
+  ---
+  duration_ms: 12.1224
+  type: 'test'
+  ...
+# Subtest: first detail sell closes an unknown fallback after metadata-only launchpad upgrade
+ok 178 - first detail sell closes an unknown fallback after metadata-only launchpad upgrade
+  ---
+  duration_ms: 13.6636
+  type: 'test'
+  ...
+# Subtest: metadata-only launchpad upgrade reaches repeat buy through the real coordinator once
+ok 179 - metadata-only launchpad upgrade reaches repeat buy through the real coordinator once
+  ---
+  duration_ms: 3.6633
+  type: 'test'
+  ...
+# Subtest: content execution pre-validation trusts only verified same-token GMGN metadata
+ok 180 - content execution pre-validation trusts only verified same-token GMGN metadata
+  ---
+  duration_ms: 1.099
+  type: 'test'
+  ...
+# Subtest: content execution pre-validation strips untrusted no-position caller trust
+ok 181 - content execution pre-validation strips untrusted no-position caller trust
+  ---
+  duration_ms: 0.7648
+  type: 'test'
+  ...
+# Subtest: detail placeholders reuse trench metadata only for the exact chain and normalized address, then accept exact GMGN upgrades
+ok 182 - detail placeholders reuse trench metadata only for the exact chain and normalized address, then accept exact GMGN upgrades
+  ---
+  duration_ms: 0.9464
+  type: 'test'
+  ...
+# Subtest: detail placeholders reject trench metadata from a different address or chain
+ok 183 - detail placeholders reject trench metadata from a different address or chain
+  ---
+  duration_ms: 1.5124
+  type: 'test'
+  ...
+# Subtest: detail placeholder metadata falls back from an exact position to an exact trade before the route label
+ok 184 - detail placeholder metadata falls back from an exact position to an exact trade before the route label
+  ---
+  duration_ms: 0.6229
+  type: 'test'
+  ...
+# Subtest: trench and invalid token routes do not create placeholder detail contexts
+ok 185 - trench and invalid token routes do not create placeholder detail contexts
+  ---
+  duration_ms: 1.4606
+  type: 'test'
+  ...
+# Subtest: an exact GMGN page supply stays ephemeral inside the mark throttle
+ok 186 - an exact GMGN page supply stays ephemeral inside the mark throttle
+  ---
+  duration_ms: 2.1652
+  type: 'test'
+  ...
+# Subtest: a duplicate in-flight calibration target does not schedule a redundant retry
+ok 187 - a duplicate in-flight calibration target does not schedule a redundant retry
+  ---
+  duration_ms: 1.443
+  type: 'test'
+  ...
+# Subtest: a stronger background native observation during supply calibration reruns immediately after settlement
+ok 188 - a stronger background native observation during supply calibration reruns immediately after settlement
+  ---
+  duration_ms: 1.5468
+  type: 'test'
+  ...
+# Subtest: same-quality exact supply observations do not bypass the ordinary mark throttle
+ok 189 - same-quality exact supply observations do not bypass the ordinary mark throttle
+  ---
+  duration_ms: 1.2035
+  type: 'test'
+  ...
+# Subtest: late verified Pump Mayhem mode is a same-rank immediate calibration upgrade
+ok 190 - late verified Pump Mayhem mode is a same-rank immediate calibration upgrade
+  ---
+  duration_ms: 0.8009
+  type: 'test'
+  ...
+# Subtest: page supply-only observations update cache and display without rewriting synthetic positions
+ok 191 - page supply-only observations update cache and display without rewriting synthetic positions
+  ---
+  duration_ms: 2.3653
+  type: 'test'
+  ...
+# Subtest: a background native-price response immediately calibrates the current position without timer advancement
+ok 192 - a background native-price response immediately calibrates the current position without timer advancement
+  ---
+  duration_ms: 1.4868
+  type: 'test'
+  ...
+# Subtest: an exact-chain GMGN network quote bootstraps every supported detail panel when DOM metadata is unavailable
+ok 193 - an exact-chain GMGN network quote bootstraps every supported detail panel when DOM metadata is unavailable
+  ---
+  duration_ms: 8.3852
+  type: 'test'
+  ...
+# Subtest: a GMGN network quote cannot bootstrap a detail context for another chain or a trench route
+ok 194 - a GMGN network quote cannot bootstrap a detail context for another chain or a trench route
+  ---
+  duration_ms: 1.8223
+  type: 'test'
+  ...
+# Subtest: market-cap-only GMGN detail metadata can show the panel but remains non-executable
+ok 195 - market-cap-only GMGN detail metadata can show the panel but remains non-executable
+  ---
+  duration_ms: 1.6975
+  type: 'test'
+  ...
+# Subtest: SPA detail navigation establishes a placeholder and requests a GMGN quote replay
+ok 196 - SPA detail navigation establishes a placeholder and requests a GMGN quote replay
+  ---
+  duration_ms: 2.2891
+  type: 'test'
+  ...
+# Subtest: a delayed empty DOM detail read cannot erase a same-route GMGN network fallback
+ok 197 - a delayed empty DOM detail read cannot erase a same-route GMGN network fallback
+  ---
+  duration_ms: 2.1018
+  type: 'test'
+  ...
+# Subtest: content Engine mark fixture derives trusted Pump market-cap prices like production
+ok 198 - content Engine mark fixture derives trusted Pump market-cap prices like production
+  ---
+  duration_ms: 0.7255
+  type: 'test'
+  ...
+# Subtest: detail sell commits the verified synchronous DOM quote instead of the cached quote
+ok 199 - detail sell commits the verified synchronous DOM quote instead of the cached quote
+  ---
+  duration_ms: 1.7318
+  type: 'test'
+  ...
+# Subtest: detail commit immediately falls back when the verified DOM snapshot is unavailable
+ok 200 - detail commit immediately falls back when the verified DOM snapshot is unavailable
+  ---
+  duration_ms: 1.3547
+  type: 'test'
+  ...
+# Subtest: detail buy commits the verified synchronous DOM quote
+ok 201 - detail buy commits the verified synchronous DOM quote
+  ---
+  duration_ms: 1.9821
+  type: 'test'
+  ...
+# Subtest: detail confirmation keeps the cached preview but commits the final DOM snapshot
+ok 202 - detail confirmation keeps the cached preview but commits the final DOM snapshot
+  ---
+  duration_ms: 2.087
+  type: 'test'
+  ...
+# Subtest: order-local DOM dimensions beat a cache field timestamp one millisecond newer
+ok 203 - order-local DOM dimensions beat a cache field timestamp one millisecond newer
+  ---
+  duration_ms: 1.5924
+  type: 'test'
+  ...
+# Subtest: detail commit ignores a verified DOM snapshot returned for another token
+ok 204 - detail commit ignores a verified DOM snapshot returned for another token
+  ---
+  duration_ms: 1.4369
+  type: 'test'
+  ...
+# Subtest: matching detail token rejects unusable snapshot quotes without replacing the frozen order quote
+    # Subtest: missing quote
+    ok 1 - missing quote
+      ---
+      duration_ms: 1.7993
+      type: 'test'
+      ...
+    # Subtest: untrusted quote
+    ok 2 - untrusted quote
+      ---
+      duration_ms: 1.3629
+      type: 'test'
+      ...
+    # Subtest: identity-mismatched quote
+    ok 3 - identity-mismatched quote
+      ---
+      duration_ms: 1.385
+      type: 'test'
+      ...
+    1..3
+ok 205 - matching detail token rejects unusable snapshot quotes without replacing the frozen order quote
+  ---
+  duration_ms: 4.7803
+  type: 'test'
+  ...
+# Subtest: trench quick buy preserves the card quote without reading the detail DOM snapshot
+ok 206 - trench quick buy preserves the card quote without reading the detail DOM snapshot
+  ---
+  duration_ms: 1.1579
+  type: 'test'
+  ...
+# Subtest: a confirmation callback captured on one token cannot execute after same-chain navigation
+ok 207 - a confirmation callback captured on one token cannot execute after same-chain navigation
+  ---
+  duration_ms: 1.4079
+  type: 'test'
+  ...
+# Subtest: delayed confirmation preserves factual observation times and the real engine rejects the stale order
+ok 208 - delayed confirmation preserves factual observation times and the real engine rejects the stale order
+  ---
+  duration_ms: 1.3782
+  type: 'test'
+  ...
+# Subtest: a fresh background DEX quote replaces stale field freshness and commits the local paper buy
+ok 209 - a fresh background DEX quote replaces stale field freshness and commits the local paper buy
+  ---
+  duration_ms: 3.5276
+  type: 'test'
+  ...
+# Subtest: a fresh envelope with an explicitly stale price dimension buys through deterministic fallback
+ok 210 - a fresh envelope with an explicitly stale price dimension buys through deterministic fallback
+  ---
+  duration_ms: 2.0912
+  type: 'test'
+  ...
+# Subtest: a fresh envelope with a wrong price source buys through deterministic fallback
+ok 211 - a fresh envelope with a wrong price source buys through deterministic fallback
+  ---
+  duration_ms: 1.3411
+  type: 'test'
+  ...
+# Subtest: stale or wrong-source market-cap dimensions cannot change deterministic fallback valuation
+ok 212 - stale or wrong-source market-cap dimensions cannot change deterministic fallback valuation
+  ---
+  duration_ms: 1.715
+  type: 'test'
+  ...
+# Subtest: an explicitly stale price dimension cannot suppress a verified background refresh
+ok 213 - an explicitly stale price dimension cannot suppress a verified background refresh
+  ---
+  duration_ms: 4.3661
+  type: 'test'
+  ...
+# Subtest: provisional execution timestamps do not overwrite a factual market-cap observation
+ok 214 - provisional execution timestamps do not overwrite a factual market-cap observation
+  ---
+  duration_ms: 0.789
+  type: 'test'
+  ...
+# Subtest: delayed confirmation may timestamp a fully deterministic fallback while retaining its audit provenance
+ok 215 - delayed confirmation may timestamp a fully deterministic fallback while retaining its audit provenance
+  ---
+  duration_ms: 2.1702
+  type: 'test'
+  ...
+# Subtest: quick-buy commits before same-chain navigation and background native refresh cannot duplicate it
+ok 216 - quick-buy commits before same-chain navigation and background native refresh cannot duplicate it
+  ---
+  duration_ms: 4.6289
+  type: 'test'
+  ...
+# Subtest: quick-buy freezes complete click-time metadata before same-chain navigation
+ok 217 - quick-buy freezes complete click-time metadata before same-chain navigation
+  ---
+  duration_ms: 2.4495
+  type: 'test'
+  ...
+# Subtest: stale or untrusted populated GMGN fields still request verified DEX fallback
+ok 218 - stale or untrusted populated GMGN fields still request verified DEX fallback
+  ---
+  duration_ms: 0.7498
+  type: 'test'
+  ...
+# Subtest: content preserves the background native observation timestamp instead of restamping receipt
+ok 219 - content preserves the background native observation timestamp instead of restamping receipt
+  ---
+  duration_ms: 0.6307
+  type: 'test'
+  ...
+# Subtest: background native response still persists an eligible calibration
+ok 220 - background native response still persists an eligible calibration
+  ---
+  duration_ms: 1.0384
+  type: 'test'
+  ...
+# Subtest: execution uses a stale local native observation immediately and refreshes it in background
+ok 221 - execution uses a stale local native observation immediately and refreshes it in background
+  ---
+  duration_ms: 1.1333
+  type: 'test'
+  ...
+# Subtest: quick buy uses exact-address last-known token and native prices when refresh is unavailable
+ok 222 - quick buy uses exact-address last-known token and native prices when refresh is unavailable
+  ---
+  duration_ms: 1.6951
+  type: 'test'
+  ...
+# Subtest: position drawer sell uses the position last-known quote instead of failing as stale
+ok 223 - position drawer sell uses the position last-known quote instead of failing as stale
+  ---
+  duration_ms: 1.5846
+  type: 'test'
+  ...
+# Subtest: page TOKEN_QUOTES remain ephemeral and cannot persist metadata or calibration
+ok 224 - page TOKEN_QUOTES remain ephemeral and cannot persist metadata or calibration
+  ---
+  duration_ms: 1.1932
+  type: 'test'
+  ...
+# Subtest: page TOKEN_QUOTES stay marker-visible but cannot persist on the next real quote tick
+ok 225 - page TOKEN_QUOTES stay marker-visible but cannot persist on the next real quote tick
+  ---
+  duration_ms: 1.2766
+  type: 'test'
+  ...
+# Subtest: PnL calendar exposes current-chain trade history and sends the active chain
+ok 226 - PnL calendar exposes current-chain trade history and sends the active chain
+  ---
+  duration_ms: 1.1859
+  type: 'test'
+  ...
+# Subtest: an old failed quote request cannot suppress or remove a newer away-and-back request
+ok 227 - an old failed quote request cannot suppress or remove a newer away-and-back request
+  ---
+  duration_ms: 1.7385
+  type: 'test'
+  ...
+# Subtest: supplyless EVM market-cap observation fills provisionally before background DEX refresh
+ok 228 - supplyless EVM market-cap observation fills provisionally before background DEX refresh
+  ---
+  duration_ms: 1.2511
+  type: 'test'
+  ...
+# Subtest: non-Pump Solana market cap fills provisionally while real-price refresh stays background-only
+ok 229 - non-Pump Solana market cap fills provisionally while real-price refresh stays background-only
+  ---
+  duration_ms: 2.3037
+  type: 'test'
+  ...
+# Subtest: content validates a persisted Pump market-cap position after detail metadata replaces trench metadata
+ok 230 - content validates a persisted Pump market-cap position after detail metadata replaces trench metadata
+  ---
+  duration_ms: 0.677
+  type: 'test'
+  ...
+# Subtest: trade confirmation displays market cap instead of a synthetic Pump token price
+ok 231 - trade confirmation displays market cap instead of a synthetic Pump token price
+  ---
+  duration_ms: 1.24
+  type: 'test'
+  ...
+# Subtest: GMGN-03 logged-out Solana header renders one paper balance without wallet controls
+ok 232 - GMGN-03 logged-out Solana header renders one paper balance without wallet controls
+  ---
+  duration_ms: 1.0995
+  type: 'test'
+  ...
+# Subtest: GMGN-03 live Connect controls anchor the paper summary beside login before the whole header
+ok 233 - GMGN-03 live Connect controls anchor the paper summary beside login before the whole header
+  ---
+  duration_ms: 0.5803
+  type: 'test'
+  ...
+# Subtest: GMGN-04 invalid buy and sell drafts survive validation and later rerenders until cancel
+ok 234 - GMGN-04 invalid buy and sell drafts survive validation and later rerenders until cancel
+  ---
+  duration_ms: 1.5872
+  type: 'test'
+  ...
+# Subtest: GMGN-04 save failure keeps editable drafts and a corrected retry persists them
+ok 235 - GMGN-04 save failure keeps editable drafts and a corrected retry persists them
+  ---
+  duration_ms: 1.3208
+  type: 'test'
+  ...
+# Subtest: GMGN-04 pending save preserves newer typed buy and sell drafts before any rerender
+ok 236 - GMGN-04 pending save preserves newer typed buy and sell drafts before any rerender
+  ---
+  duration_ms: 1.241
+  type: 'test'
+  ...
+# Subtest: GMGN-04 pending save cannot close a new edit session even with identical draft values
+ok 237 - GMGN-04 pending save cannot close a new edit session even with identical draft values
+  ---
+  duration_ms: 1.5888
+  type: 'test'
+  ...
+# Subtest: GMGN-04 pending previous-chain save preserves the new chain draft
+ok 238 - GMGN-04 pending previous-chain save preserves the new chain draft
+  ---
+  duration_ms: 1.2137
+  type: 'test'
+  ...
+# Subtest: trusted page shortcut works while disabled and rejects synthetic, repeat, and modified keys
+ok 239 - trusted page shortcut works while disabled and rejects synthetic, repeat, and modified keys
+  ---
+  duration_ms: 0.662
+  type: 'test'
+  ...
+1..239
+# tests 256
+# suites 0
+# pass 256
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3165.9092

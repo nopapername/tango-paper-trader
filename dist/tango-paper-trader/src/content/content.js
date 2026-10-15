@@ -61,6 +61,19 @@
     requireTrustedUserEvent(event);
   }
 
+  // Remain active when the paper UI is disabled so a second press restores it.
+  // Some embedded browsers do not dispatch manifest extension commands.
+  window.addEventListener('keydown', async (event) => {
+    if (event.isTrusted !== true || event.repeat || event.isComposing
+      || !event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey
+      || (event.code !== 'KeyY' && String(event.key || '').toLowerCase() !== 'y')) return;
+    event.preventDefault();
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'TANGO_TOGGLE_SHORTCUT' });
+      if (!response?.ok) showToast(t('settingsSaveFailed'), 'error');
+    } catch { showToast(t('settingsSaveFailed'), 'error'); }
+  }, true);
+
   for (const type of ['click', 'keydown', 'change', 'pointerdown']) {
     shell.addEventListener(type, blockUntrustedShellEvent, { capture: true, passive: false });
   }
