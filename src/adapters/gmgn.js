@@ -300,9 +300,9 @@
     // Avoid accepting a page-wide ancestor merely because another widget happens
     // to contain the new route address while GMGN is still rendering the old header.
     if (text.length <= 4_000 && addressHintMatches(text, address, chainId)) return true;
-    const nodes = [element, ...Array.from(element.querySelectorAll?.('a[href], [title], [data-address], [data-token-address], [data-mint], [data-ca]') || []).slice(0, 80)];
+    const nodes = [element, ...Array.from(element.querySelectorAll?.('a[href], [title], [data-addr], [data-address], [data-token-address], [data-mint], [data-ca]') || []).slice(0, 80)];
     const caseInsensitive = !chainId || Tango.Chains.get(chainId)?.addressFamily === 'EVM';
-    return nodes.filter((node) => !isQuoteTokenIdentityNode(node)).some((node) => ['href', 'title', 'data-address', 'data-token-address', 'data-mint', 'data-ca']
+    return nodes.filter((node) => !isQuoteTokenIdentityNode(node)).some((node) => ['href', 'title', 'data-addr', 'data-address', 'data-token-address', 'data-mint', 'data-ca']
       .some((attribute) => {
         const value = String(node.getAttribute?.(attribute) || '');
         return (caseInsensitive ? value.toLowerCase() : value).includes(caseInsensitive ? String(address).toLowerCase() : String(address));
@@ -334,7 +334,7 @@
 
     const leafNodes = Array.from(scope.querySelectorAll?.('span,div,p,a,button') || [])
       .filter((node) => Number(node.childElementCount || 0) === 0 && String(node.textContent || '').length <= 128);
-    const attributeNodes = Array.from(scope.querySelectorAll?.('[data-address], [data-token-address], [data-mint], [data-ca]') || []);
+    const attributeNodes = Array.from(scope.querySelectorAll?.('[data-addr], [data-address], [data-token-address], [data-mint], [data-ca]') || []);
     const evidence = [];
     leafNodes.forEach((node) => {
       if (isQuoteTokenIdentityNode(node)) return;
@@ -343,7 +343,7 @@
     });
     attributeNodes.forEach((node) => {
       if (isQuoteTokenIdentityNode(node)) return;
-      ['data-address', 'data-token-address', 'data-mint', 'data-ca'].forEach((attribute) => {
+      ['data-addr', 'data-address', 'data-token-address', 'data-mint', 'data-ca'].forEach((attribute) => {
         const hint = visibleAddressHint(node.getAttribute?.(attribute), chainId);
         if (hint) evidence.push({ node, hint });
       });

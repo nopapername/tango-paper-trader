@@ -2122,6 +2122,50 @@ test('a PRICE marker missing its factual coordinate cannot be synthesized from t
   assert.equal(chart.api.snapshot().overlayTops[0], '300px');
 });
 
+test('a separate right-axis canvas spans only its sibling chart pane and rejects ambiguous panes', () => {
+  const chart = loadChartBridge({
+    canvasRect: { left: 843, top: 0, width: 56, height: 538 },
+    viewport: { width: 899, height: 605 }
+  });
+  const plotRect = { left: 56, top: 0, width: 787, height: 538 };
+  const plot = { isConnected: true, getBoundingClientRect: () => ({ ...plotRect }) };
+  const pane = {
+    matches: selector => selector === '[data-qa-id="pane"]',
+    querySelectorAll: selector => selector === '[data-qa-id="pane-widget-chart-gui-wrapper"]' ? [plot] : []
+  };
+  const row = { children: [pane] };
+  const axisContainer = { parentElement: row, matches: selector => selector === '.price-axis-container' };
+  const axis = { parentElement: axisContainer, matches: selector => selector === '.price-axis[data-name]' };
+  chart.canvasContext.canvas.parentElement = axis;
+  chart.canvasContext.canvas.width = 56;
+  chart.canvasContext.canvas.height = 538;
+  const recordAnchors = () => {
+    for (const [text, y] of [['$1', 400], ['$2', 300], ['$3', 200]]) {
+      chart.api.record(chart.canvasContext, text, 6, y);
+    }
+  };
+  recordAnchors();
+  chart.markers({ chain: 'bsc', tokenAddress: BSC_ADDRESS, currentPrice: 2, currentMarketCap: 0,
+    markers: [{ id: 'buy', side: 'BUY', marketCap: 0, price: 2, label: 'Paper Buy' }] }, {
+    axisHint: 'PRICE', frameGeneration: 1, probeId: 'test:1'
+  });
+  assert.equal(chart.api.snapshot().overlayTops[0], '300px');
+  assert.equal(chart.api.snapshot().overlayStyles[0].left, '56px');
+  assert.equal(chart.api.snapshot().overlayStyles[0].right, '56px');
+
+  plotRect.left = 76;
+  plotRect.width = 767;
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayChildren, 0, 'changed pane geometry invalidates placement');
+  recordAnchors();
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayStyles[0].left, '76px');
+
+  row.children.push(pane);
+  chart.api.render();
+  assert.equal(chart.api.snapshot().overlayChildren, 0, 'two possible sibling panes cannot supply plot bounds');
+});
+
 test('line top left and right come from one transformed current source rectangle', () => {
   const chart = loadChartBridge({
     canvasRect: { left: 20, top: 40, width: 1_000, height: 350 },

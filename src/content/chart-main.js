@@ -326,11 +326,27 @@
     const xs = points.map((point) => Number(point.x)).filter(Number.isFinite);
     const ys = points.map((point) => Number(point.y)).filter(Number.isFinite);
     if (xs.length < 3 || ys.length < 3) return null;
+    let plotRect = sourceRect;
+    const axis = canvas.parentElement;
+    if (axis?.matches?.('.price-axis[data-name]')) {
+      const axisContainer = axis.parentElement;
+      if (!axisContainer?.matches?.('.price-axis-container')) return null;
+      const panes = Array.from(axisContainer.parentElement?.children || [])
+        .filter((node) => node.matches?.('[data-qa-id="pane"]'));
+      if (panes.length !== 1) return null;
+      const plotWrappers = Array.from(panes[0].querySelectorAll?.('[data-qa-id="pane-widget-chart-gui-wrapper"]') || []);
+      if (plotWrappers.length !== 1) return null;
+      plotRect = finiteRect(plotWrappers[0]);
+      if (!plotRect || plotRect.width <= sourceRect.width
+        || Math.abs(plotRect.right - sourceRect.left) > 2
+        || Math.abs(plotRect.top - sourceRect.top) > 2
+        || Math.abs(plotRect.bottom - sourceRect.bottom) > 2) return null;
+    }
     const plotBounds = {
-      left: Math.max(0, sourceRect.left),
-      right: Math.min(viewport.width, sourceRect.right, Math.min(...xs)),
-      top: Math.max(0, sourceRect.top, Math.min(...ys) - tickSpacing),
-      bottom: Math.min(viewport.height, sourceRect.bottom, Math.max(...ys) + tickSpacing)
+      left: Math.max(0, plotRect.left),
+      right: Math.min(viewport.width, plotRect.right, Math.min(...xs)),
+      top: Math.max(0, plotRect.top, Math.min(...ys) - tickSpacing),
+      bottom: Math.min(viewport.height, plotRect.bottom, Math.max(...ys) + tickSpacing)
     };
     if (!(plotBounds.right > plotBounds.left) || !(plotBounds.bottom > plotBounds.top)) return null;
     return { viewport, sourceRect, plotBounds };

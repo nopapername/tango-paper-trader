@@ -6076,3 +6076,46 @@ test('native MutationObserver converges after rediscovery class drift and React 
     nativeOrders: 0, paperOrders: 0
   }, 'master OFF restores only the latest coherent native generation and releases geometry');
 });
+
+
+test('captured SI BaseInfoBar with ZEC quote resolves its current token and live USD market cap', () => {
+  const captured = fs.readFileSync(path.join(__dirname, 'fixtures/si-zec-base-info.html'), 'utf8');
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tango-si-header-'));
+  try {
+    const scripts = ['src/core/chains.js', 'src/core/supply.js', 'src/adapters/gmgn.js'].map((file) =>
+      fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
+    const pagePath = path.join(tempRoot, 'header.html');
+    fs.writeFileSync(pagePath, `<!doctype html><title>${HEADLESS_LAYOUT_PENDING_TITLE}</title>${captured}<script>
+      const fake = { location: { href: 'https://gmgn.ai/bsc/token/0xcb30fae09a08314ebabe750ef123213e458d7777', origin: 'https://gmgn.ai' }, Tango: {} };
+      ${scripts.map((script) => `Function('globalThis', ${JSON.stringify(script)})(fake);`).join('\n')}
+      fake.Tango.GMGN.readCurrentToken().then(async (current) => {
+        document.querySelector('.info-item-value').textContent = '$14.1K';
+        const refreshed = await fake.Tango.GMGN.readCurrentToken();
+        const identityNode = document.querySelector('[data-addr]');
+        identityNode.setAttribute('data-addr', '0x1111111111111111111111111111111111111111');
+        const conflicting = await fake.Tango.GMGN.readCurrentToken();
+        identityNode.removeAttribute('data-addr');
+        document.querySelector('[data-testid="quote-token-tag"]').setAttribute('data-addr', fake.location.href.split('/').pop());
+        const quoteOnly = await fake.Tango.GMGN.readCurrentToken();
+        const header = document.querySelector('[data-sentry-component="TokenHeader"]');
+        const ancestry = []; for (let node = header; node && ancestry.length < 8; node = node.parentElement)
+          ancestry.push({ tag: node.tagName, descendants: node.querySelectorAll('*').length, textLength: node.textContent.length,
+            addr: [...node.querySelectorAll('[data-addr]')].map(n => n.getAttribute('data-addr')) });
+        document.title = ${JSON.stringify(HEADLESS_LAYOUT_COMPLETE_PREFIX)} + btoa(unescape(encodeURIComponent(JSON.stringify({ current, refreshed, conflicting, quoteOnly, ancestry }))));
+      });
+    </script>`, 'utf8');
+    const result = spawnSync(localChromeExecutable(), ['--headless', '--disable-gpu', '--no-sandbox', '--no-first-run',
+      '--host-resolver-rules=MAP * 0.0.0.0, EXCLUDE localhost', '--virtual-time-budget=1000', '--dump-dom',
+      `--user-data-dir=${path.join(tempRoot, 'profile')}`, pathToFileURL(pagePath).href],
+      { encoding: 'utf8', timeout: 60000, windowsHide: true });
+    assert.equal(result.status, 0, result.stderr);
+    const report = decodeHeadlessLayoutTelemetry(result.stdout.match(/<title>([^<]+)<\/title>/i)?.[1]);
+    assert.equal(report.current.token.metadataVerified, true, JSON.stringify(report));
+    assert.equal(report.current.quote.marketCapUsd, 10610, JSON.stringify(report));
+    assert.equal(report.refreshed.quote.marketCapUsd, 14100, 'fresh reads follow the captured header value');
+    assert.equal(report.conflicting.token.metadataVerified, false, 'conflicting canonical address is rejected');
+    assert.deepEqual(report.conflicting.quote, {});
+    assert.equal(report.quoteOnly.token.metadataVerified, false, 'quote asset data-addr cannot prove current token identity');
+    assert.deepEqual(report.quoteOnly.quote, {});
+  } finally { fs.rmSync(tempRoot, { recursive: true, force: true }); }
+});

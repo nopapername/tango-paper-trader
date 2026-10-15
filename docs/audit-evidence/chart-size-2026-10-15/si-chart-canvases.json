@@ -1,0 +1,79 @@
+[
+  {
+    "height": 538,
+    "parent": "<div class=\"chart-gui-wrapper\" data-qa-id=\"pane-widget-chart-gui-wrapper\" style=\"width: 787px; height: 538px;\"><div class=\"legend-YTFIJ62h noWrap-YTFIJ62h wrappable-YTFIJ62h chart-gui-wrapper__legend\" data-qa-id=\"legend\" data-tooltip-show-on-focus=\"true\" style=\"--legend-source-item-button-width: 28px; color: rgba(18, 18, 18, 0.5);\"><div class=\"legendMainSourceWrapper-YTFIJ62h\"><div data-status=\"undefined\" class=\"item-YTFIJ62h series-YTFIJ62h onlyOneButtonCanBeStick-YTFIJ62h\" data-qa-id=\"legend-series-item\" role=\"toolbar\"><div class=\"noWrapWrapper-YTFIJ62h\"><div class=\"titlesWrapper-YTFIJ62h\" data-qa-id=\"legend-titles\"><div class=\"titleWrapper-YTFIJ62h withDot-YTFIJ62h mainTitle-YTFIJ62h\" data-qa-id=\"title-wrapper legend-source-title\"><div class=\"title-YTFIJ62h\">SI</div></div><div class=\"titleWrapper-YTFIJ62h withDot-YTFIJ62h intervalTitle-YTFIJ62h\" data-qa-id=\"title-wrapper legend-source-interval\"><div class=\"title-YTFIJ62h\">1秒</div></div><div class=\"titleWrapper-YTFIJ62h withDot-YTFIJ62h exchangeTitle-YTFIJ62h\" data-qa-id=\"title-wrapper legend-source-exchange\"><div class=\"title-YTFIJ62h\">GMGN</div></div></div><div class=\"buttonsWrapper-YTFIJ62h\" data-name=\"actions\"><div class=\"buttons-YTFIJ62h\"><button class=\"button-YTFIJ62h blockHidden-LcYdo2N6 eye-YTFIJ62h apply-common-tooltip accessible-YTFIJ62h\" data-qa-id=\"legend-show-hide-action\" title=\"隐藏\" aria-label=\"隐藏\" type=\"button\" tabindex=\"-1\"><div class=\"buttonIcon-YTFIJ62h\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 18 18\" width=\"18\" height=\"18\"><g class=\"normal-eye\"><path fill=\"currentColor\" fill-rule=\"evenodd\" d=",
+    "rect": {
+      "h": 538,
+      "w": 787,
+      "x": 56,
+      "y": 0
+    },
+    "width": 787
+  },
+  {
+    "height": 538,
+    "parent": "<div class=\"chart-gui-wrapper\" data-qa-id=\"pane-widget-chart-gui-wrapper\" style=\"width: 787px; height: 538px;\"><div class=\"legend-YTFIJ62h noWrap-YTFIJ62h wrappable-YTFIJ62h chart-gui-wrapper__legend\" data-qa-id=\"legend\" data-tooltip-show-on-focus=\"true\" style=\"--legend-source-item-button-width: 28px; color: rgba(18, 18, 18, 0.5);\"><div class=\"legendMainSourceWrapper-YTFIJ62h\"><div data-status=\"undefined\" class=\"item-YTFIJ62h series-YTFIJ62h onlyOneButtonCanBeStick-YTFIJ62h\" data-qa-id=\"legend-series-item\" role=\"toolbar\"><div class=\"noWrapWrapper-YTFIJ62h\"><div class=\"titlesWrapper-YTFIJ62h\" data-qa-id=\"legend-titles\"><div class=\"titleWrapper-YTFIJ62h withDot-YTFIJ62h mainTitle-YTFIJ62h\" data-qa-id=\"title-wrapper legend-source-title\"><div class=\"title-YTFIJ62h\">SI</div></div><div class=\"titleWrapper-YTFIJ62h withDot-YTFIJ62h intervalTitle-YTFIJ62h\" data-qa-id=\"title-wrapper legend-source-interval\"><div class=\"title-YTFIJ62h\">1秒</div></div><div class=\"titleWrapper-YTFIJ62h withDot-YTFIJ62h exchangeTitle-YTFIJ62h\" data-qa-id=\"title-wrapper legend-source-exchange\"><div class=\"title-YTFIJ62h\">GMGN</div></div></div><div class=\"buttonsWrapper-YTFIJ62h\" data-name=\"actions\"><div class=\"buttons-YTFIJ62h\"><button class=\"button-YTFIJ62h blockHidden-LcYdo2N6 eye-YTFIJ62h apply-common-tooltip accessible-YTFIJ62h\" data-qa-id=\"legend-show-hide-action\" title=\"隐藏\" aria-label=\"隐藏\" type=\"button\" tabindex=\"-1\"><div class=\"buttonIcon-YTFIJ62h\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 18 18\" width=\"18\" height=\"18\"><g class=\"normal-eye\"><path fill=\"currentColor\" fill-rule=\"evenodd\" d=",
+    "rect": {
+      "h": 538,
+      "w": 787,
+      "x": 56,
+      "y": 0
+    },
+    "width": 787
+  },
+  {
+    "height": 538,
+    "parent": "<div class=\"price-axis\" data-name=\"price-axis-A\" aria-hidden=\"true\" style=\"width: 56px; left: 0px; height: 538px; min-width: 56px;\"><canvas width=\"56\" height=\"538\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 56px; height: 538px; position: absolute; z-index: 1; left: 0px; top: 0px;\"></canvas><canvas width=\"56\" height=\"538\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 56px; height: 538px; position: absolute; z-index: 2; left: 0px; top: 0px;\"></canvas><div class=\"price-axis__modeButtons price-axis__modeButtons_hidden\" style=\"background: rgb(18, 18, 18);\"><div class=\"priceScaleModeButtons-aaKX6K1a\"><div class=\"priceScaleModeButtons__buttonWrapper-aaKX6K1a\"><button class=\"priceScaleModeButton-okRV4Kjm priceScaleModeButton_activated-okRV4Kjm priceScaleModeButtons__button-aaKX6K1a apply-common-tooltip\" data-tooltip=\"自动(调整数据适于屏幕)\" aria-label=\"切换自动坐标\">A</button></div><div class=\"priceScaleModeButtons__buttonWrapper-aaKX6K1a\"><button class=\"priceScaleModeButton-okRV4Kjm priceScaleModeButtons__button-aaKX6K1a apply-common-tooltip\" data-tooltip=\"对数\" aria-label=\"切换对数坐标\">L</button></div></div></div></div>",
+    "rect": {
+      "h": 538,
+      "w": 56,
+      "x": 843,
+      "y": 0
+    },
+    "width": 56
+  },
+  {
+    "height": 538,
+    "parent": "<div class=\"price-axis\" data-name=\"price-axis-A\" aria-hidden=\"true\" style=\"width: 56px; left: 0px; height: 538px; min-width: 56px;\"><canvas width=\"56\" height=\"538\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 56px; height: 538px; position: absolute; z-index: 1; left: 0px; top: 0px;\"></canvas><canvas width=\"56\" height=\"538\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 56px; height: 538px; position: absolute; z-index: 2; left: 0px; top: 0px;\"></canvas><div class=\"price-axis__modeButtons price-axis__modeButtons_hidden\" style=\"background: rgb(18, 18, 18);\"><div class=\"priceScaleModeButtons-aaKX6K1a\"><div class=\"priceScaleModeButtons__buttonWrapper-aaKX6K1a\"><button class=\"priceScaleModeButton-okRV4Kjm priceScaleModeButton_activated-okRV4Kjm priceScaleModeButtons__button-aaKX6K1a apply-common-tooltip\" data-tooltip=\"自动(调整数据适于屏幕)\" aria-label=\"切换自动坐标\">A</button></div><div class=\"priceScaleModeButtons__buttonWrapper-aaKX6K1a\"><button class=\"priceScaleModeButton-okRV4Kjm priceScaleModeButtons__button-aaKX6K1a apply-common-tooltip\" data-tooltip=\"对数\" aria-label=\"切换对数坐标\">L</button></div></div></div></div>",
+    "rect": {
+      "h": 538,
+      "w": 56,
+      "x": 843,
+      "y": 0
+    },
+    "width": 56
+  },
+  {
+    "height": 28,
+    "parent": "<div aria-hidden=\"true\" style=\"width: 100%; height: 100%; position: relative; overflow: hidden;\"><canvas width=\"787\" height=\"28\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 787px; height: 28px; position: absolute; z-index: 1; left: 0px; top: 0px;\"></canvas><canvas width=\"787\" height=\"28\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 787px; height: 28px; position: absolute; z-index: 2; left: 0px; top: 0px;\"></canvas></div>",
+    "rect": {
+      "h": 28,
+      "w": 787,
+      "x": 56,
+      "y": 538
+    },
+    "width": 787
+  },
+  {
+    "height": 28,
+    "parent": "<div aria-hidden=\"true\" style=\"width: 100%; height: 100%; position: relative; overflow: hidden;\"><canvas width=\"787\" height=\"28\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 787px; height: 28px; position: absolute; z-index: 1; left: 0px; top: 0px;\"></canvas><canvas width=\"787\" height=\"28\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 787px; height: 28px; position: absolute; z-index: 2; left: 0px; top: 0px;\"></canvas></div>",
+    "rect": {
+      "h": 28,
+      "w": 787,
+      "x": 56,
+      "y": 538
+    },
+    "width": 787
+  },
+  {
+    "height": 28,
+    "parent": "<div class=\"apply-common-tooltip\" aria-hidden=\"true\" style=\"width: 56px; height: 28px; position: absolute; left: 0px; overflow: hidden; min-width: 56px;\"><canvas width=\"56\" height=\"28\" style=\"user-select: none; -webkit-tap-highlight-color: transparent; width: 56px; height: 28px; position: absolute; left: 0px; top: 0px;\"></canvas></div>",
+    "rect": {
+      "h": 28,
+      "w": 56,
+      "x": 843,
+      "y": 538
+    },
+    "width": 56
+  }
+]
