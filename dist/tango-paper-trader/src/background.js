@@ -89,11 +89,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, error: 'Invalid Dashboard route' });
       return false;
     }
-    const hasDeepLink = Boolean(requestedTab || requestedChain);
     const baseUrl = chrome.runtime.getURL('dashboard.html');
     const dashboardUrl = `${baseUrl}${requestedChain ? `?chain=${encodeURIComponent(requestedChain)}` : ''}${requestedTab ? `#${encodeURIComponent(requestedTab)}` : ''}`;
-    const openDashboard = hasDeepLink ? chrome.tabs.create({ url: dashboardUrl }) : chrome.runtime.openOptionsPage();
-    openDashboard
+    // Use the same tab route for every entry point; embedded browsers may not
+    // provide an options-page surface even when openOptionsPage resolves.
+    Promise.resolve().then(() => chrome.tabs.create({ url: dashboardUrl }))
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;

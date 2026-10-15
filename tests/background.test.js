@@ -305,6 +305,26 @@ test('Alt+Shift+P command toggles only the enabled setting in serialized order',
   assert.equal(loaded.storageValues[settingsKey].enabled, false);
 });
 
+test('plain Dashboard requests open a tab even when the options-page API silently does nothing', async () => {
+  const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+  const response = await send(loaded, { type: 'TANGO_OPEN_DASHBOARD' });
+  assert.equal(response.ok, true);
+  assert.deepEqual(loaded.openedTabs, ['chrome-extension://test/dashboard.html']);
+});
+
+test('Dashboard opening reports both asynchronous rejections and synchronous API failures', async () => {
+  for (const synchronous of [false, true]) {
+    const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
+    loaded.context.chrome.tabs.create = () => {
+      if (synchronous) throw new Error('tab unavailable');
+      return Promise.reject(new Error('tab unavailable'));
+    };
+    const response = await send(loaded, { type: 'TANGO_OPEN_DASHBOARD' });
+    assert.equal(response.ok, false);
+    assert.equal(response.error, 'tab unavailable');
+  }
+});
+
 test('Dashboard deep links validate and carry the requested tab and current chain', async () => {
   const loaded = loadBackground(async () => { throw new Error('must not fetch'); });
   const opened = await send(loaded, { type: 'TANGO_OPEN_DASHBOARD', tab: 'history', chain: 'base' });

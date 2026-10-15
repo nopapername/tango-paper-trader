@@ -234,6 +234,18 @@ test('Popup startup storage failure renders a retry that recovers', async () => 
   assert.match(popup.app.innerHTML, /id="popup-chain"/);
 });
 
+test('Popup Dashboard button uses the background route and surfaces opening failures', async () => {
+  const popup = await loadPopup();
+  await popup.element('#dashboard').click();
+  assert.ok(popup.runtimeMessages.some((message) => message.type === 'TANGO_OPEN_DASHBOARD'));
+  popup.context.chrome.runtime.sendMessage = async () => ({ ok: false, error: 'unavailable' });
+  await popup.element('#dashboard').click();
+  assert.match(popup.app.innerHTML, /openDashboardFailed/);
+  popup.context.chrome.runtime.sendMessage = () => { throw new Error('context invalidated'); };
+  await popup.element('#dashboard').click();
+  assert.match(popup.app.innerHTML, /openDashboardFailed/);
+});
+
 test('Popup routes an uninitialized account to onboarding without writing fixed defaults', async () => {
   const popup = await loadPopup({ initialized: false });
 

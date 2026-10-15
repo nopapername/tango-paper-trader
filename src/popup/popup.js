@@ -291,7 +291,12 @@
         async () => { await reload(); render(); }
       );
     });
-    document.querySelector('#dashboard')?.addEventListener('click', () => global.chrome.runtime.openOptionsPage());
+    document.querySelector('#dashboard')?.addEventListener('click', async () => {
+      try {
+        const response = await global.chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD' });
+        if (!response?.ok) throw new Error('openDashboardFailed');
+      } catch { statusMessage = t('openDashboardFailed'); render(); }
+    });
     document.querySelector('#gmgn')?.addEventListener('click', async () => {
       const selectionRevision = selectedChainRevision;
       if (selectionPending) await selectionPending.promise;
