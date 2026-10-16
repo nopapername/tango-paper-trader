@@ -125,6 +125,7 @@
     ['syntheticNativePrice', (value) => typeof value === 'boolean'],
     ['needsCalibration', (value) => typeof value === 'boolean'],
     ['provisionalTokenPrice', (value) => typeof value === 'boolean'],
+    ['initialMarketCapPending', (value) => typeof value === 'boolean'],
     ['provisionalNativePrice', (value) => typeof value === 'boolean'],
     ['totalSupply', (value) => finiteBetween(value, 0, Number.MAX_VALUE)],
     ['provisionalSupply', (value) => finiteBetween(value, 0, Number.MAX_VALUE)],

@@ -434,10 +434,10 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 .tango-token-strip strong { color: var(--text); max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tango-token-strip span { color: var(--muted); }
 .tango-paper-logo { color: var(--brand); font-size: 15px; font-weight: 900; letter-spacing: -.08em; }
-.tango-summary-grid { border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4,1fr); padding: 12px 4px 10px; }
+.tango-summary-grid { border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 12px 4px 10px; }
 .tango-summary-item { min-width: 0; padding: 0 5px; text-align: center; }
 .tango-summary-item span { color: var(--muted); display: block; font-size: 10px; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tango-summary-item strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tango-summary-item strong { display: block; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; white-space: normal; }
 .tango-paper-balance-summary { background: linear-gradient(135deg,rgba(198,250,116,.18),rgba(62,230,160,.08)); border: 1px solid rgba(198,250,116,.42); border-radius: 8px; margin: -5px 2px; padding: 5px 4px; }
 .tango-paper-balance-summary span { color: #cbbfff; font-size: 11px; font-weight: 750; margin-bottom: 3px; }
 .tango-paper-balance-summary strong { color: #72f0bd; font-size: 15px; font-weight: 900; text-shadow: 0 0 12px rgba(62,230,160,.18); }

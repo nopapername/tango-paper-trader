@@ -1,7 +1,7 @@
 (function initConstants(global) {
   const Tango = global.Tango = global.Tango || {};
 
-  Tango.VERSION = '0.3.29';
+  Tango.VERSION = '0.3.30';
   Tango.STORAGE_KEY = 'tangoPaperTraderStateV1';
   Tango.SETTINGS_KEY = 'tangoPaperTraderSettingsV1';
   Tango.QUOTE_STALE_MS = 15_000;

@@ -1697,6 +1697,8 @@
       && Math.abs(Number(quote.totalSupply) - Number(position.totalSupply))
         > Number(position.totalSupply) * Number.EPSILON;
     if (lateLaunchModeCorrection) return true;
+    if (position.initialMarketCapPending === true
+      && (quote.syntheticTokenPrice !== true || quote.valuationSource === 'CARD_MARKET_CAP_FALLBACK_SUPPLY')) return true;
     if (position.syntheticTokenPrice === true && quote.syntheticTokenPrice !== true) return true;
     if (position.syntheticNativePrice === true && quote.syntheticNativePrice !== true) return true;
     return (position.needsCalibration === true || position.provisional === true)
@@ -1818,7 +1820,22 @@
       && Tango.Chains.normalizeAddress(chain.id, runtime.current.token.address) === address;
     const candidate = currentMatches ? runtime.current.quote : freshGmgnQuote(chain.id, address);
     try { return { quote: requireExecutableQuote(position, candidate), reason: null }; }
-    catch (error) { return { quote: null, reason: error?.message || 'invalidQuote' }; }
+    catch (error) {
+      // A fresh observed cap can value a paper position while exact token supply
+      // is still unknown. Use the same resolved observation as detail execution,
+      // rather than silently waiting for the ten-second durable quote write.
+      const normalized = normalizeObservationDimensions(candidate);
+      if (trustedCachedObservation(normalized, chain.id, address, Number(Tango.QUOTE_STALE_MS || 15_000))) {
+        const token = currentMatches ? runtime.current.token : { ...position, address };
+        const resolved = resolvePaperTradeQuote(token, normalized, { position });
+        const observedCap = resolved?.valuationSource === 'CARD_MARKET_CAP_FALLBACK_SUPPLY'
+          && ['GMGN', 'GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'].includes(String(resolved.marketCapSource || '').toUpperCase())
+          && Number(resolved.marketCapObservedAt) > 0;
+        if (observedCap && Tango.Engine.validateQuote(resolved, Date.now(), undefined, position,
+          executionValidationTrustContext(position, token)).ok) return { quote: resolved, reason: null };
+      }
+      return { quote: null, reason: error?.message || 'invalidQuote' };
+    }
   }
 
   function freshExecutableQuote(position) {
@@ -2592,7 +2609,7 @@
     const current = runtime.current;
     if (!current?.token || current.token.chain !== chain.id) return '';
     const position = currentPosition();
-    const liveQuote = executableQuote(current.token, current.quote);
+    const liveQuote = position ? freshExecutableQuote(position) : executableQuote(current.token, current.quote);
     const paperQuote = liveQuote || resolvePaperTradeQuote(current.token, current.quote, { position });
     // A startup/no-chart fallback is an execution estimate, not a new market
     // observation. Keep the position's last mark until factual data arrives.

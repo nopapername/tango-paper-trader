@@ -571,6 +571,22 @@
     );
   }
 
+  function initialMarketCapPlaceholder(quote) {
+    return quote?.syntheticTokenPrice === true && quote?.paperFallback === true
+      && String(quote.source || '').toUpperCase() === 'TANGO_FALLBACK'
+      && Number(quote.marketCapUsd) === Number(Tango.Supply.UNKNOWN_INITIAL_MARKET_CAP_USD)
+      && !(Number(quote.marketCapObservedAt) > 0)
+      && quote.originalObservedAt === 0;
+  }
+
+  function observedTokenValuation(quote) {
+    if (quote?.syntheticTokenPrice !== true && positiveFinite(quote?.priceUsd)) return true;
+    return positiveFinite(quote?.marketCapUsd)
+      && ['GMGN', 'GMGN_DETAIL', 'GMGN_TRENCH', 'GMGN_NETWORK'].includes(
+        String(quote.marketCapSource || '').toUpperCase())
+      && Number.isSafeInteger(quote.marketCapObservedAt) && quote.marketCapObservedAt > 0;
+  }
+
   function calibrationReason(price, nativePrice, supply) {
     if (price && nativePrice && supply) return 'PRICE_NATIVE_AND_SUPPLY';
     if (price && nativePrice) return 'PRICE_AND_NATIVE';
@@ -618,7 +634,9 @@
     const priceCorrection = existing.provisionalTokenPrice === true
       && quote.syntheticTokenPrice !== true
       && (!supplyCorrection || marketCapMoved);
-    const reason = calibrationReason(priceCorrection, nativeCorrection, supplyCorrection);
+    const initialMarketCapCorrection = existing.initialMarketCapPending === true
+      && observedTokenValuation(quote);
+    const reason = calibrationReason(priceCorrection || initialMarketCapCorrection, nativeCorrection, supplyCorrection);
     if (!reason) return { status: 'NOOP', state };
 
     const selectedSupply = preferredSupply(quote, {
@@ -627,12 +645,16 @@
     if (![newPriceUsd, newNativePriceUsd].every(positiveFinite)) {
       return { status: 'FAILED', state, reason: 'calibrationFailed' };
     }
-    const neutralDimensionCorrection = supplyCorrection || nativeCorrection;
+    const neutralDimensionCorrection = supplyCorrection || nativeCorrection || initialMarketCapCorrection;
     const supplyRatio = supplyCorrection
       ? observedSupply.totalSupply / oldSupply.totalSupply : 1;
     const oldNativePriceUsd = Number(existing.lastNativePriceUsd || newNativePriceUsd);
     const nativeRatio = nativeCorrection ? newNativePriceUsd / oldNativePriceUsd : 1;
-    const nextQuantity = Number(existing.quantity) * supplyRatio * nativeRatio;
+    // Correct the placeholder price once. Its ratio already includes any supply
+    // change, so applying supplyRatio as well would count that change twice.
+    const tokenRatio = initialMarketCapCorrection
+      ? Number(existing.lastPriceUsd) / newPriceUsd : supplyRatio;
+    const nextQuantity = Number(existing.quantity) * tokenRatio * nativeRatio;
     let roundedNextQuantity;
     try {
       roundedNextQuantity = checkedRound(nextQuantity, 'positive');
@@ -693,6 +715,7 @@
       syntheticTokenPrice: nextProvisionalTokenPrice,
       syntheticNativePrice: nextProvisionalNativePrice,
       provisionalTokenPrice: nextProvisionalTokenPrice,
+      initialMarketCapPending: existing.initialMarketCapPending === true && !initialMarketCapCorrection,
       provisionalNativePrice: nextProvisionalNativePrice,
       ...(selectedSupply?.source === 'LEGACY_PUMP_RULE'
         ? { marketCapProvenance: MARKET_CAP_PROVENANCE }
@@ -773,6 +796,13 @@
     const executionSettings = validatedExecutionSettings(settings, chain);
     const amountNative = Number(order?.amountNative);
     if (!finiteBetween(amountNative, Number.EPSILON, Number.MAX_VALUE)) throw new Error('invalidAmount');
+    const held = state.positions?.[positionKey(chain, tokenAddress)];
+    // A missing quote must never price a new tranche at the arbitrary launch
+    // placeholder once this position has an established valuation. The content
+    // path supplies explicit position history for offline/no-chart additions.
+    if (held && held.initialMarketCapPending !== true && initialMarketCapPlaceholder(order.quote)) {
+      throw new Error('invalidQuote');
+    }
     const prepared = preparePositionForExecution(
       state, order?.token, order?.quote, now, order?.staleMs
     );
@@ -931,6 +961,8 @@
       quoteSource: String(order.quote.source || existing?.quoteSource || ''),
       paperFallback: order.quote.paperFallback === true || existing?.paperFallback === true,
       needsCalibration, provisionalTokenPrice, provisionalNativePrice,
+      initialMarketCapPending: existing ? existing.initialMarketCapPending === true
+        : initialMarketCapPlaceholder(order.quote),
       averageEntryPriceProvenance,
       ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {})
     };
@@ -1192,7 +1224,10 @@
     let quantity = Number(position.quantity);
     const oldSupply = trustedSupply(position);
     const observedSupply = quote && quoteSupply(quote, position);
-    if (usesMarketCapValuation(position) && oldSupply && observedSupply
+    if (position.initialMarketCapPending === true && observedTokenValuation(quote)
+      && priceUsd > 0 && Number(position.lastPriceUsd) > 0) {
+      quantity *= Number(position.lastPriceUsd) / priceUsd;
+    } else if (usesMarketCapValuation(position) && oldSupply && observedSupply
       && supplyRank(observedSupply.source) > supplyRank(oldSupply.source)) {
       quantity *= observedSupply.totalSupply / oldSupply.totalSupply;
     }

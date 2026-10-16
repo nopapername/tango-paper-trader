@@ -294,7 +294,7 @@
       && quote?.valuationMode === 'MARKET_CAP'
       && String(quote?.source || '').toUpperCase() === 'TANGO_FALLBACK'
       && quote?.provisionalSupplyProvenance == null
-      && ['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'].includes(candidateMarketCapSource)
+      && ['GMGN', 'GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'].includes(candidateMarketCapSource)
       && Number.isSafeInteger(candidateMarketCapObservedAt)
       && candidateMarketCapObservedAt > 0
       && candidateMarketCapObservedAt <= executionNow
