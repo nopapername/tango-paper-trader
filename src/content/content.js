@@ -1512,25 +1512,6 @@
     // current launch rule (including Mayhem) must retain its own supply.
     const legacyFallbackSupply = Tango.Supply.ruleSupply(chain.id, resolvedLaunchpad, resolvedLaunchMode)
       ? 0 : legacyPumpSupply;
-    const supply = Tango.Supply.resolve({
-      chain: chain.id,
-      totalSupply: localExactSupply || positionExactSupply || legacyFallbackSupply,
-      supplySource: localExactSupply || positionExactSupply ? 'GMGN_EXACT'
-        : legacyFallbackSupply ? 'LEGACY_PUMP_RULE' : '',
-      priceUsd: safeObservedPrice,
-      marketCapUsd: safeMarketCapUsd,
-      address: normalizedAddress,
-      observationId: local.observationId,
-      priceObservationId: local.priceObservationId,
-      marketCapObservationId: local.marketCapObservationId,
-      priceObservedAt: local.priceObservedAt || local.originalObservedAt || local.observedAt,
-      marketCapObservedAt: local.marketCapObservedAt || local.originalObservedAt || local.observedAt,
-      priceSource: local.priceSource || local.source,
-      marketCapSource: local.marketCapSource || local.source,
-      priceProvenance: local.priceProvenance,
-      launchpad: resolvedLaunchpad,
-      launchMode: resolvedLaunchMode
-    });
     const marketCapObservationSource = factualObservationSource(
       local.marketCapSource || local.source
     );
@@ -1559,6 +1540,39 @@
       && (marketCapObservationId || totalSupplyObservationId
         ? Boolean(marketCapObservationId && marketCapObservationId === totalSupplyObservationId)
         : marketCapObservationTime > 0 && marketCapObservationTime === totalSupplyObservationTime);
+    // A supply-only observation cannot change the units of a historical price.
+    // Keep the held supply until a factual price or a coherent MC/supply pair
+    // can support a neutral calibration.
+    const heldSupply = boundPosition && Tango.Supply.resolve({
+      ...boundPosition, address: normalizedAddress,
+      priceUsd: boundPosition.lastPriceUsd, marketCapUsd: boundPosition.lastMarketCapUsd
+    });
+    const deferSupplyUpgrade = !safeObservedPrice && !sameValuationObservation
+      && localExactSupply > 0 && heldSupply?.totalSupply > 0
+      && Number(heldSupply.totalSupply) !== localExactSupply
+      && boundPosition?.syntheticTokenPrice !== true
+      && boundPosition?.provisionalTokenPrice !== true;
+    const supply = Tango.Supply.resolve({
+      chain: chain.id,
+      totalSupply: deferSupplyUpgrade ? heldSupply.totalSupply
+        : localExactSupply || positionExactSupply || legacyFallbackSupply,
+      supplySource: deferSupplyUpgrade ? heldSupply.source
+        : localExactSupply || positionExactSupply ? 'GMGN_EXACT'
+        : legacyFallbackSupply ? 'LEGACY_PUMP_RULE' : '',
+      priceUsd: safeObservedPrice,
+      marketCapUsd: safeMarketCapUsd,
+      address: normalizedAddress,
+      observationId: local.observationId,
+      priceObservationId: local.priceObservationId,
+      marketCapObservationId: local.marketCapObservationId,
+      priceObservedAt: local.priceObservedAt || local.originalObservedAt || local.observedAt,
+      marketCapObservedAt: local.marketCapObservedAt || local.originalObservedAt || local.observedAt,
+      priceSource: local.priceSource || local.source,
+      marketCapSource: local.marketCapSource || local.source,
+      priceProvenance: local.priceProvenance,
+      launchpad: resolvedLaunchpad,
+      launchMode: resolvedLaunchMode
+    });
     const factualDerivedPrice = mergedHasFactualMarketCap
       && (supply?.source !== 'GMGN_EXACT' || sameValuationObservation
         || (preferTrenchMarketCap && Number(supply?.totalSupply) === cardRuleSupply));
