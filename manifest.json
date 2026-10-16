@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Tango Paper Trader",
-  "version": "0.3.43",
-  "description": "Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics.",
+  "name": "__MSG_extensionName__",
+  "version": "0.3.44",
+  "description": "__MSG_extensionDescription__",
   "permissions": [
     "storage"
   ],
@@ -15,7 +15,7 @@
     "service_worker": "src/background.js"
   },
   "action": {
-    "default_title": "Tango Paper Trader",
+    "default_title": "__MSG_extensionName__",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "assets/icons/icon-16.png",
@@ -29,7 +29,7 @@
       "suggested_key": {
         "default": "Alt+Shift+Y"
       },
-      "description": "Toggle all Tango paper trading features"
+      "description": "__MSG_toggleDescription__"
     }
   },
   "options_page": "dashboard.html",
@@ -117,5 +117,6 @@
     "32": "assets/icons/icon-32.png",
     "48": "assets/icons/icon-48.png",
     "128": "assets/icons/icon-128.png"
-  }
+  },
+  "default_locale": "zh_CN"
 }

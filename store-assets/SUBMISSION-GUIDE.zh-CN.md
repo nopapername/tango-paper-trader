@@ -1,6 +1,6 @@
 # Tango Paper Trader 谷歌商店后台填写教程
 
-适用安装包：0.3.43。资料日期：2026-10-16。以下是准备好的填写内容，不表示已获 Google 审核批准。后台字段可能随账号、地区和界面版本变化；身份、地址、邮箱及经营身份必须填写发布者自己的真实信息。
+适用安装包：0.3.44。资料日期：2026-10-16。以下是准备好的填写内容，不表示已获 Google 审核批准。后台字段可能随账号、地区和界面版本变化；身份、地址、邮箱及经营身份必须填写发布者自己的真实信息。
 
 ## 1 注册与账号设置
 
@@ -18,7 +18,7 @@
 
 ## 2 上传软件包
 
-点击 Add new item，上传同目录 tango-paper-trader-0.3.43.zip。打开 Package，确认名称 Tango Paper Trader、版本0.3.43、Manifest V3。
+点击 Add new item，上传同目录 tango-paper-trader-0.3.44.zip。打开 Package，确认名称 Tango Paper Trader、版本0.3.44、Manifest V3。
 
 ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上传整个 GitHub 仓库 ZIP，不要把 store-assets、用户 JSON 备份和测试日志一起上传。
 
@@ -26,17 +26,17 @@ ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上�
 
 | 字段 | 具体填写 |
 | --- | --- |
-| Name | Tango Paper Trader，当前从 manifest 读取 |
-| Summary / Short description | 当前从 manifest 读取：Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics. |
-| Detailed description | 当前只有一个语言页面时，复制 DESCRIPTION.bilingual.txt 全文；不要复制 Markdown 文件标题、编辑备注或审核说明 |
+| Name | 简体中文：Tango Paper Trader — Meme模拟交易练习；英文：Tango Paper Trader；从本地化 manifest 读取 |
+| Summary / Short description | 简体中文：在 GMGN 练习六链 Meme 模拟交易，查看仓位、盈亏、买卖复盘与日报。无需连接钱包。英文见 LISTING.en.md；从本地化 manifest 读取 |
+| Detailed description | 默认简体中文页复制 LISTING.zh-CN.md 的详细说明正文；英文语言页复制 LISTING.en.md 的 Detailed description 正文；不复制标题、版本或编辑备注 |
 | Category | 从实际选项选择最符合交易练习和分析工具的类别；若有 Tools 可优先考虑，不要随意归为真实金融交易服务 |
-| Language | 与所填长描述和目标用户一致；后台若只显示单一语言，使用双语长描述 |
+| Language | 默认语言选择简体中文（zh_CN），保留 English（en）语言页，各填对应语言文案 |
 | Homepage / Website | https://github.com/nopapername/tango-paper-trader |
 | Support URL | https://github.com/nopapername/tango-paper-trader/issues |
 | Official URL / Verified publisher | 没有验证自己域名时留空；不要把 GitHub 仓库链接冒充已验证域名 |
 | Promotional video | 没有视频时留空，不填写无关视频 |
 
-安装包内部的中英文切换使用项目自己的语言模块；0.3.43未加入 Chrome 的 _locales 元数据。独立中英文商店页面需以后新增 _locales 配置并上传更高版本，不能假设当前后台可直接切换两个商店语言。中英文文案已分别保存于 LISTING.zh-CN.md 和 LISTING.en.md。
+0.3.44 已加入 _locales/zh_CN 和 _locales/en，并设置 default_locale 为 zh_CN。上传新版后核对后台简体中文默认语言与英文语言页；名称和简短说明由 manifest 本地化消息提供，长描述分别粘贴。浏览器显示名称会跟随其语言选择。插件内语言偏好仍由原有设置控制，不会重置。
 
 ## 4 图像上传
 
@@ -51,7 +51,7 @@ ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上�
 | Screenshot 5 | screenshot-03-chart-refresh.jpg |
 | Marquee 1400×560 | 未制作，非必需项可留空 |
 
-五张截图均为1280×800 JPEG，来自实际0.3.38页面；0.3.43保留这些功能，但精修了字号、间距和颜色。上传后检查裁切、排序和清晰度。推广图和截图都不上传到 Package 页。
+五张截图均为1280×800 JPEG，来自实际0.3.38页面；0.3.44保留这些功能，但精修了字号、间距和颜色。上传后检查裁切、排序和清晰度。推广图和截图都不上传到 Package 页。
 
 ## 5 隐私规范 Privacy practices
 
@@ -89,7 +89,7 @@ All extension application logic is packaged locally. For a persistently empty id
 
 ### 数据类型 Data usage
 
-本地处理也必须披露。下面是根据0.3.43行为的填写建议，按后台具体定义核对：
+本地处理也必须披露。下面是根据0.3.44行为的填写建议，按后台具体定义核对：
 
 | 数据类别 | 当前填写建议及范围 |
 | --- | --- |
@@ -113,7 +113,7 @@ Limited Use 三项声明：仅在核对与实际行为一致后勾选“不出�
 
 https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 
-0.3.43隐私政策与本轮上架资料一并同步至远端主分支。提交前请在未登录GitHub的窗口验证该链接公开可访问。
+0.3.44隐私政策与本轮上架资料随此版本一并发布。提交前请在未登录GitHub的窗口验证该链接公开可访问。
 
 ## 6 测试说明 Test instructions
 
@@ -136,7 +136,7 @@ https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 
 ## 8 最后检查与提交
 
-确认版本0.3.43、安装ZIP含41文件、图标及5张截图、长描述、支持入口、公开隐私政策、权限理由、数据声明与测试说明都已填写。0.3.43已重载并完成验收，报价加载提示会自动消失，六链美元金额正常；提交前再核对后台预览。
+确认版本0.3.44、安装ZIP含43文件、图标及5张截图、长描述、支持入口、公开隐私政策、权限理由、数据声明与测试说明都已填写。0.3.44已通过本地回归，发布者已重载确认名称与隐私页显示正常；提交前再核对后台预览。
 
 建议选择审核通过后手动发布，避免未经最终检查自动上线。保存所有资料；具体字段和提示以你账号的实际后台为准。本文不代替实际审核结果。
 
@@ -149,6 +149,10 @@ https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 - https://developer.chrome.com/docs/webstore/cws-dashboard-distribution
 - https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements
 
-## 0.3.43 界面调整
+## 0.3.44 界面调整
 
 GMGN入口统一为“打开 GMGN / Open GMGN”，无邀请入口及仅保存设置按钮已移除。首次点击会保存设置并打开原有GMGN地址。盈亏日历保留“当前链交易记录”，底部改为新人扫链教程；扩展弹窗也有教程入口，详情交易面板不显示教程。教程链接：https://t.co/H2RSVQV4sX 。
+
+## 0.3.44 本次变更
+
+仅修正英文隐私页旧按钮名称，并加入简体中文默认、英文备用的扩展元数据。未修改行情、交易、账户、音效或既有界面语言设置。

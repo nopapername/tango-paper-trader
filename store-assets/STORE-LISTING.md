@@ -1,10 +1,10 @@
 # Tango Paper Trader Chrome Web Store submission draft
 
-Version: 0.3.43. Submission materials; Google review has not been performed.
+Version: 0.3.44. Submission materials; Google review has not been performed.
 
 ## 中文商店文案
 
-名称：Tango Paper Trader
+名称：Tango Paper Trader — Meme模拟交易练习
 
 简短说明：在 GMGN 练习六链 Meme 模拟交易，查看仓位、盈亏、买卖复盘与日报。无需连接钱包。
 
@@ -23,7 +23,7 @@ Tango 是完全免费的 Meme 模拟交易练习工具，独立于 GMGN。使用
 
 Name: Tango Paper Trader
 
-Short description: Practice six-chain Meme paper trading on GMGN with positions, PnL, trade replay and daily reports. No wallet needed.
+Short description: Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics.
 
 Detailed description:
 
@@ -84,7 +84,7 @@ Embedded Codex/Owl can block extension-created internal tabs; that is a browser 
 - Packaged icons: assets/icons/icon-16.png, icon-32.png, icon-48.png, icon-128.png.
 - Audio: GMGN Handgun / Kaching requested at runtime; synthesized local fallback. The publisher states there is no authorization issue; no independent license verification is claimed. See assets/NOTICE.txt and privacy policy.
 - Store promo: promo-440x280.png in this directory (outside the uploaded extension ZIP).
-- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Core trading and replay functions are unchanged; 0.3.43 refines styling. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
+- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Core trading and replay functions are unchanged; 0.3.44 refines styling. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
 - ZIP must contain manifest.json directly at root, not an extra wrapper directory.
 - Register/verify publisher account and contact information; select distribution and accurate content rating; accept applicable agreements personally.
 - User/developer must submit for review. This preparation does not submit, register, pay a fee or accept agreements.

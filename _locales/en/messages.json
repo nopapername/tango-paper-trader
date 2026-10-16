@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "Tango Paper Trader"
+  },
+  "extensionDescription": {
+    "message": "Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics."
+  },
+  "toggleDescription": {
+    "message": "Toggle all Tango paper trading features"
+  }
+}

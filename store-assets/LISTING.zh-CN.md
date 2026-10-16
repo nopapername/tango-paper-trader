@@ -1,8 +1,8 @@
 # Tango Paper Trader 中文上架文案
 
-版本 0.3.43
+版本 0.3.44
 
-名称：Tango Paper Trader
+名称：Tango Paper Trader — Meme模拟交易练习
 
 简短说明：在 GMGN 练习六链 Meme 模拟交易，查看仓位、盈亏、买卖复盘与日报。无需连接钱包。
 

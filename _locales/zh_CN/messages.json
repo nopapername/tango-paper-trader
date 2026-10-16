@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "Tango Paper Trader — Meme模拟交易练习"
+  },
+  "extensionDescription": {
+    "message": "在 GMGN 练习六链 Meme 模拟交易，查看仓位、盈亏、买卖复盘与日报。无需连接钱包。"
+  },
+  "toggleDescription": {
+    "message": "开启或关闭 Tango 全部模拟交易功能"
+  }
+}

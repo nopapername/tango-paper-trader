@@ -1,10 +1,10 @@
 # Tango Paper Trader English listing
 
-Version 0.3.43
+Version 0.3.44
 
 Name: Tango Paper Trader
 
-Short description: Practice six-chain Meme paper trading on GMGN with positions, PnL, trade replay and daily reports. No wallet needed.
+Short description: Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics.
 
 Detailed description:
 

@@ -2,7 +2,7 @@
 
 更新日期 / Last updated: 2026-10-16
 
-适用产品 / Product: Tango Paper Trader Chrome extension, version 0.3.43 and later unless replaced by a newer policy.
+适用产品 / Product: Tango Paper Trader Chrome extension, version 0.3.44 and later unless replaced by a newer policy.
 
 维护者与联系 / Maintainer and contact: Tango Paper Trader project maintainers. https://github.com/nopapername/tango-paper-trader/issues
 
