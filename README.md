@@ -8,7 +8,7 @@
 
 Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet connection or real funds required.
 
-**当前版本 / Current version: 0.3.37**
+**当前版本 / Current version: 0.3.38**
 
 [中文使用指南](#中文使用指南) · [English guide](#english-guide) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 
@@ -199,3 +199,19 @@ Tango is **completely free and intended for paper trading/practice only**. It do
 Paper balances, positions, settings and history stay in the current browser's local storage. Public market-data requests may include chain identifiers or public token contracts; core paper-account data is not uploaded to Tango. Read [Privacy](PRIVACY.md) and [Security](SECURITY.md).
 
 Simulated results do not guarantee live performance or model every liquidity constraint, token tax, MEV effect, failed transaction or market impact.
+## Store edition / 商店准备版
+
+买卖音效使用 GMGN Handgun / Kaching，播放失败时使用本地合成提示音；图标为 Tango 独立设计。隐私政策可在插件内打开，也可阅读 [中英文政策](PRIVACY.md)。
+
+The optional GMGN referral entry uses X9cuc5jd. The publisher may earn commissions from real GMGN trading fees (publisher-reported rate: 10%; GMGN determines eligibility/rates). No user discount is promised. The interface labels referral actions and offers a plain GMGN link. Paper trading is free and does not require referral attribution. Tango is not affiliated with or endorsed by GMGN. Store submission still requires resolving the affiliate-policy requirement for a direct, transparent user benefit; disclosure alone is not proof of compliance.
+
+可选 GMGN 推广入口使用 X9cuc5jd。发布者可能从真实交易手续费获得返佣（发布者提供比例为10%，以GMGN为准）；不承诺用户折扣。界面标注推广并提供普通入口，免费模拟交易不要求推荐关系。Tango不是GMGN官方产品。保留邀请码的商店提交仍需确认直接、透明的用户利益，披露本身不代表满足该项政策。
+
+### Account and valuation details
+
+- Trading and chain-scoped portfolio operations are current-chain-only. Only the active chain supplies the balance, positions, history, and header asset. JSON import and export form a full six-chain backup.
+- Changing common capital requires explicit confirmation and atomically resets every chain: balances, positions, trades, PnL/analytics, and calibrations, while preserving other settings.
+- Buy presets and network fee are per-chain; common capital is shared across all six independent chain accounts numerically, not converted. Sell presets, slippage, platform fee, confirmation, fast mode, sound, language, theme, enabled state, and selected chain are global.
+- First-run onboarding lets the user choose language and one common paper-capital amount, defaulting to 10. All six independent chain accounts receive that chosen numeric amount in their own native asset. First install opens the onboarding dashboard once; extension updates do not reopen onboarding.
+- GMGN live data takes precedence over K-line or synthetic market-cap estimates where applicable to the verified quote route. With no usable observation, the canonical deterministic fallback opens at $3,200 market cap with a provisional 1B supply divisor; it is explicitly simulated.
+- There is no wallet connection, signature, approval, swap, transaction broadcast, RPC broadcast, or real funds capability.

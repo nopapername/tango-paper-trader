@@ -3,6 +3,10 @@
 
   const messages = {
     en: {
+      affiliateDisclosure: 'Optional GMGN referral X9cuc5jd: the publisher may earn commissions from your real GMGN trading fees (publisher-reported rate: 10%; GMGN terms apply). No user discount is promised. Paper trading is free and does not require this link. Tango is independent of GMGN.',
+      referralLink: 'GMGN · referral link', plainGmgnLink: 'GMGN without referral', privacyPolicy: 'Privacy / 隐私',
+      saveWithoutReferral: 'Save setup only (no referral)',
+      startWithReferral: 'Save setup & open GMGN referral link',
       extensionReloadRequired: 'Tango was reloaded or updated. Refresh this GMGN page before paper trading again.',
       importTooManyRecords: 'Backup exceeds the 10,000 trade or calibration record limit. Import was rejected; nothing was changed.',
       paperTradingDisabled: 'Tango is off. Enable it before paper trading.',
@@ -88,6 +92,10 @@
       closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
+      affiliateDisclosure: '可选推广链接，邀请码 X9cuc5jd：发布者可能从您的 GMGN 真实交易手续费获得返佣（发布者提供比例为10%，以GMGN规则为准），不承诺用户折扣。模拟交易完全免费，不要求使用推广链接。Tango与GMGN无官方隶属关系。',
+      referralLink: 'GMGN · 推广链接', plainGmgnLink: '不带邀请码打开 GMGN', privacyPolicy: '隐私 / Privacy',
+      saveWithoutReferral: '仅保存设置（不使用推广）',
+      startWithReferral: '保存设置并打开 GMGN 推广链接',
       extensionReloadRequired: 'Tango 已重新加载或更新，请刷新当前 GMGN 页面后再进行模拟交易。',
       importTooManyRecords: '备份的成交或校准记录超过 10,000 条上限，已拒绝导入，现有数据未更改。',
       paperTradingDisabled: 'Tango 已关闭，请先启用后再进行模拟交易。',

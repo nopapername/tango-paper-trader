@@ -2348,7 +2348,7 @@
       try {
         sound.volume = 0.55;
         sound.currentTime = 0;
-        // play() may remain pending on a stalled remote resource, without rejecting.
+        // play() may remain pending on a stalled media resource, without rejecting.
         watchdog = setTimeout(fallback, 800);
         const playback = sound.play();
         const started = () => {

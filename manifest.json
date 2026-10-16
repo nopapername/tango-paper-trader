@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tango Paper Trader",
-  "version": "0.3.37",
+  "version": "0.3.38",
   "description": "Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics.",
   "permissions": [
     "storage"
@@ -16,7 +16,13 @@
   },
   "action": {
     "default_title": "Tango Paper Trader",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    }
   },
   "commands": {
     "toggle-paper-trading-master": {
@@ -105,5 +111,11 @@
         "https://gmgn.ai/*"
       ]
     }
-  ]
+  ],
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  }
 }
