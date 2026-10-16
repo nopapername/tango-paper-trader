@@ -746,6 +746,7 @@
       return;
     }
     Tango.GMGN.syncPositionBadges?.((token, readCardQuote) => {
+      if (!Tango.Chains.validateAddress(token?.chain, token?.address)) return null;
       const position = runtime.state.positions[Tango.Engine.positionKey(token.chain, token.address)];
       if (!position || !(Number(position.quantity) > 0)) return null;
       const cardQuote = readCardQuote();
@@ -757,7 +758,8 @@
       const label = language().toLowerCase().startsWith('zh') ? '持仓' : 'Holding';
       return { text: `${label} ${Tango.Format.native(mark.valueNative, symbol, language())}`,
         title: `${label} ${Tango.Format.number(mark.valueNative, language(), 8)} ${symbol}` };
-    }, roots, (chain, address) => Number(runtime.state.positions[
+    }, roots, (chain, address) => Tango.Chains.validateAddress(chain, address)
+      && Number(runtime.state.positions[
       Tango.Engine.positionKey(chain, address)]?.quantity) > 0);
   }
 

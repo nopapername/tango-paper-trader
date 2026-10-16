@@ -383,7 +383,8 @@
     let chain = explorerTokenChains.get(url.hostname);
     let path = chain ? url.pathname.match(/^\/token\/([^/]+)\/?$/) : null;
     if (url.hostname === 'web3.okx.com') {
-      chain = 'xlayer'; path = url.pathname.match(/^\/token\/x-layer\/([^/]+)\/?$/);
+      chain = 'xlayer'; path = url.pathname.match(/^\/token\/x-layer\/([^/]+)\/?$/)
+        || url.pathname.match(/^\/explorer\/x-layer\/evm\/token\/([^/]+)\/?$/);
     } else if (url.hostname === 'oklink.com' || url.hostname === 'www.oklink.com') {
       chain = 'xlayer'; path = url.pathname.match(/^\/xlayer\/token\/([^/]+)\/?$/);
     }
