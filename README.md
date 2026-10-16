@@ -8,7 +8,7 @@
 
 Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet connection or real funds required.
 
-**当前版本 / Current version: 0.3.44**
+**当前版本 / Current version: 0.3.45**
 
 [中文使用指南](#中文使用指南) · [English guide](#english-guide) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 

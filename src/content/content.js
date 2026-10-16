@@ -4,7 +4,7 @@
 
   const Tango = global.Tango;
   const runtime = {
-    state: null, settings: null, current: null, drawerOpen: false, modal: null,
+    state: null, settings: null, current: null, drawerOpen: false, modal: null, extensionInvalidated: false,
     toast: null, lastQuoteWriteAt: 0, lastQuoteWriteKey: null, quoteTimer: null, observer: null, renderQueued: false,
     presetEditing: null, presetDraft: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
     nativePrices: new Map(), nativePriceObservedAt: new Map(), nativePricePromises: new Map(),
@@ -70,7 +70,7 @@
       || (event.code !== 'KeyY' && String(event.key || '').toLowerCase() !== 'y')) return;
     event.preventDefault();
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'TANGO_TOGGLE_SHORTCUT' });
+      const response = await sendContentMessage({ type: 'TANGO_TOGGLE_SHORTCUT' });
       if (!response?.ok) showToast(t('settingsSaveFailed'), 'error');
     } catch { showToast(t('settingsSaveFailed'), 'error'); }
   }, true);
@@ -82,6 +82,26 @@
   shell.addEventListener('pointerdown', (event) => {
     if (event.isTrusted === true) runtime.interactionUntil = Date.now() + 500;
   }, true);
+
+  // Chrome may throw before returning a Promise after an extension reload.
+  function noteInvalidatedContext(error) {
+    if (!/extension context invalidated|^extensionReloadRequired$/i.test(String(error?.message || ''))) return false;
+    runtime.extensionInvalidated = true;
+    if (runtime.quoteTimer !== null) clearInterval(runtime.quoteTimer);
+    runtime.quoteTimer = null;
+    if (runtime.refreshRetryTimer !== null) clearTimeout(runtime.refreshRetryTimer);
+    runtime.refreshRetryTimer = null;
+    return true;
+  }
+
+  async function sendContentMessage(message) {
+    if (runtime.extensionInvalidated) throw new Error('extensionReloadRequired');
+    try { return await chrome.runtime.sendMessage(message); }
+    catch (error) {
+      noteInvalidatedContext(error);
+      throw error;
+    }
+  }
 
   function activeChain() { return Tango.Chains.fromUrl(location.href); }
   function paperExecutionDisabled() {
@@ -612,6 +632,7 @@
       runtime.refreshRetryDelay = 500;
       return true;
     } catch (error) {
+      if (noteInvalidatedContext(error)) return false;
       console.error('[Tango Paper Trader] settings refresh failed', error);
       scheduleRefreshRetry();
       return false;
@@ -812,6 +833,7 @@
   }
 
   async function performQuoteTick() {
+    if (runtime.extensionInvalidated) return;
     const routeCapture = captureRoute();
     const chain = activeChain();
     if (!chain) {
@@ -880,9 +902,15 @@
     if (previousKey !== currentKey || runtime.current) queueRender();
   }
 
-  const tickQuote = coalesceAsync(performQuoteTick);
+  const tickQuote = coalesceAsync(async () => {
+    try { return await performQuoteTick(); }
+    catch (error) {
+      if (!noteInvalidatedContext(error)) throw error;
+    }
+  });
 
   function ensureNativePrice(context, routeCapture = captureRoute()) {
+    if (runtime.extensionInvalidated) return;
     const chain = activeChain();
     if (!chain || (context && context.token?.chain !== chain.id)) return;
     const cached = freshNativePrice(chain.id);
@@ -894,7 +922,7 @@
     }
     if (freshPersistentNativePrice(chain.id) > 0) return;
     if (runtime.nativePricePromises.has(chain.id)) return;
-    const request = chrome.runtime.sendMessage({ type: 'TANGO_GET_NATIVE_PRICE', chain: activeChain().id })
+    const request = sendContentMessage({ type: 'TANGO_GET_NATIVE_PRICE', chain: chain.id })
       .then((response) => {
         const price = Number(response?.price || 0);
         if (!(price > 0)) return;
@@ -1025,6 +1053,7 @@
   }
 
   function ensureTokenQuote(context, routeCapture = captureRoute()) {
+    if (runtime.extensionInvalidated) return;
     const chain = activeChain();
     if (!routeCaptureIsCurrent(routeCapture) || !chain || context?.token?.chain !== chain.id
       || !context?.token?.address) return;
@@ -1065,7 +1094,7 @@
 
   function requestWithTimeout(message, timeoutMs = 650) {
     return Promise.race([
-      chrome.runtime.sendMessage(message).catch(() => null),
+      sendContentMessage(message).catch(() => null),
       new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))
     ]);
   }
@@ -1872,7 +1901,7 @@
     host.setAttribute('data-tango-token-open-status', 'requested');
     host.setAttribute('data-tango-token-open-result', '');
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'TANGO_OPEN_TOKEN', url: positionUrl(position) });
+      const response = await sendContentMessage({ type: 'TANGO_OPEN_TOKEN', url: positionUrl(position) });
       if (response?.opening && typeof response.opening === 'object') {
         const opening = Object.fromEntries(['sourceWindowKnown', 'returnedWindowKnown', 'returnedTab', 'hasTabId', 'sameWindow', 'active'].map((key) => [
           key, typeof response.opening[key] === 'boolean' ? response.opening[key] : null
@@ -2637,6 +2666,11 @@
     const waitingForMarket = Boolean(position && !liveQuote && paperQuote?.syntheticTokenPrice);
     const mark = position ? Tango.Engine.markPosition(position,
       waitingForMarket ? undefined : paperQuote, currentNativePriceUsd()) : null;
+    const holdingNativeText = !position
+      ? Tango.Format.native(0, chain.nativeSymbol, language())
+      : !waitingForMarket && Number(mark?.priceUsd) > 0 && Number(mark?.nativePriceUsd) > 0
+        && Number.isFinite(mark?.valueNative) && mark.valueNative >= 0
+        ? Tango.Format.native(mark.valueNative, chain.nativeSymbol, language()) : null;
     const displayMarketCap = Number(current.quote?.marketCapUsd) > 0
       ? Number(current.quote.marketCapUsd) : Number(position?.lastMarketCapUsd || 0);
     const displayMarketCapText = displayMarketCap > 0
@@ -2664,7 +2698,7 @@
           <div class="tango-trade-meta"><span>⌁ ${Tango.Format.percent(runtime.settings.slippageBps / 100, language())}</span><span>♜ ${Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())}</span><span>♙ ${feePercent}%</span><span class="safe">${t('entryMc')} ${position ? Tango.Format.usd(position.averageEntryMarketCap, language(), true) : '--'}</span></div>
         </section>
         <section class="tango-trade-block">
-          <div class="tango-trade-title sell-title"><span>${t('sell')} %</span><span class="tango-title-balance">${position ? `${Tango.Format.compact(position.quantity, language(), 2)} ${esc(symbol)}` : `0 ${esc(symbol)}`}</span></div>
+          <div class="tango-trade-title sell-title"><span>${t('sell')} %</span><span class="tango-title-balance tango-position-holding"><span class="tango-held-quantity">${position ? `${Tango.Format.compact(position.quantity, language(), 2)} ${esc(symbol)}` : `0 ${esc(symbol)}`}</span><span class="tango-held-native">· ${holdingNativeText === null ? '—' : `≈${esc(holdingNativeText)}`}</span></span></div>
           <div class="tango-preset-grid">${renderPresetGrid('sell', runtime.settings.sellPresets)}</div>
           <div class="tango-trade-meta"><span>⌁ ${runtime.settings.fastMode ? 'FAST' : t('auto')}</span><span>♜ ${Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())}</span><div class="tango-sell-market-actions"><span class="safe">${t('currentMc')} ${displayMarketCapText}</span><button class="tango-breakeven-link" data-action="breakeven" ${breakevenPercent ? '' : 'disabled'} title="${esc(breakevenRecovered ? t('breakevenRecovered') : breakevenPercent ? breakevenLabel : t('breakevenUnavailable'))}">${esc(breakevenLabel)}</button></div></div>
         </section>
@@ -2989,7 +3023,7 @@
 
   async function openDashboard(route = {}) {
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'TANGO_OPEN_DASHBOARD', ...route });
+      const response = await sendContentMessage({ type: 'TANGO_OPEN_DASHBOARD', ...route });
       if (response?.ok) return;
       throw new Error(response?.error || t('openDashboardFailed'));
     } catch (error) {
@@ -3245,7 +3279,7 @@
         if (callback) await callback();
         if (suppressForSession) {
           runtime.suppressConfirmForSession = true;
-          await chrome.runtime.sendMessage({ type: 'TANGO_SET_SESSION_CONFIRM', suppressed: true }).catch(() => null);
+          await sendContentMessage({ type: 'TANGO_SET_SESSION_CONFIRM', suppressed: true }).catch(() => null);
         }
       }
     }));
@@ -3466,7 +3500,7 @@
       characterData: true
     });
     Tango.Store.subscribe(refreshRecoverably);
-    const session = await chrome.runtime.sendMessage({ type: 'TANGO_GET_SESSION_CONFIRM' }).catch(() => null);
+    const session = await sendContentMessage({ type: 'TANGO_GET_SESSION_CONFIRM' }).catch(() => null);
     runtime.suppressConfirmForSession = Boolean(session?.suppressed);
     runtime.activeChainId = activeChain()?.id || null;
     await refreshRecoverably();
@@ -3480,7 +3514,7 @@
     document.addEventListener('input', handleQuickBuyAmountChange, true);
     document.addEventListener('change', handleQuickBuyAmountChange, true);
     await tickQuote();
-    runtime.quoteTimer = setInterval(tickQuote, 3000);
+    if (!runtime.extensionInvalidated) runtime.quoteTimer = setInterval(tickQuote, 3000);
     runtime.markerTimer = setInterval(() => { if (!document.hidden) syncChartMarkers(); }, 1000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncChartMarkers(); });
     runtime.routeTimer = setInterval(handleRouteChange, 150);

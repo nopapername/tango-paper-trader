@@ -403,6 +403,9 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 .tango-trade-title.buy-title { color: #39e58c; }
 .tango-trade-title.sell-title { color: #ff6673; }
 .tango-title-balance { color: var(--text); font-size: 11px; font-weight: 700; margin-left: auto; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tango-position-holding { display: flex; flex: 1; flex-wrap: wrap; justify-content: flex-end; gap: 3px 6px; min-width: 0; max-width: none; overflow: visible; white-space: normal; text-align: right; line-height: 1.4; }
+.tango-held-quantity { min-width: 0; overflow-wrap: anywhere; }
+.tango-held-native { white-space: nowrap; }
 .tango-preset.buy-preset { background: transparent; border-color: #26d77e; color: #42e797; font-weight: 800; }
 .tango-preset.buy-preset:hover { background: rgba(38,215,126,.12); }
 .tango-preset.sell-preset { background: transparent; border-color: #ff4d5e; color: #ff6673; font-weight: 800; }

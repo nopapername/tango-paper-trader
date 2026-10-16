@@ -1,6 +1,6 @@
 # Tango Paper Trader Chrome Web Store submission draft
 
-Version: 0.3.44. Submission materials; Google review has not been performed.
+Version: 0.3.45. Submission materials; Google review has not been performed.
 
 ## 中文商店文案
 
@@ -84,7 +84,10 @@ Embedded Codex/Owl can block extension-created internal tabs; that is a browser 
 - Packaged icons: assets/icons/icon-16.png, icon-32.png, icon-48.png, icon-128.png.
 - Audio: GMGN Handgun / Kaching requested at runtime; synthesized local fallback. The publisher states there is no authorization issue; no independent license verification is claimed. See assets/NOTICE.txt and privacy policy.
 - Store promo: promo-440x280.png in this directory (outside the uploaded extension ZIP).
-- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Core trading and replay functions are unchanged; 0.3.44 refines styling. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
+- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Core trading and replay functions are unchanged; 0.3.45 refines styling. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
 - ZIP must contain manifest.json directly at root, not an extra wrapper directory.
 - Register/verify publisher account and contact information; select distribution and accurate content rating; accept applicable agreements personally.
 - User/developer must submit for review. This preparation does not submit, register, pay a fee or accept agreements.
+详情交易面板在持仓数量旁显示对应的原生币估值（如 SOL、BNB），报价不可用时显示占位；该显示不改变成交计算。
+
+Alongside token quantity, the detail trading panel displays the holding value in the chain native asset (such as SOL or BNB). Unavailable valuations show a placeholder; execution calculations are unchanged.

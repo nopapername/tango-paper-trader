@@ -1,9 +1,9 @@
 # Tango Paper Trader 商店提交材料
 
-版本 0.3.44
+版本 0.3.45
 
 - [后台逐项填写教程](SUBMISSION-GUIDE.zh-CN.md)
-- [插件提交 ZIP](tango-paper-trader-0.3.44.zip)
+- [插件提交 ZIP](tango-paper-trader-0.3.45.zip)
 - [中文文案](LISTING.zh-CN.md) / [English copy](LISTING.en.md)
 - [可直接粘贴的中英文详细介绍](DESCRIPTION.bilingual.txt)
 - [完整资料与审核技术说明](STORE-LISTING.md)
@@ -20,4 +20,6 @@
 
 [小型推广图 440×280](promo-440x280.png)
 
-ZIP 仅含 43 个插件安装文件，manifest.json 位于根目录；本资料目录不打入插件 ZIP。截图来自0.3.38，截图保留核心功能展示；0.3.44另有字号、间距和颜色精修。未提交Google审核。
+ZIP 仅含 43 个插件安装文件，manifest.json 位于根目录；本资料目录不打入插件 ZIP。截图来自0.3.38，截图保留核心功能展示；0.3.45另有字号、间距和颜色精修。未提交Google审核。
+
+[GitHub Release / 直接下载](https://github.com/nopapername/tango-paper-trader/releases/tag/v0.3.45)
