@@ -49,8 +49,16 @@ html:not(.tango-paper-native-quick-buy-allowed) [data-sentry-component="BuyButto
 }
 
 /* Compact, non-interactive position value beside the native token name. */
+.tango-trench-position-row > :is([data-sentry-component="TooltipCopy"], [data-testid="token-symbol"], [data-token-symbol], .tango-trench-position-name) {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tango-trench-position-badge {
   display: inline-block;
+  pointer-events: none;
   flex: 0 0 auto;
   min-width: max-content;
   max-width: 130px;

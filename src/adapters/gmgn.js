@@ -2498,23 +2498,45 @@
   }
 
   const positionBadgeCards = new Set();
+  const positionBadgeLayouts = new WeakMap();
+
+  function clearPositionBadgeLayout(card, badge) {
+    const previous = positionBadgeLayouts.get(card);
+    const rows = new Set([previous?.row, badge?.parentElement,
+      ...(card?.querySelectorAll?.('.tango-trench-position-row') || [])]);
+    for (const row of rows) {
+      row?.classList?.remove('tango-trench-position-row');
+      row?.querySelectorAll?.('.tango-trench-position-name').forEach(node => node.classList.remove('tango-trench-position-name'));
+    }
+    previous?.name?.classList?.remove('tango-trench-position-name');
+    positionBadgeLayouts.delete(card);
+  }
 
   function updatePositionBadge(card, display) {
     let badge = card?.querySelector?.('.tango-trench-position-badge');
     if (!display?.text) {
+      clearPositionBadgeLayout(card, badge);
       badge?.remove();
       if (card?.dataset) delete card.dataset.tangoPositionCard;
       positionBadgeCards.delete(card);
       return;
     }
+    let anchor;
     if (!badge) {
       const symbol = card?.querySelector?.('[data-sentry-component="TooltipCopy"], [data-testid="token-symbol"], [data-token-symbol]');
-      const anchor = symbol?.nextElementSibling || symbol;
+      anchor = symbol?.nextElementSibling || symbol;
       if (!anchor?.insertAdjacentElement) return;
       badge = document.createElement('span');
       badge.className = 'tango-trench-position-badge';
       anchor.insertAdjacentElement('afterend', badge);
     }
+    const previous = positionBadgeLayouts.get(card);
+    const row = badge.parentElement;
+    const name = anchor || badge.previousElementSibling || previous?.name;
+    if (previous && (previous.row !== row || previous.name !== name)) clearPositionBadgeLayout(card, badge);
+    if (!name?.classList?.contains('tango-trench-position-name')) name?.classList?.add('tango-trench-position-name');
+    if (!row?.classList?.contains('tango-trench-position-row')) row?.classList?.add('tango-trench-position-row');
+    positionBadgeLayouts.set(card, { row, name });
     if (badge.textContent !== display.text) badge.textContent = display.text;
     if (badge.title !== display.title) badge.title = display.title || display.text;
     card.dataset.tangoPositionCard = '1';
