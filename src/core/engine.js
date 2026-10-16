@@ -857,6 +857,8 @@
     const unknownFallbackSupply = executionSupply.supplySource === UNKNOWN_FALLBACK_SOURCE;
     const existingEntryProvenance = existing?.averageEntryPriceProvenance
       || (existing ? (usesMarketCapValuation(existing) ? 'MARKET_CAP_DERIVED' : 'OBSERVED_PRICE') : '');
+    const averageEntryPriceProvenance = existingQuantity > 0 && existingEntryProvenance !== priceProvenance
+      ? 'MIXED_DERIVED' : existingEntryProvenance || priceProvenance;
     const existingRealizedPnlNative = checkedArithmetic(existing?.realizedPnlNative ?? 0);
     const nextCashBalanceNative = checkedArithmetic(cashBalanceNative - amountNative, 'nonnegative');
     const roundedQuantity = checkedRound(quantity, 'positive');
@@ -912,7 +914,7 @@
       lastPriceUsd: observedPriceUsd, lastMarketCapUsd: coherentPositionMarketCap(
         observedPriceUsd, quoteMarketCapUsd, executionTotalSupply,
         { ...existing, valuationMode: positionValuationMode, supplySource: executionSupply.supplySource,
-          lastPriceProvenance: priceProvenance }),
+          lastPriceProvenance: priceProvenance, averageEntryPriceProvenance }),
       lastNativePriceUsd: nativePriceUsd, openedAt: existing?.openedAt || now,
       ...(positionQuoteObservedAt == null ? {} : { quoteObservedAt: positionQuoteObservedAt }),
       updatedAt: now, valuationMode: positionValuationMode,
@@ -929,9 +931,7 @@
       quoteSource: String(order.quote.source || existing?.quoteSource || ''),
       paperFallback: order.quote.paperFallback === true || existing?.paperFallback === true,
       needsCalibration, provisionalTokenPrice, provisionalNativePrice,
-      averageEntryPriceProvenance: existingQuantity > 0 && existingEntryProvenance !== priceProvenance
-        ? 'MIXED_DERIVED'
-        : existingEntryProvenance || priceProvenance,
+      averageEntryPriceProvenance,
       ...(legacyExecutionSupply ? { marketCapProvenance: MARKET_CAP_PROVENANCE } : {})
     };
     if (positionQuoteObservedAt == null) delete nextState.positions[key].quoteObservedAt;
@@ -1231,10 +1231,10 @@
     return Number.isFinite(percent) && percent > 0 && percent <= 100 ? percent : null;
   }
 
-  function portfolioSummary(state, chain, currentNativePriceUsd) {
+  function portfolioSummary(state, chain, currentNativePriceUsd, quoteForPosition) {
     const account = chainAccount(state, chain);
     const positions = Object.values(state.positions || {}).filter((position) => position.chain === chain);
-    const marks = positions.map((position) => markPosition(position, undefined, currentNativePriceUsd));
+    const marks = positions.map((position) => markPosition(position, quoteForPosition?.(position), currentNativePriceUsd));
     const positionsValueNative = marks.reduce((sum, mark) => sum + mark.valueNative, 0);
     const unrealizedPnlNative = marks.reduce((sum, mark) => sum + mark.unrealizedPnlNative, 0);
     const equityNative = Number(account.cashBalanceNative) + positionsValueNative;
@@ -1266,14 +1266,14 @@
     };
   }
 
-  function chainUsdSummary(state, chain, nativePriceUsd) {
+  function chainUsdSummary(state, chain, nativePriceUsd, quoteForPosition) {
     const account = chainAccount(state, chain);
     const price = Number(nativePriceUsd);
     if (!Number.isFinite(price) || !(price > 0)) throw new Error('invalidNativePrice');
     const positionsUsd = Object.values(state.positions || {})
       .filter((position) => position.chain === chain)
       .reduce((sum, position) => {
-        const mark = markPosition(position, undefined, price);
+        const mark = markPosition(position, quoteForPosition?.(position), price);
         return checkedArithmetic(
           sum + checkedArithmetic(mark.quantity * mark.priceUsd, 'nonnegative'),
           'nonnegative'

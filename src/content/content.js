@@ -485,7 +485,7 @@
     if (!chain || runtime.settings?.displayCurrency !== 'USD') return null;
     const price = currentNativePriceUsd();
     if (!Number.isFinite(price) || price <= 0) return null;
-    try { return Tango.Engine.chainUsdSummary(runtime.state, chain.id, price); }
+    try { return Tango.Engine.chainUsdSummary(runtime.state, chain.id, price, freshExecutableQuote); }
     catch (error) {
       if (['invalidArithmetic', 'invalidNativePrice'].includes(error?.message)) return null;
       throw error;
@@ -1808,6 +1808,20 @@
   }
 
   function freshExecutableQuote(position) {
+    const chain = activeChain();
+    const currentMatches = runtime.current?.token?.chain === position.chain
+      && Tango.Chains.normalizeAddress(position.chain, runtime.current.token.address) === position.tokenAddress;
+    if (chain?.id === position.chain && !currentMatches) {
+      const snapshot = Tango.GMGN.readTrenchSnapshot?.(position.chain, position.tokenAddress);
+      const age = Date.now() - Number(snapshot?.quote?.observedAt || 0);
+      const sameToken = snapshot?.token?.chain === position.chain
+        && Tango.Chains.validateAddress(position.chain, snapshot.token.address)
+        && Tango.Chains.normalizeAddress(position.chain, snapshot.token.address) === position.tokenAddress;
+      if (sameToken && age >= 0 && age <= Number(Tango.QUOTE_STALE_MS || 15_000)) {
+        const quote = resolvePaperTradeQuote(snapshot.token, snapshot.quote, { position });
+        if (quote) return quote;
+      }
+    }
     return freshExecutableQuoteResult(position).quote;
   }
 
@@ -2135,7 +2149,7 @@
     if (!chain) return showToast(t('unsupportedChain'), 'error');
     const positions = Tango.ChainView.positions(runtime.state, chain.id);
     if (!positions.length) return showToast(t('noPositions'), 'error');
-    const summary = Tango.Engine.portfolioSummary(runtime.state, chain.id, currentNativePriceUsd());
+    const summary = Tango.Engine.portfolioSummary(runtime.state, chain.id, currentNativePriceUsd(), freshExecutableQuote);
     const usdMode = runtime.settings?.displayCurrency === 'USD';
     runtime.modal = {
       type: 'confirm', title: t('closeAllConfirm'),
@@ -3079,9 +3093,9 @@
       clearHeaderAccountSummary();
       return;
     }
-    const summary = Tango.Engine.portfolioSummary(runtime.state, activeChain().id, currentNativePriceUsd());
-    renderHeaderAccountSummary(summary);
     syncTrenchPositionBadges();
+    const summary = Tango.Engine.portfolioSummary(runtime.state, activeChain().id, currentNativePriceUsd(), freshExecutableQuote);
+    renderHeaderAccountSummary(summary);
     // Preserve the native file input while its dialog is open. Replacing it
     // during a quote tick detaches an in-progress browser file chooser.
     if (runtime.modal?.type === 'dashboard-error'
