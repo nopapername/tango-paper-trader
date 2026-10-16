@@ -375,21 +375,39 @@
     return addressNode;
   }
 
-  function elementChainBinding(element, chainId) {
+  const explorerTokenChains = new Map([
+    ['solscan.io', 'sol'], ['etherscan.io', 'eth'], ['bscscan.com', 'bsc'],
+    ['basescan.org', 'base'], ['robin.etherscan.io', 'robinhood']
+  ]);
+  function explorerTokenIdentity(url) {
+    let chain = explorerTokenChains.get(url.hostname);
+    let path = chain ? url.pathname.match(/^\/token\/([^/]+)\/?$/) : null;
+    if (url.hostname === 'web3.okx.com') {
+      chain = 'xlayer'; path = url.pathname.match(/^\/token\/x-layer\/([^/]+)\/?$/);
+    } else if (url.hostname === 'oklink.com' || url.hostname === 'www.oklink.com') {
+      chain = 'xlayer'; path = url.pathname.match(/^\/xlayer\/token\/([^/]+)\/?$/);
+    }
+    if (!chain) return null;
+    return { chain, address: path?.[1] || '', valid: url.protocol === 'https:'
+      && !url.username && !url.password && !url.port && Boolean(path)
+      && Tango.Chains.validateAddress(chain, path[1]) };
+  }
+  function elementChainBinding(element, chainId, address) {
     if (!chainId) return 'MATCH';
     const links = Array.from(element?.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || [])
       .filter((node) => !isQuoteTokenIdentityNode(node))
-      .filter((link) => {
-        try {
-          const parsed = new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai');
-          return parsed.hostname === 'gmgn.ai' || parsed.hostname === 'pump.fun';
-        } catch { return true; }
-      });
+      .map((link) => {
+        try { return new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai'); }
+        catch { return null; }
+      }).filter((url) => !url || url.hostname === 'gmgn.ai' || url.hostname === 'pump.fun'
+        || explorerTokenIdentity(url));
     if (!links.length) return 'UNKNOWN';
-    const matches = links.every((link) => {
-      let parsed;
-      try { parsed = new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai'); }
-      catch { return false; }
+    const matches = links.every((parsed) => {
+      if (!parsed) return false;
+      const explorer = explorerTokenIdentity(parsed);
+      if (explorer) return explorer.valid && explorer.chain === chainId
+        && Tango.Chains.validateAddress(chainId, address)
+        && Tango.Chains.normalizeAddress(chainId, explorer.address) === Tango.Chains.normalizeAddress(chainId, address);
       if (parsed.hostname === 'pump.fun') return chainId === 'sol';
       return chainFromUrl(parsed.href) === chainId;
     });
@@ -399,9 +417,9 @@
   function findTokenDetailScope(address, chainId = null, allowUnknownChain = false) {
     const findMatches = (headers, quoteScope = null) => {
       const bindingFor = (header, scope = quoteScope) => {
-        const headerBinding = elementChainBinding(header, chainId);
+        const headerBinding = elementChainBinding(header, chainId, address);
         if (headerBinding !== 'UNKNOWN' || !scope || scope === header) return headerBinding;
-        return elementChainBinding(scope, chainId);
+        return elementChainBinding(scope, chainId, address);
       };
       const directMatches = headers
         .filter((header) => elementHasTokenAddress(header, address, chainId))
@@ -756,7 +774,7 @@
     return result;
   }
 
-  function readVerifiedCurrentTokenSnapshot(expectedToken) {
+  function readVerifiedCurrentTokenSnapshot(expectedToken, options = {}) {
     if (!isTokenDetailPage()) return null;
     const chain = chainFromUrl();
     const rawAddress = tokenAddressFromUrl();
@@ -779,9 +797,17 @@
     const identity = detailTokenIdentity(detail.identityScope || detail.scope, address, chain);
     const fingerprint = `${identity.symbol}\u0000${identity.name}\u0000${tokenLogo(detail.header)}`;
     if (fingerprint !== verified.fingerprint) return null;
-    const quote = detailQuote(detail, chain, address);
-    if (!(Number.isFinite(Number(quote?.priceUsd)) && Number(quote.priceUsd) > 0)
-      || quote?.source !== 'GMGN' || quote?.priceProvenance !== 'OBSERVED_PRICE') return null;
+    let quote = detailQuote(detail, chain, address);
+    if (quote?.source !== 'GMGN') return null;
+    const factualPrice = Number.isFinite(Number(quote.priceUsd)) && Number(quote.priceUsd) > 0
+      && quote.priceProvenance === 'OBSERVED_PRICE';
+    if (!factualPrice) {
+      if (options.allowMarketCapOnly !== true || quote.marketCapSource !== 'GMGN'
+        || !(Number.isFinite(Number(quote.marketCapUsd)) && Number(quote.marketCapUsd) > 0)) return null;
+      // Keep the current bound USD cap, never promote its inferred unit price.
+      quote = { ...quote, priceUsd: 0, priceObservedAt: 0, priceSource: '',
+        priceProvenance: '', valuationMode: 'MARKET_CAP' };
+    }
     return {
       token: {
         chain, address, symbol: identity.symbol, name: identity.name, logoUrl: tokenLogo(detail.header),

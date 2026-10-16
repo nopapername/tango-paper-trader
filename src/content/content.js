@@ -462,10 +462,7 @@
   function accountMoney(value, signed = false) {
     const chain = activeChain();
     if (!chain) return '--';
-    const reference = Number(runtime.nativePrices.get(chain.id)
-      || (runtime.current?.token?.chain === chain.id ? runtime.current?.quote?.nativePriceUsd : 0)
-      || Tango.ChainView.positions(runtime.state, chain.id).find((position) => position.lastNativePriceUsd)?.lastNativePriceUsd
-      || 0);
+    const reference = currentNativePriceUsd();
     if (runtime.settings?.displayCurrency !== 'USD' || !(reference > 0)) {
       return Tango.Format.native(value, chain.nativeSymbol, language(), signed);
     }
@@ -476,9 +473,13 @@
   function currentNativePriceUsd() {
     const chain = activeChain();
     if (!chain) return 0;
-    return Number(runtime.nativePrices.get(chain.id)
-      || (runtime.current?.token?.chain === chain.id ? runtime.current?.quote?.nativePriceUsd : 0)
-      || 0);
+    const current = freshNativePrice(chain.id);
+    if (current > 0) return current;
+    const quote = runtime.current?.token?.chain === chain.id ? runtime.current.quote : null;
+    const price = Number(quote?.nativePriceUsd || 0);
+    return Number.isFinite(price) && price > 0 && quote?.syntheticNativePrice !== true
+      && freshObservationTime(quote?.nativePriceObservedAt || quote?.nativeObservedAt, Number(Tango.QUOTE_STALE_MS || 15_000))
+      ? price : 0;
   }
   function canonicalUsdSummary() {
     const chain = activeChain();
@@ -1333,6 +1334,11 @@
       preferred.totalSupplySource = String(candidate.totalSupplySource || candidate.supplySource || '');
       preferred.totalSupplyObservationSource = String(candidate.totalSupplyObservationSource || candidate.source || '');
     }
+    if (!(Number(candidate.priceUsd) > 0) && Number(candidate.marketCapUsd) > 0) {
+      // A new DOM cap cannot be paired with an unrelated cached unit price.
+      preferred.priceUsd = 0; preferred.priceObservedAt = 0;
+      preferred.priceSource = ''; preferred.priceProvenance = '';
+    }
     if (candidate.priceProvenance) preferred.priceProvenance = candidate.priceProvenance;
     preferred.observedAt = Number(candidate.observedAt || preferred.observedAt || 0);
     preferred.source = String(candidate.source || preferred.source || '');
@@ -1983,7 +1989,7 @@
       ? resolvePaperTradeQuote(order?.token, order?.quote, { position })
       : order?.quote || resolvePaperTradeQuote(order?.token, order?.quote, { position });
     if (!routeMatchesDetailToken(order?.token)) return fallback;
-    const snapshot = Tango.GMGN.readVerifiedCurrentTokenSnapshot?.(order.token);
+    const snapshot = Tango.GMGN.readVerifiedCurrentTokenSnapshot?.(order.token, { allowMarketCapOnly: true });
     if (!routeCaptureIsCurrent(routeCapture)) return null;
     const address = snapshot?.token?.address || snapshot?.token?.tokenAddress;
     const quoteAddress = snapshot?.quote?.address || snapshot?.quote?.tokenAddress;
@@ -1994,13 +2000,19 @@
     const maxAgeMs = Number(Tango.QUOTE_STALE_MS || 15_000);
     const normalizedQuote = normalizeObservationDimensions(snapshot.quote, maxAgeMs);
     const expectedAddress = Tango.Chains.normalizeAddress(order.token.chain, order.token.address);
+    const boundMarketCapOnly = snapshot.token.metadataVerified === true
+      && snapshot.token.metadataSource === 'GMGN_DETAIL'
+      && snapshot.quote.source === 'GMGN' && snapshot.quote.marketCapSource === 'GMGN'
+      && Number(snapshot.quote.priceUsd) === 0 && snapshot.quote.priceProvenance === ''
+      && Number(normalizedQuote?.marketCapUsd) > 0
+      && freshObservationTime(snapshot.quote.marketCapObservedAt, maxAgeMs);
     if (snapshot.quote?.chain !== order.token.chain
       || !Tango.Chains.validateAddress(order.token.chain, quoteAddress)
       || Tango.Chains.normalizeAddress(order.token.chain, quoteAddress) !== expectedAddress
       || !trustedCachedObservation(
         normalizedQuote, order.token.chain, expectedAddress, maxAgeMs
       )
-      || !acceptedTokenObservation(normalizedQuote, snapshot.token, maxAgeMs)) return fallback;
+      || (!boundMarketCapOnly && !acceptedTokenObservation(normalizedQuote, snapshot.token, maxAgeMs))) return fallback;
     // A verified, current, same-token observation that fails coherence is an
     // execution veto. Falling back here would silently undo quote validation.
     return resolvePaperTradeQuote(order.token, normalizedQuote, { position, preferCandidate: true });
