@@ -42,11 +42,35 @@
     return Object.fromEntries(entries);
   }
   function derived(t){return t.syntheticTokenPrice===true||t.provisionalTokenPrice===true||/MARKET_CAP|MIXED_DERIVED|SYNTHETIC|FALLBACK/i.test(String(t.priceProvenance||''))||/^TANGO_FALLBACK/.test(String(t.quoteSource||''));}
+  function observedCardCap(t){
+    const upper=v=>String(v||'').trim().toUpperCase();
+    const source=upper(t.source),capSource=upper(t.marketCapSource),valuation=upper(t.valuationSource);
+    const supply=Number(Tango.Supply?.UNKNOWN_TOTAL_SUPPLY||1e9),observedAt=Number(t.quoteObservedAtOriginal);
+    return upper(t.quoteSource)==='TANGO_FALLBACK_CARD_MARKET_CAP'
+      && (!source||source==='TANGO_FALLBACK_CARD_MARKET_CAP')
+      && (!capSource||['GMGN','GMGN_TRENCH','GMGN_DETAIL','GMGN_NETWORK'].includes(capSource))
+      && (!valuation||valuation==='CARD_MARKET_CAP_FALLBACK_SUPPLY')
+      && t.paperFallback===true && t.provisional===true && t.syntheticTokenPrice===true
+      && upper(t.valuationMode)==='MARKET_CAP' && upper(t.priceProvenance)==='SYNTHETIC_PRICE'
+      && t.supplySource==='UNKNOWN_FALLBACK'
+      && t.provisionalSupplyProvenance==='TANGO_INTERNAL_UNKNOWN_FALLBACK_V1'
+      && Number(t.totalSupply)===supply && Number(t.marketCapDivisor)===supply && Number(t.provisionalSupply)===supply
+      && Number.isSafeInteger(observedAt) && observedAt>0 && observedAt<=Number(t.executedAt)
+      && finite(t.observedPriceUsd) && finite(t.marketCapUsd)
+      && Math.abs(Number(t.marketCapUsd)/Number(t.observedPriceUsd)-supply)<=supply*.001;
+  }
+  // A synthetic unit price can still carry a separately observed card cap.
+  // Never promote the arbitrary launch placeholder or a history-only mark.
+  function capCoordinate(t){
+    const source=String(t.quoteSource||'').trim().toUpperCase();
+    if(!finite(t.marketCapUsd)||source==='TANGO_POSITION_HISTORY')return null;
+    return !source.startsWith('TANGO_FALLBACK')||observedCardCap(t)?Number(t.marketCapUsd):null;
+  }
   function model(state,chain,address,cache={},requestedMetric=null){
     const token=identity(chain,address),c=Tango.Chains.get(chain);
     const trades=(state?.trades||[]).filter(t=>{
       try{return t.chain===token.chain&&identity(t.chain,t.tokenAddress).address===token.address&&['BUY','SELL'].includes(t.side)&&finite(t.executedAt)&&Number(t.executedAt)<=Date.now()+60000;}catch{return false;}
-    }).map(t=>({...t,time:Number(t.executedAt),price:!derived(t)&&finite(t.executionPriceUsd)?Number(t.executionPriceUsd):null,cap:finite(t.marketCapUsd)&&!/^TANGO_FALLBACK/.test(String(t.quoteSource||''))?Number(t.marketCapUsd):null})).sort((a,b)=>a.time-b.time);
+    }).map(t=>({...t,time:Number(t.executedAt),price:!derived(t)&&finite(t.executionPriceUsd)?Number(t.executionPriceUsd):null,cap:capCoordinate(t)})).sort((a,b)=>a.time-b.time);
     const capSeries=cleanPoints(cache?.[`${token.chain}:${token.address}:marketCap`]?.points,'marketCap');
     const metric=['price','marketCap'].includes(requestedMetric)?requestedMetric:trades.length&&trades.every(t=>t.cap!==null)?'marketCap':trades.some(t=>t.price!==null)?'price':'marketCap';
     const series=cleanPoints(cache?.[`${token.chain}:${token.address}:${metric}`]?.points,metric);
