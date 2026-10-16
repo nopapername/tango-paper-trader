@@ -5,7 +5,7 @@
   const Tango = global.Tango;
   const runtime = {
     state: null, settings: null, current: null, drawerOpen: false, modal: null,
-    toast: null, lastQuoteWriteAt: 0, quoteTimer: null, observer: null, renderQueued: false,
+    toast: null, lastQuoteWriteAt: 0, lastQuoteWriteKey: null, quoteTimer: null, observer: null, renderQueued: false,
     presetEditing: null, presetDraft: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
     nativePrices: new Map(), nativePriceObservedAt: new Map(), nativePricePromises: new Map(),
     persistentNativePrices: new Map(), persistentNativePriceObservedAt: new Map(),
@@ -267,12 +267,14 @@
     return price > 0 && observedAt > 0 && Date.now() - observedAt <= maxAgeMs ? price : 0;
   }
   function clearShellMarkup() {
+    Tango.TradeReplay?.close();
     if (runtime.renderedMarkup !== '') shell.innerHTML = '';
     runtime.renderedMarkup = '';
   }
   function clearChainContext() {
     clearChartMarkers();
     runtime.current = null;
+    runtime.lastQuoteWriteKey = null;
     runtime.modal = null;
     runtime.calendarOpen = false;
     runtime.gmgnQuotes.clear();
@@ -361,6 +363,12 @@
       queueRender();
       return;
     }
+
+    if (event.source === window && event.data?.source === 'TANGO_GMGN_PAGE' && event.data?.type === 'REPLAY_CANDLES') {
+      const token=detailRouteToken(),batch=event.data.batch;
+      if(runtime.settings?.enabled && token && batch?.chain===token.chain && batch.address===token.address) Tango.TradeReplay?.recordBatch(batch);
+      return;
+    }
     if (event.source !== window || event.data?.source !== 'TANGO_GMGN_PAGE' || event.data?.type !== 'TOKEN_QUOTES') return;
     if (!Array.isArray(event.data.quotes)) return;
     const chain = activeChain();
@@ -381,11 +389,35 @@
       const previousQuote = normalizeObservationDimensions(
         runtime.gmgnQuotes.get(cacheKey), maxAgeMs, false
       );
-      const cachedQuote = normalizeObservationDimensions(
+      let cachedQuote = normalizeObservationDimensions(
         Tango.GMGNQuotes.mergeObservation(previousQuote, normalizedQuote), maxAgeMs, false
       );
+      // A network replay may describe an older pool state despite arriving now.
+      // Prefer the independently verified current header for this route only.
+      if (runtime.settings?.enabled && routeToken?.chain === chain.id && routeToken.address === address) {
+        const snapshot = Tango.GMGN.readVerifiedCurrentTokenSnapshot?.(routeToken);
+        const live = normalizeObservationDimensions(snapshot?.quote, maxAgeMs, false);
+        if (snapshot?.token?.chain === chain.id && snapshot.token.address === address
+          && trustedCachedObservation(live, chain.id, address, maxAgeMs, false)
+          && acceptedTokenObservation(live, snapshot.token, maxAgeMs)) {
+          cachedQuote = preferObservationDimensions(cachedQuote, live);
+        } else {
+          const current = runtime.current;
+          const previousHeader = current?.token?.chain === chain.id && current.token.address === address
+            ? normalizeObservationDimensions({ ...current.quote,
+              chain: current.quote?.chain ?? chain.id, address: current.quote?.address ?? address
+            }, maxAgeMs, false) : null;
+          // React may replace a verified header before the 48 ms identity probe
+          // completes. Keep its fresh quote; never extend its observation time.
+          if (previousHeader?.source === 'GMGN' && Number(previousHeader.priceUsd) > 0
+            && trustedCachedObservation(previousHeader, chain.id, address, maxAgeMs, false)) {
+            cachedQuote = preferObservationDimensions(cachedQuote, previousHeader);
+          }
+        }
+      }
       if (!trustedCachedObservation(cachedQuote, chain.id, address, maxAgeMs, false)) return;
       runtime.gmgnQuotes.set(cacheKey, cachedQuote);
+      if(runtime.settings?.enabled && routeToken?.chain===chain.id && routeToken.address===address) Tango.TradeReplay?.recordQuote(cachedQuote);
       if (!runtime.current && routeToken?.chain === chain.id && routeToken.address === address
         && detailBootstrapObservation(cachedQuote)) {
         const symbol = String(cachedQuote.symbol || '').replace(/^\$/, '').replace(/\s+/g, ' ').trim().slice(0, 32);
@@ -678,6 +710,12 @@
       || node?.querySelector?.(wallet) || node?.querySelector?.(actions));
   }
 
+  function detailHeaderMutationNode(node, includeDescendants = false) {
+    const selector = '[data-sentry-component="BaseInfoBar"], [data-sentry-component="TokenHeader"], #token-base-symbol';
+    return Boolean(node?.matches?.(selector) || (includeDescendants
+      ? node?.querySelector?.(selector) : node?.closest?.(selector)));
+  }
+
   let lastQuickBuyFullSyncAt = 0;
 
   function syncQuickBuyButtons(roots, {
@@ -694,10 +732,32 @@
       Tango.GMGN.discoverTokenCards(handleQuickBuy, settings.buyPresets?.[0] || 0.1, t('paper'), roots, {
         fast, addedRoots, removedRoots, hrefMutations, policyKey
       });
+      syncTrenchPositionBadges(roots);
       runtime.quickBuyMode = 'active';
     } else {
       clearQuickBuyButtons();
     }
+  }
+
+  function syncTrenchPositionBadges(roots) {
+    if (!runtime.settings?.enabled || !runtime.state?.initialized) {
+      Tango.GMGN.clearPositionBadges?.();
+      return;
+    }
+    Tango.GMGN.syncPositionBadges?.((token, readCardQuote) => {
+      const position = runtime.state.positions[Tango.Engine.positionKey(token.chain, token.address)];
+      if (!position || !(Number(position.quantity) > 0)) return null;
+      const cardQuote = readCardQuote();
+      Tango.GMGN.rememberTrenchSnapshot?.({ token, quote: cardQuote });
+      const quote = resolvePaperTradeQuote(token, cardQuote, { position });
+      const mark = Tango.Engine.markPosition(position, quote || undefined, currentNativePriceUsd());
+      if (!(Number.isFinite(mark.valueNative) && mark.valueNative >= 0)) return null;
+      const symbol = Tango.Chains.get(token.chain).nativeSymbol;
+      const label = language().toLowerCase().startsWith('zh') ? '持仓' : 'Holding';
+      return { text: `${label} ${Tango.Format.native(mark.valueNative, symbol, language())}`,
+        title: `${label} ${Tango.Format.number(mark.valueNative, language(), 8)} ${symbol}` };
+    }, roots, (chain, address) => Number(runtime.state.positions[
+      Tango.Engine.positionKey(chain, address)]?.quantity) > 0);
   }
 
   function clearQuickBuyButtons() {
@@ -793,10 +853,17 @@
       await queueImmediateCurrentCalibration(routeCapture);
       if (!routeCaptureIsCurrent(routeCapture)) return;
     } else if (routeCaptureIsCurrent(routeCapture) && executable && position
-      && Date.now() - runtime.lastQuoteWriteAt > 10_000) {
-      runtime.state = await Tango.Store.updatePositionQuote(runtime.current.token, executable);
+      && (runtime.lastQuoteWriteKey !== Tango.Engine.positionKey(chain.id, runtime.current.token.address)
+        || Date.now() - runtime.lastQuoteWriteAt > 10_000)) {
+      const token = { ...runtime.current.token };
+      const writeKey = Tango.Engine.positionKey(chain.id, token.address);
+      const nextState = await Tango.Store.updatePositionQuote(token, executable);
+      if (!routeCaptureIsCurrent(routeCapture)
+        || !runtime.current?.token
+        || Tango.Engine.positionKey(runtime.current.token.chain, runtime.current.token.address) !== writeKey) return;
+      runtime.state = nextState;
       runtime.lastQuoteWriteAt = Date.now();
-      if (!routeCaptureIsCurrent(routeCapture)) return;
+      runtime.lastQuoteWriteKey = writeKey;
     }
     if (!routeCaptureIsCurrent(routeCapture)) return;
     // Mutation lanes and the 750ms health probe reconcile new/replaced slots.
@@ -1272,6 +1339,25 @@
     return preferred;
   }
 
+  function recordQuoteRejection(stage, token, quote) {
+    // Keep only the latest public observation, never account or trade data.
+    const fields = ['source', 'priceSource', 'marketCapSource', 'supplySource',
+      'totalSupplySource', 'priceProvenance', 'valuationMode', 'priceUsd',
+      'marketCapUsd', 'totalSupply', 'marketCapDivisor', 'nativePriceUsd',
+      'observedAt', 'priceObservedAt', 'marketCapObservedAt', 'nativeObservedAt',
+      'provisional', 'syntheticTokenPrice', 'syntheticNativePrice'];
+    const observation = {};
+    for (const field of fields) {
+      const value = quote?.[field];
+      if (typeof value === 'string') observation[field] = value.slice(0, 100);
+      else if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) observation[field] = value;
+    }
+    host.setAttribute('data-tango-quote-rejection', JSON.stringify({
+      stage, chain: token?.chain, address: token?.address || token?.tokenAddress,
+      launchpad: String(token?.launchpad || '').slice(0, 100), quote: observation
+    }));
+  }
+
   function resolvePaperTradeQuote(token, candidate, options = {}) {
     const chain = activeChain();
     const address = token?.address || token?.tokenAddress;
@@ -1321,12 +1407,20 @@
     const freshExact = trustedCachedObservation(
       normalizedExact, chain.id, normalizedAddress, Number(Tango.QUOTE_STALE_MS || 15_000)
     ) ? normalizedExact : null;
+    const cardRuleSupply = token?.metadataVerified === true && token?.metadataSource === 'GMGN_TRENCH'
+      ? Number(Tango.Supply.ruleSupply(chain.id, token.launchpad, token.launchMode)) : 0;
+    const conflictingExactSupply = [position, freshExact].some(observation =>
+      ['GMGN_EXACT', 'GMGN_NETWORK_EXACT'].includes(String(observation?.supplySource || observation?.totalSupplySource || ''))
+      && Number(observation.totalSupply) > 0 && Number(observation.totalSupply) !== cardRuleSupply);
+    const preferTrenchMarketCap = candidateSource === 'GMGN_TRENCH' && cardRuleSupply > 0
+      && Number(boundCandidate?.marketCapUsd) > 0 && !candidateHasFactualPrice && !conflictingExactSupply;
     const normallyMerged = freshExact && boundCandidate
       ? Tango.GMGNQuotes.mergeObservation(freshExact, boundCandidate)
       : boundCandidate || freshExact;
-    const merged = options.preferCandidate === true && boundCandidate
-      ? preferObservationDimensions(normallyMerged, boundCandidate)
-      : normallyMerged;
+    const merged = preferTrenchMarketCap ? boundCandidate
+      : options.preferCandidate === true && boundCandidate
+        ? preferObservationDimensions(normallyMerged, boundCandidate)
+        : normallyMerged;
     const mergedHasFactualPrice = Tango.GMGNQuotes.isFactualPriceObservation(merged)
       && Number.isFinite(Number(merged?.priceUsd)) && Number(merged.priceUsd) > 0;
     const positionAddress = position?.tokenAddress || position?.address;
@@ -1376,6 +1470,28 @@
     const positionExactSupply = boundPosition?.supplySource === 'GMGN_EXACT'
       && Number.isFinite(Number(boundPosition?.totalSupply)) && Number(boundPosition.totalSupply) > 0
       ? Number(boundPosition.totalSupply) : 0;
+    // Independently fresh fields can come from different GMGN responses. Never
+    // execute a mixed price/MC pair that contradicts an exact token supply.
+    // A small tolerance allows rounded DOM numbers, not a different price unit.
+    const verifiedRuleSupply = token?.metadataVerified === true
+      && ['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'].includes(String(token.metadataSource || '').toUpperCase())
+      ? Number(Tango.Supply.ruleSupply(chain.id, token.launchpad, token.launchMode)) : 0;
+    const positionRuleCoherenceSupply = boundPosition?.supplySource === 'LAUNCHPAD_RULE'
+      && Number(boundPosition.totalSupply) === Number(Tango.Supply.ruleSupply(
+        chain.id, boundPosition.launchpad, boundPosition.launchMode))
+      ? Number(boundPosition.totalSupply) : 0;
+    const sameRuleObservation = Number(local.priceObservedAt || local.observedAt) > 0
+      && Number(local.priceObservedAt || local.observedAt) === Number(local.marketCapObservedAt || local.observedAt)
+      && String(local.priceSource || local.source) === String(local.marketCapSource || local.source);
+    const exactCoherenceSupply = localExactSupply || positionExactSupply
+      || (sameRuleObservation ? verifiedRuleSupply || positionRuleCoherenceSupply : 0);
+    if (safeObservedPrice > 0 && mergedHasFactualMarketCap && exactCoherenceSupply > 0
+      && factualObservationSource(local.marketCapSource || local.source)
+      && Math.abs(safeObservedPrice * exactCoherenceSupply - safeMarketCapUsd)
+        > safeMarketCapUsd * .02) {
+      recordQuoteRejection('coherence', token, { ...local, totalSupply: exactCoherenceSupply });
+      return null;
+    }
     const trustedMetadataSources = ['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK'];
     const tokenMetadataVerified = token?.metadataVerified === true
       && trustedMetadataSources.includes(String(token?.metadataSource || '').toUpperCase());
@@ -1392,11 +1508,15 @@
         : positionLaunchpadVerified ? boundPosition : {};
     const resolvedLaunchpad = launchContext?.launchpad || '';
     const resolvedLaunchMode = launchContext?.launchMode || '';
+    // Legacy canonical supply is only a compatibility fallback. A verified
+    // current launch rule (including Mayhem) must retain its own supply.
+    const legacyFallbackSupply = Tango.Supply.ruleSupply(chain.id, resolvedLaunchpad, resolvedLaunchMode)
+      ? 0 : legacyPumpSupply;
     const supply = Tango.Supply.resolve({
       chain: chain.id,
-      totalSupply: localExactSupply || positionExactSupply || legacyPumpSupply,
+      totalSupply: localExactSupply || positionExactSupply || legacyFallbackSupply,
       supplySource: localExactSupply || positionExactSupply ? 'GMGN_EXACT'
-        : legacyPumpSupply ? 'LEGACY_PUMP_RULE' : '',
+        : legacyFallbackSupply ? 'LEGACY_PUMP_RULE' : '',
       priceUsd: safeObservedPrice,
       marketCapUsd: safeMarketCapUsd,
       address: normalizedAddress,
@@ -1440,22 +1560,27 @@
         ? Boolean(marketCapObservationId && marketCapObservationId === totalSupplyObservationId)
         : marketCapObservationTime > 0 && marketCapObservationTime === totalSupplyObservationTime);
     const factualDerivedPrice = mergedHasFactualMarketCap
-      && (supply?.source !== 'GMGN_EXACT' || sameValuationObservation);
+      && (supply?.source !== 'GMGN_EXACT' || sameValuationObservation
+        || (preferTrenchMarketCap && Number(supply?.totalSupply) === cardRuleSupply));
     const calculatedPrice = !safeObservedPrice && safeMarketCapUsd > 0 && supply && factualDerivedPrice
       ? safeMarketCapUsd / supply.totalSupply
       : 0;
     const derivedPrice = Number.isFinite(calculatedPrice) && calculatedPrice > 0 ? calculatedPrice : 0;
     const historicalValue = Number(boundPosition?.lastPriceUsd || boundPosition?.averageEntryPriceUsd || 0);
+    // A provisional paper entry is still the account's historical valuation.
+    // Missing observations must never reset a held token to the initial fallback
+    // market cap. Keep this explicitly provisional; it is not a chart quote.
+    const historicalSupplyUnchanged = !Number(supply?.totalSupply)
+      || Number(supply.totalSupply) === Number(boundPosition?.totalSupply || boundPosition?.marketCapDivisor);
     const historicalPrice = ((boundPosition?.syntheticTokenPrice !== true
-      && boundPosition?.provisionalTokenPrice !== true)
-      || boundPosition?.quoteSource === 'TANGO_POSITION_HISTORY')
+      && boundPosition?.provisionalTokenPrice !== true) || (historicalSupplyUnchanged && !mergedHasFactualMarketCap))
       && Number.isFinite(historicalValue) && historicalValue > 0 ? historicalValue : 0;
     const fallback = Tango.Supply.fallbackValuation({
       chain: chain.id, launchpad: resolvedLaunchpad, launchMode: resolvedLaunchMode
     });
     const preservePositionMarketCap = mergedHasFactualMarketCap && !safeObservedPrice
       && supply?.source === 'GMGN_EXACT' && positionExactSupply > 0 && !localExactSupply
-      && !sameValuationObservation
+      && !sameValuationObservation && !preferTrenchMarketCap
       && Number.isFinite(historicalMarketCapUsd) && historicalMarketCapUsd > 0;
     const executionMarketCap = preservePositionMarketCap
       ? historicalMarketCapUsd : safeMarketCapUsd || fallback.marketCapUsd;
@@ -1516,7 +1641,8 @@
       nativeOriginalObservedAt: Number(native.observedAt || 0),
       source: syntheticTokenPrice
         ? historicalPrice > 0 ? 'TANGO_POSITION_HISTORY' : 'TANGO_FALLBACK'
-        : String(local.source || 'GMGN_LAST_KNOWN'),
+        : supply?.source === 'LEGACY_PUMP_RULE' && String(local.source || '') === 'GMGN_TRENCH'
+          ? 'GMGN_TRENCH_MC' : String(local.source || 'GMGN_LAST_KNOWN'),
       valuationMode: safeObservedPrice > 0 || usesPositionHistory ? 'PRICE'
         : derivedPrice > 0 || internalUnknownFallbackSupply
         ? 'MARKET_CAP' : 'PRICE',
@@ -1591,6 +1717,7 @@
             !== Tango.Chains.normalizeAddress(token.chain, token.address)) return runtime.state;
         runtime.state = state;
         runtime.lastQuoteWriteAt = Date.now();
+        runtime.lastQuoteWriteKey = key;
         queueRender();
         return runtime.state;
       })
@@ -1722,29 +1849,29 @@
     const lockKey = clickContext.actionId
       ? `action:${clickContext.actionId}`
       : `${gmgnQuoteKey(chain.id, clickContext.token.address)}:${amountNative}`;
-    const lastHandledAt = Number(runtime.quickBuyLocks.get(lockKey) || 0);
-    if (Date.now() - lastHandledAt < 1000) return;
-    runtime.quickBuyLocks.set(lockKey, Date.now());
-    if (runtime.quickBuyLocks.size > 100) {
-      [...runtime.quickBuyLocks.entries()].filter(([, at]) => Date.now() - at > 5000).forEach(([key]) => runtime.quickBuyLocks.delete(key));
-    }
-    if (clickContext.side === 'SELL') {
-      const key = Tango.Engine.positionKey(chain.id, clickContext.token.address);
-      const position = runtime.state.positions[key];
-      if (!position) return showToast(t('noPosition'), 'error');
-      const quote = resolvePaperTradeQuote(clickContext.token, clickContext.quote, { position });
-      if (!quote) return showToast(t('invalidQuote'), 'error');
-      const percent = clickContext.breakeven === true
-        ? Tango.Engine.breakevenSellPercent(position, quote, runtime.settings)
-        : Number(clickContext.sellPercent);
-      if (!(percent > 0 && percent <= 100)) {
-        return showToast(t(clickContext.breakeven === true ? 'breakevenUnavailable' : 'invalidAmount'), 'error');
+    // Deduplicate only while this action is in flight. Distinct trusted clicks
+    // after settlement must not disappear inside a fixed one-second window.
+    if (runtime.quickBuyLocks.has(lockKey)) return;
+    runtime.quickBuyLocks.set(lockKey, true);
+    try {
+      if (clickContext.side === 'SELL') {
+        const key = Tango.Engine.positionKey(chain.id, clickContext.token.address);
+        const position = runtime.state.positions[key];
+        if (!position) return showToast(t('noPosition'), 'error');
+        const quote = resolvePaperTradeQuote(clickContext.token, clickContext.quote, { position });
+        if (!quote) return showToast(t('invalidQuote'), 'error');
+        const percent = clickContext.breakeven === true
+          ? Tango.Engine.breakevenSellPercent(position, quote, runtime.settings)
+          : Number(clickContext.sellPercent);
+        if (!(percent > 0 && percent <= 100)) {
+          return showToast(t(clickContext.breakeven === true ? 'breakevenUnavailable' : 'invalidAmount'), 'error');
+        }
+        return await sell(percent, { token: clickContext.token, quote,
+          ...(clickContext.breakeven === true ? { breakeven: true } : {}) }, routeCapture);
       }
-      return sell(percent, { token: clickContext.token, quote,
-        ...(clickContext.breakeven === true ? { breakeven: true } : {}) }, routeCapture);
-    }
-    if (clickContext.side && clickContext.side !== 'BUY') return showToast(t('invalidAmount'), 'error');
-    await buy(amountNative, clickContext, routeCapture);
+      if (clickContext.side && clickContext.side !== 'BUY') return showToast(t('invalidAmount'), 'error');
+      await buy(amountNative, clickContext, routeCapture);
+    } finally { runtime.quickBuyLocks.delete(lockKey); }
   }
 
   async function buy(amountNative, context = runtime.current, routeCapture = captureRoute()) {
@@ -1790,16 +1917,24 @@
 
   function resolveCommitPaperTradeQuote(order, position, routeCapture) {
     if (!routeCaptureIsCurrent(routeCapture)) return null;
-    const preview = paperExecutableQuote(order?.token, order?.quote, position);
-    const baseContext = executionValidationBaseContext(order?.token);
-    const previewValid = Tango.Engine.validateQuote(
-      preview, Date.now(), undefined, baseContext,
-      executionValidationTrustContext(baseContext, order?.token)
-    ).ok;
-    // A sell confirmation can outlive a factual quote. Resolve the position's
-    // paper exit again instead of pinning an expired preview. Buys retain their
+    if (position && !Tango.GMGN._isTokenDetailPage?.()) {
+      const token = order?.token;
+      const snapshot = Tango.GMGN.readTrenchSnapshot?.(token?.chain, token?.address);
+      const address = snapshot?.token?.address;
+      const observedAt = Number(snapshot?.quote?.observedAt || 0);
+      if (token && snapshot?.token?.chain === token.chain
+        && snapshot.token.metadataVerified === true && snapshot.token.metadataSource === 'GMGN_TRENCH'
+        && Tango.Chains.validateAddress(token.chain, address)
+        && Tango.Chains.normalizeAddress(token.chain, address) === Tango.Chains.normalizeAddress(token.chain, token.address)
+        && observedAt > 0 && observedAt <= Date.now() + 5000
+        && Date.now() - observedAt <= Number(Tango.QUOTE_STALE_MS || 15000)) {
+        return resolvePaperTradeQuote(snapshot.token, snapshot.quote, { position });
+      }
+    }
+    // A sell confirmation can outlive or lag a factual quote. Resolve the
+    // position's paper exit again instead of pinning its preview. Buys retain their
     // existing stale-preview protection; provisional estimates keep their value.
-    const fallback = position && !previewValid
+    const fallback = position
       ? resolvePaperTradeQuote(order?.token, order?.quote, { position })
       : order?.quote || resolvePaperTradeQuote(order?.token, order?.quote, { position });
     if (!routeMatchesDetailToken(order?.token)) return fallback;
@@ -1821,7 +1956,9 @@
         normalizedQuote, order.token.chain, expectedAddress, maxAgeMs
       )
       || !acceptedTokenObservation(normalizedQuote, snapshot.token, maxAgeMs)) return fallback;
-    return resolvePaperTradeQuote(order.token, normalizedQuote, { position, preferCandidate: true }) || fallback;
+    // A verified, current, same-token observation that fails coherence is an
+    // execution veto. Falling back here would silently undo quote validation.
+    return resolvePaperTradeQuote(order.token, normalizedQuote, { position, preferCandidate: true });
   }
 
   function previewBuy(order, routeCapture) {
@@ -1835,7 +1972,10 @@
       order.quote, Date.now(), undefined, baseContext,
       executionValidationTrustContext(baseContext, order.token)
     );
-    if (!validation.ok) throw new Error(validation.reason);
+    if (!validation.ok) {
+      recordQuoteRejection(`buy-preview:${validation.reason}`, order.token, order.quote);
+      throw new Error(validation.reason);
+    }
     if (!(order.amountNative > 0)) throw new Error('invalidAmount');
     if (order.amountNative > account.cashBalanceNative) throw new Error('insufficientBalance');
     if (!requiresConfirmation()) return;
@@ -1873,6 +2013,7 @@
     try {
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
       const finalQuote = resolveCommitPaperTradeQuote(order, null, routeCapture);
+      if (!finalQuote) throw new Error('invalidQuote');
       const quote = paperExecutableQuote(order.token, finalQuote);
       if (!quote) throw new Error('invalidQuote');
       const executableOrder = { ...order, quote };
@@ -1887,6 +2028,25 @@
     finally { runtime.tradePending = false; }
   }
 
+  function entryDetailNeedsRead(context) {
+    return routeMatchesDetailToken(context?.token)
+      && (context.token.metadataVerified === false
+        || (context.token.metadataSource && context.token.metadataSource !== 'GMGN_DETAIL'));
+  }
+
+  async function readEntryDetailContext(context, routeCapture) {
+    // This is the adapter's bounded DOM identity read, never a network wait.
+    const observed = await Tango.GMGN.readCurrentToken();
+    if (!routeCaptureIsCurrent(routeCapture)) return null;
+    const resolved = Tango.GMGN.resolveCurrentTokenRead(context, observed);
+    if (resolved?.token?.chain !== context.token.chain
+      || Tango.Chains.normalizeAddress(context.token.chain, resolved.token.address)
+        !== Tango.Chains.normalizeAddress(context.token.chain, context.token.address)) return context;
+    runtime.current = resolved;
+    queueRender();
+    return resolved;
+  }
+
   async function sell(percent, context = runtime.current, routeCapture = captureRoute()) {
     if (paperExecutionDisabled()) return;
     primeTradeAudio();
@@ -1899,7 +2059,13 @@
       const position = runtime.state.positions[key];
       if (!position) throw new Error('noPosition');
       if (!(order.percent > 0 && order.percent <= 100)) throw new Error('invalidAmount');
-      order.quote = resolvePaperTradeQuote(context?.token, context?.quote, { position });
+      if (entryDetailNeedsRead(context)) {
+        context = await readEntryDetailContext(context, routeCapture);
+        if (!context) return;
+      }
+      // Preview and commit both consult the verified header. A stale mixed
+      // cached quote must not reject the action before the fresh DOM is read.
+      order.quote = resolveCommitPaperTradeQuote({ ...order, quote: context?.quote }, position, routeCapture);
       if (!order.quote) throw new Error('invalidQuote');
       refreshPaperQuoteInBackground(order.token);
       const baseContext = executionValidationBaseContext(order.token);
@@ -1932,7 +2098,7 @@
     if (activeChain()?.id !== position.chain) return showToast(t('unsupportedChain'), 'error');
     const routeCapture = captureRoute();
     const token = { chain: position.chain, address: position.tokenAddress, symbol: position.symbol };
-    const quote = resolvePaperTradeQuote(token, positionQuote(position), { position });
+    const quote = resolveCommitPaperTradeQuote({ token, quote: positionQuote(position) }, position, routeCapture);
     if (!quote) return showToast(t('invalidQuote'), 'error');
     refreshPaperQuoteInBackground(token);
     await sell(percent, { token, quote }, routeCapture);
@@ -1946,6 +2112,7 @@
       if (!routeCaptureIsCurrent(routeCapture) || activeChain()?.id !== order.token?.chain) throw new Error('unsupportedChain');
       const position = persistedQuoteContext(order.token);
       const finalQuote = resolveCommitPaperTradeQuote(order, position, routeCapture);
+      if (!finalQuote) throw new Error('invalidQuote');
       const quote = paperExecutableQuote(order.token, finalQuote, position);
       if (!quote) throw new Error('invalidQuote');
       const executableOrder = { ...order, quote };
@@ -2042,10 +2209,13 @@
   async function sellBreakeven() {
     if (paperExecutionDisabled()) return;
     const routeCapture = captureRoute();
+    if (entryDetailNeedsRead(runtime.current)) {
+      if (!await readEntryDetailContext(runtime.current, routeCapture)) return;
+    }
     const position = currentPosition();
     if (!position) return showToast(t('noPosition'), 'error');
     if (Tango.Engine.breakevenTargetNative?.(position) === 0) return showToast(t('breakevenRecovered'), 'success');
-    const quote = resolvePaperTradeQuote(runtime.current?.token, runtime.current?.quote, { position });
+    const quote = resolveCommitPaperTradeQuote({ token: runtime.current?.token, quote: runtime.current?.quote }, position, routeCapture);
     if (!quote) return showToast(t('invalidQuote'), 'error');
     refreshPaperQuoteInBackground(runtime.current.token);
     const percent = Tango.Engine.breakevenSellPercent(position, quote, runtime.settings);
@@ -2222,22 +2392,22 @@
     style.textContent = `
       .tango-header-summary-anchor { overflow: visible !important; position: relative !important; }
       #tango-header-account-summary {
-        align-items: center; background: rgba(12,13,18,.96); border: 1px solid rgba(155,124,255,.34);
-        border-radius: 8px; color: #aeb1bd; cursor: pointer; display: flex; font: 650 12px/24px Inter,ui-sans-serif,system-ui,sans-serif;
+        align-items: center; background: rgba(16,19,17,.96); border: 1px solid rgba(198,250,116,.34);
+        border-radius: 8px; color: #a5afa4; cursor: pointer; display: flex; font: 650 12px/24px Inter,ui-sans-serif,system-ui,sans-serif;
         gap: 8px; padding: 4px 9px; pointer-events: auto; position: absolute; right: 0;
         top: calc(100% + 2px); white-space: nowrap; width: max-content; z-index: 80;
       }
-      #tango-header-account-summary:hover { background: rgba(25,22,39,.98); border-color: rgba(155,124,255,.65); }
+      #tango-header-account-summary:hover { background: rgba(34,43,32,.98); border-color: rgba(198,250,116,.65); }
       #tango-header-account-summary strong { color: #72f0bd; font-size: 14px; font-weight: 900; }
       #tango-header-account-summary i { background: rgba(255,255,255,.12); height: 13px; width: 1px; }
-      #tango-header-account-summary .tango-header-paper-badge { color: #c9bcff; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
-      #tango-header-account-summary .tango-header-calendar-link { color: #d8d0ff; font-size: 11px; font-weight: 800; }
+      #tango-header-account-summary .tango-header-paper-badge { color: #c6fa74; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
+      #tango-header-account-summary .tango-header-calendar-link { color: #d4f2ad; font-size: 11px; font-weight: 800; }
       #tango-header-account-summary[data-theme="light"] { background: rgba(255,255,255,.98); color: #1b2030; border-color: rgba(26,31,48,.18); }
       #tango-header-account-summary[data-theme="light"]:hover { background: #f0f2f8; }
       #tango-header-account-summary[data-theme="light"] strong { color: #08794e; }
       #tango-header-account-summary[data-theme="light"] i { background: rgba(26,31,48,.18); }
       #tango-header-account-summary[data-theme="light"] .tango-header-paper-badge,
-      #tango-header-account-summary[data-theme="light"] .tango-header-calendar-link { color: #5936a2; }
+      #tango-header-account-summary[data-theme="light"] .tango-header-calendar-link { color: #355811; }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -2357,6 +2527,34 @@
     return { totalBuy, totalSell, realizedPnl };
   }
 
+  function refreshDetailDisplayQuote() {
+    if (!runtime.settings?.enabled || !runtime.state?.initialized) return false;
+    const context = runtime.current;
+    if (!context?.token || !routeMatchesDetailToken(context.token)) return false;
+    const routeCapture = captureRoute();
+    const snapshot = Tango.GMGN.readVerifiedCurrentTokenSnapshot?.(context.token);
+    const address = snapshot?.token?.address || snapshot?.token?.tokenAddress;
+    const chain = context.token.chain;
+    if (!routeCaptureIsCurrent(routeCapture) || snapshot?.token?.chain !== chain
+      || !Tango.Chains.validateAddress(chain, address)
+      || Tango.Chains.normalizeAddress(chain, address)
+        !== Tango.Chains.normalizeAddress(chain, context.token.address)) return false;
+    const quote = normalizeObservationDimensions(snapshot.quote);
+    if (!trustedCachedObservation(quote, chain, context.token.address, Number(Tango.QUOTE_STALE_MS || 15_000))
+      || !acceptedTokenObservation(quote, snapshot.token)
+      || !resolvePaperTradeQuote(snapshot.token, quote, { position: currentPosition(), preferCandidate: true })) return false;
+    const changed = ['priceUsd', 'marketCapUsd', 'totalSupply', 'liquidityUsd', 'source']
+      .some(field => context.quote?.[field] !== quote[field]);
+    runtime.current = Tango.GMGN.resolveCurrentTokenRead(context, snapshot);
+    mergeQuote(runtime.current, quote);
+    rememberPersistentGmgnQuote(quote);
+    if (changed) {
+      queueImmediateCurrentCalibration(routeCapture);
+      queueRender();
+    }
+    return true;
+  }
+
   function renderPanel() {
     if (!runtime.state.initialized || !runtime.settings.enabled) return '';
     const chain = activeChain();
@@ -2368,7 +2566,15 @@
     const position = currentPosition();
     const liveQuote = executableQuote(current.token, current.quote);
     const paperQuote = liveQuote || resolvePaperTradeQuote(current.token, current.quote, { position });
-    const mark = position ? Tango.Engine.markPosition(position, paperQuote, currentNativePriceUsd()) : null;
+    // A startup/no-chart fallback is an execution estimate, not a new market
+    // observation. Keep the position's last mark until factual data arrives.
+    const waitingForMarket = Boolean(position && !liveQuote && paperQuote?.syntheticTokenPrice);
+    const mark = position ? Tango.Engine.markPosition(position,
+      waitingForMarket ? undefined : paperQuote, currentNativePriceUsd()) : null;
+    const displayMarketCap = Number(current.quote?.marketCapUsd) > 0
+      ? Number(current.quote.marketCapUsd) : Number(position?.lastMarketCapUsd || 0);
+    const displayMarketCapText = displayMarketCap > 0
+      ? Tango.Format.usd(displayMarketCap, language(), true) : '--';
     const quoteValid = Boolean(paperQuote);
     const symbol = current?.token?.symbol || 'GMGN';
     const { totalBuy, totalSell, realizedPnl } = tokenTradeTotals(
@@ -2394,7 +2600,7 @@
         <section class="tango-trade-block">
           <div class="tango-trade-title sell-title"><span>${t('sell')} %</span><span class="tango-title-balance">${position ? `${Tango.Format.compact(position.quantity, language(), 2)} ${esc(symbol)}` : `0 ${esc(symbol)}`}</span></div>
           <div class="tango-preset-grid">${renderPresetGrid('sell', runtime.settings.sellPresets)}</div>
-          <div class="tango-trade-meta"><span>⌁ ${runtime.settings.fastMode ? 'FAST' : t('auto')}</span><span>♜ ${Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())}</span><div class="tango-sell-market-actions"><span class="safe">${t('currentMc')} ${Tango.Format.usd(current.quote.marketCapUsd, language(), true)}</span><button class="tango-breakeven-link" data-action="breakeven" ${breakevenPercent ? '' : 'disabled'} title="${esc(breakevenRecovered ? t('breakevenRecovered') : breakevenPercent ? breakevenLabel : t('breakevenUnavailable'))}">${esc(breakevenLabel)}</button></div></div>
+          <div class="tango-trade-meta"><span>⌁ ${runtime.settings.fastMode ? 'FAST' : t('auto')}</span><span>♜ ${Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())}</span><div class="tango-sell-market-actions"><span class="safe">${t('currentMc')} ${displayMarketCapText}</span><button class="tango-breakeven-link" data-action="breakeven" ${breakevenPercent ? '' : 'disabled'} title="${esc(breakevenRecovered ? t('breakevenRecovered') : breakevenPercent ? breakevenLabel : t('breakevenUnavailable'))}">${esc(breakevenLabel)}</button></div></div>
         </section>
         <div class="tango-summary-grid">
           <div class="tango-summary-item tango-paper-balance-summary"><span>${t('paperBalance')}</span><strong>${accountMoney(account.cashBalanceNative)}</strong></div>
@@ -2404,11 +2610,12 @@
         </div>
         <div class="tango-bottom-details">
           <span>${t('entryMc')} <strong>${position ? Tango.Format.usd(position.averageEntryMarketCap, language(), true) : '--'}</strong></span>
-          <span>${t('currentMc')} <strong>${Tango.Format.usd(current.quote.marketCapUsd, language(), true)}</strong></span>
+          <span>${t('currentMc')} <strong>${displayMarketCapText}</strong></span>
           <span>${t('pnl')} <strong class="${pnlClass(mark?.unrealizedPnlNative)}">${position ? Tango.Format.percent(mark.roi, language(), true) : '--'}</strong></span>
           <span>${t('pnlAmount')} <strong class="${pnlClass(totalProfit)}">${accountMoney(totalProfit, true)}</strong></span>
         </div>
-        ${paperQuote?.provisional === true
+        <button type="button" class="tango-button" data-action="trade-replay" style="width:100%;margin-top:10px">${language()==='zh-CN'?'查看买卖记录 · 走势图':'View trades · chart'}</button>
+        ${waitingForMarket ? `<div class="tango-warning">${t('quoteLoading')}</div>` : paperQuote?.provisional === true
           ? `<div class="tango-warning">${t('provisionalQuote')}</div>`
           : quoteValid ? '' : `<div class="tango-warning">${t('quoteLoading')}</div>`}
       </div>`}
@@ -2736,6 +2943,11 @@
   async function exportPageBackup() {
     try {
       const data = await Tango.Store.exportData();
+      if(runtime.modal?.type==='dashboard-error'){
+        runtime.modal.backupJson=JSON.stringify(data,null,2);
+        runtime.renderedRecoveryDialog=null;
+        render();
+      }
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -2807,7 +3019,7 @@
     if (!runtime.modal) return '';
     if(runtime.modal.type==='daily-report') return Tango.DailyReport.dialog(runtime.modal.report,runtime.modal.currency,language(),runtime.modal.busy);
     if (runtime.modal.type === 'dashboard-error') {
-      return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3><div class="tango-warning">${esc(runtime.modal.note)}</div><div class="tango-modal-actions"><button class="tango-button" data-action="cancel-modal">${t('cancel')}</button><button class="tango-button primary" data-action="export-backup">${t('exportJson')}</button><label>${t('importJson')}<input id="tango-import-backup" type="file" accept=".json,application/json" style="display:block;max-width:100%"></label></div></div></div>`;
+      return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3><div class="tango-warning">${esc(runtime.modal.note)}</div>${runtime.modal.backupJson?`<p>${language().toLowerCase().startsWith('zh')?'若浏览器未下载，可全选下方 JSON 文本，复制并保存为 .json 文件。':'If the browser did not download, select all JSON below, copy and save as a .json file.'}</p><textarea id="tango-backup-json-fallback" aria-label="JSON backup" readonly style="width:100%;min-height:120px;box-sizing:border-box">${esc(runtime.modal.backupJson)}</textarea>`:''}<div class="tango-modal-actions"><button class="tango-button" data-action="cancel-modal">${t('cancel')}</button><button class="tango-button primary" data-action="export-backup">${t('exportJson')}</button><label>${t('importJson')}<input id="tango-import-backup" type="file" accept=".json,application/json" style="display:block;max-width:100%"></label></div></div></div>`;
     }
     return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3>
       <div class="tango-confirm-list">${runtime.modal.rows.map(([label,value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
@@ -2869,6 +3081,7 @@
     }
     const summary = Tango.Engine.portfolioSummary(runtime.state, activeChain().id, currentNativePriceUsd());
     renderHeaderAccountSummary(summary);
+    syncTrenchPositionBadges();
     // Preserve the native file input while its dialog is open. Replacing it
     // during a quote tick detaches an in-progress browser file chooser.
     if (runtime.modal?.type === 'dashboard-error'
@@ -2938,6 +3151,10 @@
       if (action === 'toggle-sound') {
         const soundEnabled = !runtime.settings.soundEnabled;
         await patchRuntimeSettings({ soundEnabled });
+      }
+      if (action === 'trade-replay' && runtime.current?.token) {
+        const token=runtime.current.token;
+        await Tango.TradeReplay?.open(shadow,runtime.state,token.chain,token.address,language());
       }
       if (action === 'breakeven') await sellBreakeven();
       if (action === 'close-all') requestCloseAll();
@@ -3067,6 +3284,9 @@
     runtime.routeIdentity = currentRouteIdentity();
     chartFrames().forEach((frame) => registerChartFrame(frame));
     let mutationTimer;
+    let detailQuoteMutation = false;
+    let detailMetadataMutation = false;
+    const heldQuoteRoots = new Set();
     runtime.observer = new MutationObserver((records) => {
       if (location.href !== runtime.lastUrl) {
         handleRouteChange();
@@ -3077,11 +3297,23 @@
       const hrefMutations = [];
       let chartMutation = false;
       let headerMutation = false;
+      const detailPage = Boolean(detailRouteToken());
+      const detailPending = Tango.GMGN.needsCurrentTokenRead(runtime.current);
       for (const record of records) {
         const target = record.target?.nodeType === 3 ? record.target.parentElement : record.target;
+        const heldCard = target?.closest?.('[data-icon="MC"]')?.closest?.('[data-tango-position-card="1"]');
+        if (heldCard && (record.type === 'characterData' || record.type === 'childList')) heldQuoteRoots.add(heldCard);
+        if (detailPage && detailHeaderMutationNode(target)) {
+          detailQuoteMutation = true;
+          if (detailPending) headerMutation = true;
+        }
         if (record.type === 'attributes') {
           if (record.attributeName !== 'href' && typeof record.oldValue === 'string'
             && target?.getAttribute?.(record.attributeName) === record.oldValue) continue;
+          if (detailPage && detailHeaderMutationNode(target)
+            && ['data-addr', 'data-address', 'data-token-address', 'data-symbol'].includes(record.attributeName)) {
+            detailMetadataMutation = true;
+          }
           const roots = quickBuyMutationRoots(target);
           if (roots.length) {
             roots.forEach((root) => runtime.pendingMutationRoots.add(root));
@@ -3097,8 +3329,13 @@
         if (record.type === 'childList') {
           const paperReplacement = [...(record.addedNodes || [])].some(containsPaperQuickBuyMutationNode);
           for (const node of record.addedNodes || []) {
+            if (detailPage && detailHeaderMutationNode(node, true)) {
+              detailQuoteMutation = true;
+              detailMetadataMutation = true;
+            }
             if (chartMutationNode(node)) chartMutation = true;
-            if (headerMutationNode(node)) headerMutation = true;
+            if (headerMutationNode(node)
+              || (detailPending && detailHeaderMutationNode(node, true))) headerMutation = true;
             const structuralRoots = quickBuyMutationRoots(node, {
               includeAncestors: false, includeDescendants: true
             });
@@ -3110,7 +3347,8 @@
           }
           for (const node of record.removedNodes || []) {
             if (chartMutationNode(node)) chartMutation = true;
-            if (headerMutationNode(node)) headerMutation = true;
+            if (headerMutationNode(node)
+              || (detailPending && detailHeaderMutationNode(node, true))) headerMutation = true;
             const structuralRoots = quickBuyMutationRoots(node, {
               includeAncestors: false, includeDescendants: true
             });
@@ -3132,24 +3370,33 @@
           hrefMutations, policyKey: quickBuyPolicyKey()
         });
       }
-      if (mutationTimer || (!runtime.pendingMutationRoots.size && !chartMutation && !headerMutation)) return;
+      if (mutationTimer || (!runtime.pendingMutationRoots.size && !chartMutation && !headerMutation && !detailQuoteMutation && !heldQuoteRoots.size)) return;
       mutationTimer = setTimeout(() => {
         mutationTimer = null;
+        const heldRoots = [...heldQuoteRoots];
+        heldQuoteRoots.clear();
+        if (heldRoots.length) syncTrenchPositionBadges(heldRoots);
         const roots = [...runtime.pendingMutationRoots];
         runtime.pendingMutationRoots.clear();
         if (roots.length) syncQuickBuyButtons(roots, {
           fast: false, addedRoots: [], removedRoots: [], policyKey: quickBuyPolicyKey()
         });
         if (runtime.settings?.enabled && runtime.state?.initialized) {
+          if (detailQuoteMutation) {
+            detailQuoteMutation = false;
+            refreshDetailDisplayQuote();
+          }
           renderHeaderAccountSummary({});
-          if (Tango.GMGN.needsCurrentTokenRead(runtime.current)) tickQuote();
+          const rereadDetail = detailMetadataMutation;
+          detailMetadataMutation = false;
+          if (rereadDetail || Tango.GMGN.needsCurrentTokenRead(runtime.current)) tickQuote();
         }
         if (document.querySelector('iframe[title="Financial Chart"], iframe[title="TradingView"], [data-sentry-component="TradingView"] iframe')) replayChartMarkers();
       }, 160);
     });
     runtime.observer.observe(document.body, {
       childList: true, subtree: true, attributes: true,
-      attributeFilter: ['href', 'class', 'style', 'data-testid'], attributeOldValue: true,
+      attributeFilter: ['href', 'class', 'style', 'data-testid', 'data-addr', 'data-address', 'data-token-address', 'data-symbol'], attributeOldValue: true,
       characterData: true
     });
     Tango.Store.subscribe(refreshRecoverably);

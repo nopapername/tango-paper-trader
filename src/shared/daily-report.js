@@ -56,13 +56,13 @@
   const netColor=(report,currency)=>{const value=currency==='USD'?report.netUsd:report.netNative;return value>0?'#3ee6a0':value<0?'#ff647c':'#f4f5fa';};
   function html(report,currency,language) {
     const l=labels(language), color=netColor(report,currency);
-    const row=(title,value,tint='#f4f5fa')=>`<div style="display:flex;justify-content:space-between;gap:16px;align-items:center"><span style="color:#9ca3b8">${esc(title)}</span><strong style="color:${tint};overflow-wrap:anywhere;text-align:right">${esc(value)}</strong></div>`;
-    return `<article class="tango-report-card" aria-label="${esc(l.title)}" style="box-sizing:border-box;background:#11141e;color:#f4f5fa;border:1px solid #2b3041;border-radius:16px;padding:24px;font:14px/1.5 system-ui,sans-serif;min-width:0">
-      <div style="display:flex;justify-content:space-between;gap:12px;color:#a5adca;font-weight:700"><span>TANGO · ${esc(l.title)}</span><span>${esc(report.chainName)}</span></div>
-      <div style="margin-top:22px;color:#c8cede">${esc(report.date)}</div><div style="margin-top:8px;color:#9ca3b8;font-size:12px">${esc(l.net)}</div>
+    const row=(title,value,tint='#f4f5fa')=>`<div style="display:flex;justify-content:space-between;gap:16px;align-items:center"><span style="color:#a5afa4">${esc(title)}</span><strong style="color:${tint};overflow-wrap:anywhere;text-align:right">${esc(value)}</strong></div>`;
+    return `<article class="tango-report-card" aria-label="${esc(l.title)}" style="box-sizing:border-box;background:#101311;color:#f4f5fa;border:1px solid #303a31;border-radius:16px;padding:24px;font:14px/1.5 system-ui,sans-serif;min-width:0">
+      <div style="display:flex;justify-content:space-between;gap:12px;color:#a5afa4;font-weight:700"><span>TANGO · ${esc(l.title)}</span><span>${esc(report.chainName)}</span></div>
+      <div style="margin-top:22px;color:#c7d3be">${esc(report.date)}</div><div style="margin-top:8px;color:#a5afa4;font-size:12px">${esc(l.net)}</div>
       <strong style="display:block;font-size:clamp(24px,5vw,42px);line-height:1.3;color:${color};overflow-wrap:anywhere;margin:4px 0 24px">${esc(money(report,'net',currency,language))}</strong>
       <div style="display:grid;gap:10px">${row(l.profit,money(report,'profit',currency,language),'#3ee6a0')}${row(l.loss,money(report,'loss',currency,language),'#ff647c')}${row(l.counts,`${report.wins} / ${report.losses} · ${report.sells}${l.total}`)}</div>
-      <div style="border-top:1px solid #2b3041;margin-top:22px;padding-top:14px;font-size:11px;color:#8d96ae">${esc(l.paper)}<br>${esc(l.retained)}${report.detailsIncomplete?`<br>${esc(l.incomplete)}`:''}${currency==='USD'&&report.netUsd==null?`<br>${esc(l.usdMissing)}`:''}</div></article>`;
+      <div style="border-top:1px solid #303a31;margin-top:22px;padding-top:14px;font-size:11px;color:#9aa690">${esc(l.paper)}<br>${esc(l.retained)}${report.detailsIncomplete?`<br>${esc(l.incomplete)}`:''}${currency==='USD'&&report.netUsd==null?`<br>${esc(l.usdMissing)}`:''}</div></article>`;
   }
   function canvas(report,currency,language,doc=global.document) {
     const result=doc.createElement('canvas'); result.width=1080; result.height=640;
@@ -73,16 +73,16 @@
       if(measured>max)ctx.font=`${weight} ${Math.max(10,Math.floor(size*max/measured))}px sans-serif`;
       ctx.fillStyle=color;ctx.fillText(String(value),x,y,max);
     };
-    ctx.fillStyle='#11141e';ctx.fillRect(0,0,1080,640);
-    text(`TANGO · ${l.title}`,64,72,28,'#b7c0dd',700);text(report.chainName,760,72,23,'#b7c0dd',600,256);
-    text(report.date,64,141,24,'#c8cede');text(l.net,64,190,20,'#9ca3b8');
+    ctx.fillStyle='#101311';ctx.fillRect(0,0,1080,640);
+    text(`TANGO · ${l.title}`,64,72,28,'#bdcbae',700);text(report.chainName,760,72,23,'#bdcbae',600,256);
+    text(report.date,64,141,24,'#c7d3be');text(l.net,64,190,20,'#a5afa4');
     text(money(report,'net',currency,language),64,274,70,netColor(report,currency),800);
-    text(l.profit,64,353,23,'#9ca3b8');text(money(report,'profit',currency,language),540,353,28,'#3ee6a0',700,476);
-    text(l.loss,64,405,23,'#9ca3b8');text(money(report,'loss',currency,language),540,405,28,'#ff647c',700,476);
-    text(l.counts,64,457,23,'#9ca3b8');text(`${report.wins} / ${report.losses} · ${report.sells}${l.total}`,540,457,28,'#f4f5fa',700,476);
-    text(l.paper,64,533,19,'#b7c0dd',700);text(l.retained,64,570,17,'#8d96ae');
-    if(report.detailsIncomplete)text(l.incomplete,64,603,15,'#8d96ae');
-    else if(currency==='USD'&&report.netUsd==null)text(l.usdMissing,64,603,15,'#8d96ae');
+    text(l.profit,64,353,23,'#a5afa4');text(money(report,'profit',currency,language),540,353,28,'#3ee6a0',700,476);
+    text(l.loss,64,405,23,'#a5afa4');text(money(report,'loss',currency,language),540,405,28,'#ff647c',700,476);
+    text(l.counts,64,457,23,'#a5afa4');text(`${report.wins} / ${report.losses} · ${report.sells}${l.total}`,540,457,28,'#f4f5fa',700,476);
+    text(l.paper,64,533,19,'#bdcbae',700);text(l.retained,64,570,17,'#9aa690');
+    if(report.detailsIncomplete)text(l.incomplete,64,603,15,'#9aa690');
+    else if(currency==='USD'&&report.netUsd==null)text(l.usdMissing,64,603,15,'#9aa690');
     return result;
   }
   async function exportImage(report,currency,language,mode='download',env=global) {
@@ -99,8 +99,8 @@
   }
   function dialog(report,currency,language,busy=false) {
     const l=labels(language);
-    const button=(action,title,selected=false)=>`<button type="button" data-report-action="${action}" ${busy?'disabled':''} ${action==='native'||action==='usd'?`aria-pressed="${selected}"`:''} style="border:1px solid ${selected?'#9b85ff':'#353b50'};border-radius:8px;padding:8px 12px;background:${selected?'#342957':'#202635'};color:#f4f5fa;cursor:pointer;font:13px system-ui,sans-serif">${esc(title)}</button>`;
-    return `<div class="tango-report-overlay" style="position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.65);padding:16px;box-sizing:border-box;pointer-events:auto"><section role="dialog" aria-modal="true" aria-label="${esc(l.title)}" style="box-sizing:border-box;max-width:560px;width:100%;max-height:calc(100vh - 32px);overflow:auto;background:#191e2c;border:1px solid #353b50;border-radius:18px;padding:14px;box-shadow:0 16px 60px #0008">
+    const button=(action,title,selected=false)=>`<button type="button" data-report-action="${action}" ${busy?'disabled':''} ${action==='native'||action==='usd'?`aria-pressed="${selected}"`:''} style="border:1px solid ${selected?'#c6fa74':'#435534'};border-radius:8px;padding:8px 12px;background:${selected?'#344324':'#222b20'};color:#f4f5fa;cursor:pointer;font:13px system-ui,sans-serif">${esc(title)}</button>`;
+    return `<div class="tango-report-overlay" style="position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.65);padding:16px;box-sizing:border-box;pointer-events:auto"><section role="dialog" aria-modal="true" aria-label="${esc(l.title)}" style="box-sizing:border-box;max-width:560px;width:100%;max-height:calc(100vh - 32px);overflow:auto;background:#191e1a;border:1px solid #435534;border-radius:18px;padding:14px;box-shadow:0 16px 60px #0008">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px"><div style="display:flex;gap:6px">${button('native',l.native,currency!=='USD')}${button('usd','USD',currency==='USD')}</div>${button('close',l.close)}</div>
       ${html(report,currency,language)}<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">${button('download',l.download)}${button('copy',l.copy)}${button('history',l.history)}</div></section></div>`;
   }

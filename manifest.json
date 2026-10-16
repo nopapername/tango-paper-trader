@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tango Paper Trader",
-  "version": "0.3.13",
+  "version": "0.3.24",
   "description": "Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics.",
   "permissions": [
     "storage"
@@ -49,6 +49,7 @@
         "src/core/chains.js",
         "src/core/supply.js",
         "src/adapters/gmgn-quotes.js",
+        "src/shared/trade-replay.js",
         "src/content/page-main.js"
       ],
       "run_at": "document_start",
@@ -84,6 +85,7 @@
         "src/core/state-coordinator.js",
         "src/core/storage.js",
         "src/shared/daily-report.js",
+        "src/shared/trade-replay.js",
         "src/adapters/gmgn-quotes.js",
         "src/adapters/gmgn.js",
         "src/content/chain-view.js",

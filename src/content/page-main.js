@@ -3,6 +3,7 @@
   window.__tangoGmgnQuoteTap = true;
 
   const quoteCache = new Map();
+  const replayCandleCache = new Map();
   let lastRequestObservedAt = 0;
   let quoteVersion = 0; let replayVersion = -1; let replayLocked = false;
 
@@ -54,6 +55,17 @@
   }
 
   function inspectPayload(payload, chain, url, observedAt) {
+    // Passive chart copy only. This data never enters execution quote selection.
+    try {
+      const batch=Tango.TradeReplay?.extractCandles(payload,url);
+      if(batch) {
+        const key=`${batch.chain}:${batch.address}`;
+        replayCandleCache.set(key,batch);
+        if(replayCandleCache.size>8)replayCandleCache.delete(replayCandleCache.keys().next().value);
+        window.postMessage({source:'TANGO_GMGN_PAGE',type:'REPLAY_CANDLES',batch},'*');
+      }
+    } catch {}
+
     if (chain) {
       try { publish(Tango.GMGNQuotes.extract(payload, chain, observedAt)); } catch {}
     }
@@ -142,6 +154,7 @@
   window.addEventListener('message', (event) => {
     if (event.source !== window || event.data?.source !== 'TANGO_PAPER_CONTENT' || event.data?.type !== 'REQUEST_QUOTES') return;
     if (replayLocked && replayVersion === quoteVersion) return;
+    replayCandleCache.forEach(batch=>window.postMessage({source:'TANGO_GMGN_PAGE',type:'REPLAY_CANDLES',batch},'*'));
     publish([...quoteCache.values()]);
     replayVersion = quoteVersion; replayLocked = true;
     Promise.resolve().then(() => { replayLocked = false; });

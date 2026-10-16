@@ -523,7 +523,7 @@
     const rows = trades.map((trade) => `<tr><td>${formatDate(trade.executedAt)}</td><td class="token-cell">${esc(trade.symbol || trade.tokenAddress)}</td>
       <td class="${trade.side === 'BUY' ? 'up' : 'down'}">${trade.side === 'BUY' ? t('buy') : t('sell')}</td><td>${native(trade.amountNative, view)}</td><td>${valuation(trade)}</td>
       <td>${Tango.Format.usd(trade.marketCapUsd, lang(), true)}</td><td class="${cls(trade.realizedPnlNative)}">${trade.side === 'SELL' ? native(trade.realizedPnlNative, view, true) : '—'}</td>
-      <td>${trade.side === 'SELL' ? `<button class="button" data-share="${esc(trade.id)}">PNG</button> <button class="button" data-copy-share="${esc(trade.id)}">${t('copyImage')}</button>` : ''}</td></tr>`).join('');
+      <td><button class="button" data-trade-replay="${esc(trade.id)}">${label('View trades','查看买卖记录')}</button> ${trade.side === 'SELL' ? `<button class="button" data-share="${esc(trade.id)}">PNG</button> <button class="button" data-copy-share="${esc(trade.id)}">${t('copyImage')}</button>` : ''}</td></tr>`).join('');
     const pagination = compact ? '' : `<p class="muted statistics-note">${esc(t('historyCount', { count: view.trades.length }))}</p><div class="pagination"><span>${esc(t('showingTrades', { from: view.trades.length ? offset + 1 : 0, to: offset + trades.length, count: view.trades.length }))}</span>
       <button class="button" data-history-page="-1" ${runtime.historyPage === 0 ? 'disabled' : ''}>${t('previousPage')}</button>
       <button class="button" data-history-page="1" ${runtime.historyPage >= pageCount - 1 ? 'disabled' : ''}>${t('nextPage')}</button></div>`;
@@ -608,6 +608,10 @@
   }
 
   function bindShareButtons(root) {
+    root.querySelectorAll('[data-trade-replay]').forEach(button=>button.addEventListener('click',()=>{
+      const trade=runtime.state.trades.find(t=>t.id===button.dataset.tradeReplay);
+      if(trade) Tango.TradeReplay.open(document.body,runtime.state,trade.chain,trade.tokenAddress,lang());
+    }));
     root.querySelectorAll('[data-share]').forEach((button) => button.addEventListener('click', () => shareTrade(button.dataset.share)));
     root.querySelectorAll('[data-copy-share]').forEach((button) => button.addEventListener('click', () => shareTrade(button.dataset.copyShare, 'copy')));
   }
@@ -827,8 +831,8 @@
         context.fillText(text, x, y, maxWidth);
       };
       const gradient = context.createLinearGradient(0, 0, 1_200, 630);
-      gradient.addColorStop(0, '#090a0f'); gradient.addColorStop(1, '#28165c'); context.fillStyle = gradient; context.fillRect(0, 0, 1_200, 630);
-      context.fillStyle = '#9b7cff'; context.beginPath(); context.arc(75, 72, 12, 0, Math.PI * 2); context.fill();
+      gradient.addColorStop(0, '#101311'); gradient.addColorStop(1, '#26371c'); context.fillStyle = gradient; context.fillRect(0, 0, 1_200, 630);
+      context.fillStyle = '#c6fa74'; context.beginPath(); context.arc(75, 72, 12, 0, Math.PI * 2); context.fill();
       context.fillStyle = '#fff'; fitText(`TANGO · ${t('paper')}`, 105, 82, 30, 800, 990);
       fitText(trade.symbol || trade.tokenAddress, 70, 190, 72, 900);
       context.fillStyle = Number(trade.realizedPnlNative) >= 0 ? '#3ee6a0' : '#ff647c';

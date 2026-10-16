@@ -66,3 +66,60 @@ Chart lines require trustworthy visible chart coordinates. Synthetic fallback ma
 Every trade is simulated. The extension has no wallet connection, signature, approval, swap, transaction broadcast, RPC broadcast, or real funds capability. It never requests seed phrases or private keys, and it does not submit blockchain transactions.
 
 For manual checks, click only controls labeled **Tango** and **Paper**. Never click GMGN's real buy, sell, wallet, approval, or signing UI.
+
+## Trade replay (0.3.15)
+
+The Popup, Dashboard, GMGN overlay, and share cards use Tango's dark/green visual theme while retaining light/system themes. Trading semantics, fee calculations, shortcuts, and existing entry/exit horizontal lines are unchanged.
+
+History has a **View trades / 查看买卖记录** action on both BUY and SELL rows. Token-detail paper panels have **View trades · chart / 查看买卖记录 · 走势图**, including after a position is closed. Each opens a read-only replay for that exact chain and token from retained fills. Select a B/S marker or a row to inspect time, quantity, amount and realized sell PnL. Details are paginated (50 per page); charts plot at most the latest 500 fills.
+
+The replay passively reuses explicit-USD GMGN market-cap candle responses on compatible routes and samples verified current-token USD quotes no more than once per 30 seconds. It does not request additional market-data endpoints. Historical candles require a known token identity and explicit USD unit. When candles are unavailable, recorded quote intervals form a line chart; gaps greater than two minutes remain disconnected. Price markers show recorded execution prices (including slippage); market-cap markers show the observed market cap at execution. Fills missing trustworthy coordinates remain in the ledger with an explicit chart notice. Without candles, a dashed fill-to-fill line connects recorded values by execution time and is explicitly labeled as non-market data. This line is not a candlestick history or an estimate of the intervening market. Switch between recorded USD market cap and execution price; disagreement with recorded supply is flagged without altering account PnL.
+
+Market history is a separate bounded, disposable browser-local cache (at most 8 series, 600 points per series, under 450,000 JSON characters), never an input to order execution or account valuation. It is not part of account JSON backups; restored account fills remain viewable even without the market cache. Candles that were not observed or were evicted cannot be recovered offline. The module does not alter balances, positions, trades, fees or ledger statistics.
+
+When an embedded browser silently suppresses the page recovery JSON download, the recovery dialog also displays a read-only canonical JSON backup for manual copying. Exporting does not import or reset the account.
+
+## Quote consistency (0.3.16)
+
+Paper order preparation and final execution reject a fresh factual price/market-cap pair when it disagrees with the highest-trust exact token supply by more than 2% (rounding tolerance). A position’s existing exact supply remains authoritative when a new quote omits supply. Stale optional market cap does not invalidate a fresh price-only quote. Existing account records are not rewritten; replay flags historical disagreements.
+
+
+## Quick trading quote synchronization (0.3.17)
+
+- Distinct quick-buy clicks after settlement are accepted immediately; in-flight duplicate activation remains blocked.
+- Switching to another held token no longer inherits the previous token's quote-persistence throttle.
+- Sell execution resolves the latest accepted same-token observation rather than pinning the preview price.
+- A verified current detail quote that fails consistency validation blocks execution; it cannot silently execute an older preview instead.
+- Existing trades and holdings are not rewritten. Paper-only controls, provisional quote behavior and confirmation settings remain available.
+
+
+## Trench click follow-up (0.3.18)
+
+- Remove the remaining adapter-level 900 ms post-settlement cooldown; in-flight operations and trusted-event deduplication remain enforced.
+- Record a read-only DOM diagnostic for trusted paper-button activation: Guard dispatched the callback or blocked an invalid binding. The diagnostic never authorizes execution.
+- Cover detail-to-trench same-card rebinding and single-click address-resolution regression cases.
+
+
+## Route and quote follow-up (0.3.19)
+
+- Keep same-token GMGN card links stable when Pump.fun icons arrive late; a changed binding is renewed and old callbacks stay invalid.
+- Retry the detail header read when its native identity/price section arrives, rather than waiting for the three-second periodic tick. Verified detail pages retain their existing polling cadence.
+- Normal and breakeven sell previews consult the verified current header before rejecting cached quotes. Entry placeholders use the adapter's bounded local DOM read, with route checks before updating or executing.
+- Fresh contradictory observations still block execution; no historical fills, holdings or balances are automatically rewritten.
+
+## Live detail mark follow-up (0.3.20)
+
+- Coalesced detail-header mutations refresh verified price and market cap without waiting for the three-second metadata probe or rescanning cards.
+- Startup and missing-chart quotes retain the held position mark instead of displaying a fresh synthetic estimate or zero market cap.
+- No chart is required for verified GMGN DOM/network pricing. Trade-time identity, freshness and price/supply coherence checks remain in force.
+
+## Detail network replay quote protection (0.3.21)
+
+- Prefer the independently verified live detail header over delayed network replay prices for the active token. During a header replacement, retain only the existing fresh DOM observation without renewing its timestamp; stale or missing DOM quotes still permit network fallback.
+- Reject a contradictory price/cap pair from the same observation when its launchpad supply is already verified, while preserving the existing handling of independently timed fields. Historical fills and balances are not rewritten.
+
+## Trench card valuations and position badges (0.3.22)
+
+- Verified launchpad cards use their own fresh market cap and known supply for quick buys, rather than combining that cap with a cached network price. Conflicting exact supply evidence retains the previous safety rules.
+- Held cards show their current paper position value in the chain native asset beside the token name, with a more precise hover value. Labels update after account changes and held-card market-cap changes, disappear after closing/disable/navigation, and do not write to account state or participate in trade controls.
+- Badge refreshes inspect tracked cards, skip unheld quote parsing, and coalesce held-card quote mutations without rebuilding quick-buy controls.

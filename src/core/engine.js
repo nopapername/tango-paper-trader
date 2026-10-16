@@ -458,6 +458,18 @@
     const factualObservedAt = usesFactualMarketCap
       ? (quote?.marketCapObservedAt ?? observedAt)
       : usesFactualPrice ? (quote?.priceObservedAt ?? observedAt) : observedAt;
+    const factualMarketCapSource = String(quote?.marketCapSource || quote?.source || '').toUpperCase();
+    const coherenceSupply = preferredSupply(quote, trustContext);
+    const marketCapObservedAt = quote?.marketCapObservedAt ?? quote?.originalObservedAt ?? observedAt;
+    const marketCapFresh = Number.isSafeInteger(marketCapObservedAt) && marketCapObservedAt > 0
+      && clock - marketCapObservedAt <= maxAge && marketCapObservedAt - clock <= MAX_FUTURE_SKEW_MS;
+    const exactValuationConflict = usesFactualPrice && coherenceSupply?.source === 'GMGN_EXACT'
+      && marketCapFresh
+      && positiveFinite(quote?.marketCapUsd)
+      && (factualMarketCapSource === 'GMGN' || factualMarketCapSource.startsWith('GMGN_')
+        || factualMarketCapSource === 'DEXSCREENER')
+      && Math.abs(Number(quote.priceUsd) * Number(coherenceSupply.totalSupply)
+        - Number(quote.marketCapUsd)) > Number(quote.marketCapUsd) * .02;
     const observationTimes = [observedAt, nativePriceObservedAt, factualObservedAt];
     const missingCalibrationDimension = quote?.provisional === true
       && quote?.syntheticTokenPrice !== true
@@ -468,6 +480,7 @@
       || invalidOptional
       || invalidIdentity
       || invalidTrustedSupplyClaim
+      || exactValuationConflict
       || missingCalibrationDimension
       || (quote.marketCapDivisor != null && !finiteBetween(quote.marketCapDivisor, Number.EPSILON, Number.MAX_VALUE))
       || !Number.isSafeInteger(clock) || clock < 0

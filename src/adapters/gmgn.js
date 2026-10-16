@@ -503,7 +503,9 @@
     const address = Tango.Chains.normalizeAddress(chain, tokenAddressFromUrl(url));
     const currentAddress = current?.token?.chain === chain && Tango.Chains.validateAddress(chain, current?.token?.address)
       ? Tango.Chains.normalizeAddress(chain, current.token.address) : '';
-    return !address || currentAddress !== address;
+    return !address || currentAddress !== address
+      || current?.token?.metadataVerified === false
+      || (Boolean(current?.token?.metadataSource) && current.token.metadataSource !== 'GMGN_DETAIL');
   }
 
   function detailTokenIdentity(scope, address, chainId = null) {
@@ -886,7 +888,9 @@
     if (!fromCard) return null;
     const symbolNode = card?.querySelector?.('[data-sentry-component="TooltipCopy"]');
     const structuredSymbol = String(symbolNode?.textContent || '').trim();
-    const structuredName = String(symbolNode?.nextElementSibling?.textContent || '').trim();
+    let nameNode = symbolNode?.nextElementSibling;
+    while (nameNode?.classList?.contains?.('tango-trench-position-badge')) nameNode = nameNode.nextElementSibling;
+    const structuredName = String(nameNode?.textContent || '').trim();
     // Explicit symbol/name fields need no heuristic metric-prefix filtering:
     // legitimate symbols such as FOUR CATS would otherwise be rejected as F.
     if (structuredSymbol && structuredSymbol.length <= 32 && !tokenAddressLine(structuredSymbol)) {
@@ -1022,7 +1026,10 @@
       if (!href) continue;
       const address = tokenAddressFromUrl(href);
       if (!Tango.Chains.validateAddress(chain, address)) continue;
-      byAddress.set(Tango.Chains.normalizeAddress(chain, address), href);
+      const normalizedAddress = Tango.Chains.normalizeAddress(chain, address);
+      // The card's GMGN href is first. A late launchpad icon for the same
+      // token must not replace that evidence and invalidate a live binding.
+      if (!byAddress.has(normalizedAddress)) byAddress.set(normalizedAddress, href);
     }
     if (byAddress.size > 1) return { href: '', unambiguous: false };
     return { href: byAddress.values().next().value || '', unambiguous: true };
@@ -1859,9 +1866,9 @@
         setPaperState(slot, binding, 'in-flight');
         return;
       }
-      const now = Date.now();
-      if (now - Number(replacement.dataset.tangoLastClickAt || 0) < 900) return;
-      replacement.dataset.tangoLastClickAt = String(now);
+      // Guard consumes each trusted event once; the operation lock above
+      // covers unsettled orders. A wall-clock cooldown loses distinct clicks.
+      replacement.dataset.tangoLastClickAt = String(Date.now());
       const operation = { key: operationKey, inFlight: true };
       quickBuyOperations.set(operationKey, operation);
       binding.operation = operation;
@@ -2409,6 +2416,7 @@
         continue;
       }
       if (existingBinding?.replacement?.isConnected && existingBinding.key === bindingKey
+        && existingBinding.href === href
         && existingBinding.generation === cardGeneration(card)
         && (existingBinding.tradeAction?.key || 'BUY') === quickBuyTradeAction(slot).key
         && Number(existingBinding.amountNative) === amountSol && existingBinding.paperLabel === paperLabel
@@ -2489,7 +2497,69 @@
     return injected;
   }
 
+  const positionBadgeCards = new Set();
+
+  function updatePositionBadge(card, display) {
+    let badge = card?.querySelector?.('.tango-trench-position-badge');
+    if (!display?.text) {
+      badge?.remove();
+      if (card?.dataset) delete card.dataset.tangoPositionCard;
+      positionBadgeCards.delete(card);
+      return;
+    }
+    if (!badge) {
+      const symbol = card?.querySelector?.('[data-sentry-component="TooltipCopy"], [data-testid="token-symbol"], [data-token-symbol]');
+      const anchor = symbol?.nextElementSibling || symbol;
+      if (!anchor?.insertAdjacentElement) return;
+      badge = document.createElement('span');
+      badge.className = 'tango-trench-position-badge';
+      anchor.insertAdjacentElement('afterend', badge);
+    }
+    if (badge.textContent !== display.text) badge.textContent = display.text;
+    if (badge.title !== display.title) badge.title = display.title || display.text;
+    card.dataset.tangoPositionCard = '1';
+    positionBadgeCards.add(card);
+  }
+
+  function clearPositionBadges() {
+    for (const card of [...positionBadgeCards]) updatePositionBadge(card, null);
+  }
+
+  function syncPositionBadges(readDisplay, roots, hasPosition) {
+    if (!isTrenchPage() || typeof readDisplay !== 'function') return clearPositionBadges();
+    const cards = new Map();
+    const visited = new Set();
+    const chain = chainFromUrl();
+    for (const slot of trackedQuickBuySlots) {
+      const binding = slot.__tangoQuickBuyBinding;
+      const card = binding?.card;
+      if (!slot.isConnected || !card?.isConnected || visited.has(card) || binding.chain !== chain
+        || slot.closest?.('[class~="group/a"]') !== card || !trenchColumn(card)) continue;
+      visited.add(card);
+      // Read-only holdings are independent of the quick-buy amount/pending action.
+      // A fast current-card hint avoids quote/metadata parsing for unheld cards;
+      // actual address evidence still validates every displayed holding.
+      const hint = card.getAttribute?.('data-trenches-token-address') || binding.address;
+      if (hint && hasPosition && !hasPosition(chain, hint)) continue;
+      const evidence = cardAddressEvidence(card, chain);
+      if (!evidence || (hasPosition && !hasPosition(chain, evidence.address))) continue;
+      cards.set(card, { chain, address: evidence.address });
+    }
+    for (const card of [...positionBadgeCards]) {
+      if (!cards.has(card)) updatePositionBadge(card, null);
+    }
+    for (const [card, binding] of cards) {
+      if (roots?.length && !roots.some(root => root === card || card.contains?.(root) || root.contains?.(card))) continue;
+      const metadata = verifiedCardMetadata(card, binding.address, binding.chain);
+      const token = metadata ? { ...metadata, chain: binding.chain, address: binding.address,
+        metadataVerified: true, metadataSource: 'GMGN_TRENCH' } : null;
+      const display = token ? readDisplay(token, () => cardMarketSnapshot(card, binding.chain, binding.address, token)) : null;
+      updatePositionBadge(card, display);
+    }
+  }
+
   function clearQuickBuy(restoreCurrent = true) {
+    clearPositionBadges();
     [...trackedQuickBuySlots].forEach((slot) => restoreQuickBuySlot(slot, restoreCurrent));
     document.querySelectorAll('.tango-native-buy-overridden').forEach((slot) => {
       restoreQuickBuySlot(slot, restoreCurrent);
@@ -2541,7 +2611,8 @@
 
   Tango.GMGN = {
     chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, readVerifiedCurrentTokenSnapshot, readVisibleTokenMetadata, discoverTokenCards, clearQuickBuy,
-    quickBuyNeedsReconcile,
+    quickBuyNeedsReconcile, syncPositionBadges, clearPositionBadges,
+    _updatePositionBadge: updatePositionBadge,
     rememberTrenchSnapshot, readTrenchSnapshot,
     resolveCurrentTokenRead, needsCurrentTokenRead,
     _cardMarketCap: cardMarketCap, _cardSymbol: cardSymbol, _tokenIdentityFromText: tokenIdentityFromText,

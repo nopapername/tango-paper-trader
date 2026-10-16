@@ -5,7 +5,8 @@ if (typeof importScripts === 'function') {
     'shared/constants.js',
     'core/state.js',
     'core/engine.js',
-    'core/state-coordinator.js'
+    'core/state-coordinator.js',
+    'shared/trade-replay.js'
   );
 }
 const Chains = globalThis.Tango?.Chains || (typeof require === 'function' ? require('./core/chains.js') : null);
@@ -88,6 +89,18 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'TANGO_REPLAY_RECORD' || message?.type === 'TANGO_REPLAY_READ') {
+    let origin=''; try {origin=new URL(sender?.url || sender?.tab?.url).origin;} catch {}
+    const ownExtension=sender?.id===chrome.runtime.id && String(sender?.url||'').startsWith(chrome.runtime.getURL(''));
+    if (origin!=='https://gmgn.ai' && !ownExtension) {sendResponse({ok:false});return false;}
+    if (!globalThis.Tango?.TradeReplay) {sendResponse({ok:false});return false;}
+    const request=message.type==='TANGO_REPLAY_READ'
+      ? chrome.storage.local.get(Tango.TradeReplay.KEY).then(value=>({ok:true,cache:value[Tango.TradeReplay.KEY]||{}}))
+      : Tango.TradeReplay.write(message.batch);
+    request.then(sendResponse).catch(()=>sendResponse({ok:false}));
+    return true;
+  }
+
   if (message?.type === 'TANGO_TOGGLE_SHORTCUT') {
     let origin;
     try { origin = new URL(sender?.url || sender?.tab?.url).origin; } catch {}

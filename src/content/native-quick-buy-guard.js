@@ -138,6 +138,7 @@
       stopActivation(event, click || event.type === 'auxclick' || event.isTrusted !== true);
       if (!trustedPrimaryClick || consumedTrustedClicks.has(event)) return;
       consumedTrustedClicks.add(event);
+      identity.element.dataset.tangoLastActivationStatus = 'guard-dispatched';
       try {
         Promise.resolve(identity.activate()).catch(() => null);
       } catch {}
@@ -146,6 +147,11 @@
     if (!elements.some((element) => isNativeQuickBuy(element)
       || element.matches?.('[data-tango-paper-action="quick-buy"]'))) return;
     stopActivation(event, true);
+    if (event.type === 'click' && event.isTrusted === true
+      && (event.button == null || event.button === 0)) {
+      const paper = elements.find(element => element.matches?.('[data-tango-paper-action="quick-buy"]'));
+      if (paper) paper.dataset.tangoLastActivationStatus = 'guard-blocked-binding';
+    }
   }
 
   function applySettings(settings) {
