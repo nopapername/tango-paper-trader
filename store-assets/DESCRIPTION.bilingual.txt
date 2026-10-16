@@ -1,0 +1,19 @@
+Tango 是完全免费的 Meme 模拟交易练习工具，独立于 GMGN。使用模拟资金练习入场、加仓、减仓和回本，不签名、不广播真实交易。
+
+支持 Solana、BSC、Ethereum、Base、Robinhood Chain、X Layer，各链独立余额和仓位。可使用战壕模拟快买、详情页交易面板、按比例卖出和回本工具；卡片显示持仓原生币估值，面板显示当前市值及盈亏。
+
+历史记录与详情页提供买卖点复盘；没有完整行情时，成交点虚线连线明确标注为非真实走势。兼容图表可显示虚拟买卖横线。支持盈亏日历、日报 PNG、成交图片、CSV 与全部账户 JSON 备份恢复。界面支持中文和英文、深浅主题。
+
+
+模拟数据存储在当前浏览器。插件读取 GMGN 公开行情，并可能向 CoinGecko、DEX Screener 查询参考行情。模拟交易不等同真实市场成交，不保证收益。网站改版和行情缺失可能影响兼容性。
+
+----- English -----
+
+Tango is a completely free Meme paper-trading practice tool independent of GMGN. Practice entries, scaling, percentage exits and recovering principal using simulated funds. It does not connect wallets, sign transactions or broadcast real trades.
+
+Use independent accounts on Solana, BSC, Ethereum, Base, Robinhood Chain and X Layer. Compatible trench cards offer labeled paper quick buys and native-asset holding-value badges. Token-detail panels show quotes, market caps and PnL, with percentage sells and a recover-principal action.
+
+Review recorded buy/sell points from History or token detail pages. A dashed fill-to-fill path is explicitly labeled as non-market history when complete market data is unavailable. Compatible charts support virtual entry/exit lines. Use PnL calendars, daily-report PNGs, trade-result images, CSV exports and full-account JSON backups. English/Chinese and light/dark themes are supported.
+
+
+Paper data stays in the current browser. Tango reads public GMGN market observations and may request reference quotes from CoinGecko and DEX Screener. Simulated results do not guarantee live performance. Site changes and missing quotes can limit compatibility.

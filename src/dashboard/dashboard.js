@@ -335,7 +335,7 @@
     </aside><main class="main"><div class="topbar"><div><h1>${titles[runtime.tab]}</h1><p>${t('welcome')}</p></div>
       <div class="topbar-actions"><label class="chain-select"><span>${label('Selected chain', '已选链')}</span><select id="dashboard-chain">${chainOptions}</select></label>
       <button class="button primary" data-action="open-gmgn">${t('referralLink')} ↗</button></div></div>
-      <p class="affiliate-note">${t('affiliateDisclosure')}</p><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a> · <a href="https://gmgn.ai/" target="_blank" rel="noopener noreferrer">${t('plainGmgnLink')}</a></div>${nativePriceStatus()}${renderTab(view)}
+      <div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a> · <a href="https://gmgn.ai/" target="_blank" rel="noopener noreferrer">${t('plainGmgnLink')}</a></div>${nativePriceStatus()}${renderTab(view)}
     </main></div>${runtime.dailyReport ? Tango.DailyReport.dialog(runtime.dailyReport,runtime.reportCurrency,lang(),runtime.reportBusy) : ''}${runtime.toast ? `<div class="toast">${esc(runtime.toast)}</div>` : ''}`;
     const template = document.createElement('template');
     if (template.content) template.innerHTML = markup;
@@ -372,7 +372,7 @@
       <label class="field onboarding-field"><span>${t('language')}</span><select class="select" id="onboarding-language" value="${esc(onboardingLanguage)}"><option value="zh-CN" ${onboardingLanguage === 'zh-CN' ? 'selected' : ''}>${t('chinese')}</option><option value="en" ${onboardingLanguage === 'en' ? 'selected' : ''}>${t('english')}</option></select></label>
       <label class="field onboarding-field"><span>${t('commonCapital')}</span><input class="input custom-balance" id="onboarding-balance" type="number" min="0" max="1000000000000000" step="any" value="${esc(onboardingBalance)}"></label>
       <p class="onboarding-capital-note" id="onboarding-capital-note">${esc(Tango.I18n.t('onboardingCapitalAllocation', onboardingLanguage, { amount: onboardingBalance }))}</p>
-      <button class="button primary onboarding-submit" id="complete-onboarding">${t('startWithReferral')}</button><button class="button secondary" id="complete-onboarding-local">${t('saveWithoutReferral')}</button><p class="affiliate-note">${t('affiliateDisclosure')}</p><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a> · <a href="https://gmgn.ai/" target="_blank" rel="noopener noreferrer">${t('plainGmgnLink')}</a></div>
+      <button class="button primary onboarding-submit" id="complete-onboarding">${t('startWithReferral')}</button><button class="button secondary" id="complete-onboarding-local">${t('saveWithoutReferral')}</button><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a> · <a href="https://gmgn.ai/" target="_blank" rel="noopener noreferrer">${t('plainGmgnLink')}</a></div>
       ${runtime.onboardingStatus ? `<p class="onboarding-status">${esc(t(runtime.onboardingStatus))}</p>` : ''}
     </section></div>`;
     const updateCapitalNote = () => {

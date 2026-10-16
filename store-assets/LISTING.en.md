@@ -1,6 +1,6 @@
-# Chrome Web Store English copy · 0.3.38
+# Tango Paper Trader English listing
 
-Read the [submission notes and policy gate](STORE-LISTING.md) before submitting. This is not a declaration of store approval.
+Version 0.3.39
 
 Name: Tango Paper Trader
 
@@ -14,6 +14,5 @@ Use independent accounts on Solana, BSC, Ethereum, Base, Robinhood Chain and X L
 
 Review recorded buy/sell points from History or token detail pages. A dashed fill-to-fill path is explicitly labeled as non-market history when complete market data is unavailable. Compatible charts support virtual entry/exit lines. Use PnL calendars, daily-report PNGs, trade-result images, CSV exports and full-account JSON backups. English/Chinese and light/dark themes are supported.
 
-Referral disclosure: Tango offers optional GMGN referral links using X9cuc5jd. The publisher may earn commissions from subsequent real GMGN trading fees (publisher-reported rate: 10%; GMGN determines eligibility/rates). No user fee discount is promised. Free paper trading does not require the referral; plain GMGN navigation and setup without referral navigation are available. Tango is not affiliated with or endorsed by GMGN.
 
 Paper data stays in the current browser. Tango reads public GMGN market observations and may request reference quotes from CoinGecko and DEX Screener. Simulated results do not guarantee live performance. Site changes and missing quotes can limit compatibility.

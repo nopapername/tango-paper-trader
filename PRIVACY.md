@@ -2,7 +2,7 @@
 
 更新日期 / Last updated: 2026-10-16
 
-适用产品 / Product: Tango Paper Trader Chrome extension, version 0.3.38 and later unless replaced by a newer policy.
+适用产品 / Product: Tango Paper Trader Chrome extension, version 0.3.39 and later unless replaced by a newer policy.
 
 维护者与联系 / Maintainer and contact: Tango Paper Trader project maintainers. https://github.com/nopapername/tango-paper-trader/issues
 
@@ -30,7 +30,7 @@ Tango 是独立于 GMGN 的免费模拟交易练习工具，不连接钱包、�
 
 ### 3. 可选推广链接
 
-“GMGN · 推广链接”及首次设置的“保存设置并打开 GMGN 推广链接”使用邀请码 X9cuc5jd。点击后浏览器访问 https://gmgn.ai/r/X9cuc5jd?chain=bsc ，GMGN 可按其规则建立推荐关系，发布者可能获得用户后续 GMGN 真实交易手续费的返佣；发布者报告比例为10%，最终资格和比例由GMGN决定。
+“GMGN · 推广链接”及首次设置的“保存设置并打开 GMGN 推广链接”使用邀请码 X9cuc5jd。点击后浏览器访问 https://gmgn.ai/r/X9cuc5jd?chain=bsc ，GMGN 可按其规则建立推荐关系。
 
 本插件不承诺用户手续费折扣。推广关系不改变模拟交易费用、不产生模拟返现，也不是使用免费模拟功能的条件。界面提供不带邀请码的普通 GMGN 链接；插件不在后台给用户正在浏览的页面追加或替换推荐码，不读取推广结算数据。
 
@@ -72,7 +72,7 @@ Provider policies: https://www.coingecko.com/en/privacy and https://dexscreener.
 
 ### 3. Optional referral links
 
-The labeled GMGN referral button and the first-run “Save setup & open GMGN referral link” action use code X9cuc5jd. Clicking opens https://gmgn.ai/r/X9cuc5jd?chain=bsc . GMGN may bind the referral under its rules, and the publisher may receive commissions from subsequent real GMGN trading fees (publisher-reported rate: 10%; eligibility and actual rates are determined by GMGN).
+The labeled GMGN referral button and the first-run “Save setup & open GMGN referral link” action use code X9cuc5jd. Clicking opens https://gmgn.ai/r/X9cuc5jd?chain=bsc . GMGN may bind the referral under its rules.
 
 No user fee discount is promised. Referral attribution does not change paper-trading fees, generate paper cashback or condition access to free simulation. The interface offers a plain GMGN link. Tango does not append/replace referral codes on pages in the background or read referral-settlement data.
 

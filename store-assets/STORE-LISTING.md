@@ -1,15 +1,6 @@
 # Tango Paper Trader Chrome Web Store submission draft
 
-Version: 0.3.38. This is a preparation draft, not a declaration that Google has approved the extension. Do not submit while the affiliate-policy blocker below remains unresolved.
-
-## Submission gate
-
-The publisher requires retaining referral code X9cuc5jd. The publisher confirms there is no user discount or other user benefit for this code. GMGN's official public referral documentation establishes publisher commissions. No discount is claimed in this package. UI and descriptions disclose the referral, and users can choose a plain link or save first-run setup without opening any referral page.
-
-Chrome Web Store Affiliate Ads policy additionally requires a direct, transparent user benefit related to the extension's core function. Disclosure and optional participation alone do not prove that requirement. Before submitting this package, obtain written official evidence of a qualifying user benefit or seek clarification from Chrome Web Store support. Do not claim approval, fabricate a discount, or hide/remove the code without the publisher's instruction.
-
-Policy: https://developer.chrome.com/docs/webstore/program-policies/affiliate-ads
-Official referral description: https://docs.gmgn.ai/index/referral-link
+Version: 0.3.39. Submission materials; Google review has not been performed.
 
 ## 中文商店文案
 
@@ -25,7 +16,6 @@ Tango 是完全免费的 Meme 模拟交易练习工具，独立于 GMGN。使用
 
 历史记录与详情页提供买卖点复盘；没有完整行情时，成交点虚线连线明确标注为非真实走势。兼容图表可显示虚拟买卖横线。支持盈亏日历、日报 PNG、成交图片、CSV 与全部账户 JSON 备份恢复。界面支持中文和英文、深浅主题。
 
-推广披露：插件提供可选 GMGN 推广链接，邀请码 X9cuc5jd。发布者可能从用户后续 GMGN 真实交易手续费获得返佣（发布者提供比例为10%，以GMGN资格及规则为准）。不承诺用户手续费折扣。模拟交易完全免费，不要求使用推广链接；提供普通 GMGN 入口和不跳推广页面的设置完成方式。Tango 不是 GMGN 官方或获其背书的产品。
 
 模拟数据存储在当前浏览器。插件读取 GMGN 公开行情，并可能向 CoinGecko、DEX Screener 查询参考行情。模拟交易不等同真实市场成交，不保证收益。网站改版和行情缺失可能影响兼容性。
 
@@ -43,7 +33,6 @@ Use independent accounts on Solana, BSC, Ethereum, Base, Robinhood Chain and X L
 
 Review recorded buy/sell points from History or token detail pages. A dashed fill-to-fill path is explicitly labeled as non-market history when complete market data is unavailable. Compatible charts support virtual entry/exit lines. Use PnL calendars, daily-report PNGs, trade-result images, CSV exports and full-account JSON backups. English/Chinese and light/dark themes are supported.
 
-Referral disclosure: Tango offers optional GMGN referral links using X9cuc5jd. The publisher may earn commissions from subsequent real GMGN trading fees (publisher-reported rate: 10%; GMGN determines eligibility/rates). No user fee discount is promised. Free paper trading does not require the referral; plain GMGN navigation and setup without referral navigation are available. Tango is not affiliated with or endorsed by GMGN.
 
 Paper data stays in the current browser. Tango reads public GMGN market observations and may request reference quotes from CoinGecko and DEX Screener. Simulated results do not guarantee live performance. Site changes and missing quotes can limit compatibility.
 
@@ -85,7 +74,7 @@ Regression coverage: healthy/disabled/unrelated frame preservation; one recovery
 5. Repeat on BSC; switching chains keeps separate accounts. Existing data must not be reset for ordinary testing.
 6. Open View trades after closing; inspect points/ledger and explanatory labels. Missing chart/candle data can legitimately limit plotted points.
 7. Open the dashboard in standard Chrome. Check tabs, search, calendar daily reports, PNG/CSV/JSON export. Do not import/reset a user's account.
-8. Review the labeled optional referral action and its adjacent disclosure, ordinary link, packaged privacy page and support URL. No background referral-code replacement occurs.
+8. Review the labeled optional referral action and the ordinary link, packaged privacy page and support URL. No background referral-code replacement occurs.
 9. Toggle sounds and the master switch. Verify visual confirmations still work when browser audio is blocked.
 
 Embedded Codex/Owl can block extension-created internal tabs; that is a browser restriction and standard Chrome should be used for store review. No automated test proves Google policy approval.
@@ -95,8 +84,7 @@ Embedded Codex/Owl can block extension-created internal tabs; that is a browser 
 - Packaged icons: assets/icons/icon-16.png, icon-32.png, icon-48.png, icon-128.png.
 - Audio: GMGN Handgun / Kaching requested at runtime; synthesized local fallback. The publisher states there is no authorization issue; no independent license verification is claimed. See assets/NOTICE.txt and privacy policy.
 - Store promo: promo-440x280.png in this directory (outside the uploaded extension ZIP).
-- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
+- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Trading and replay interfaces are unchanged in 0.3.39. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
 - ZIP must contain manifest.json directly at root, not an extra wrapper directory.
 - Register/verify publisher account and contact information; select distribution and accurate content rating; accept applicable agreements personally.
-- Resolve the affiliate user-benefit issue above; publish and verify the policy URL; upload real screenshots; check all privacy/permission declarations against the final package.
 - User/developer must submit for review. This preparation does not submit, register, pay a fee or accept agreements.

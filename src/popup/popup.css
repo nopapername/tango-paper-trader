@@ -65,4 +65,4 @@ body{background:var(--bg);color:var(--text);margin:0;width:360px}
 
 .button.secondary,:root[data-theme="light"] .button.secondary{color:var(--text)}
 
-.affiliate-note{font-size:12px;line-height:1.55;color:var(--muted,#767d70);margin:12px 0;overflow-wrap:anywhere}.privacy-links{font-size:12px;line-height:1.6;margin-bottom:12px}.privacy-links a{color:inherit;text-decoration:underline;text-underline-offset:3px}
+.privacy-links{font-size:12px;line-height:1.6;margin-bottom:12px}.privacy-links a{color:inherit;text-decoration:underline;text-underline-offset:3px}

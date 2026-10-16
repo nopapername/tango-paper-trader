@@ -247,7 +247,7 @@
           <small class="reset-note">${t('resetWarning')}</small>
           <button class="button secondary" id="reset-all-button">${allChainsLabel()} · ${t('resetAccount')}</button>
         </details>
-        <button class="button" id="dashboard">${t('openDashboard')}</button><button class="button secondary" id="gmgn">${t('referralLink')} →</button><p class="affiliate-note">${t('affiliateDisclosure')}</p><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a> · <a href="https://gmgn.ai/" target="_blank" rel="noopener noreferrer">${t('plainGmgnLink')}</a></div>
+        <button class="button" id="dashboard">${t('openDashboard')}</button><button class="button secondary" id="gmgn">${t('referralLink')} →</button><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a> · <a href="https://gmgn.ai/" target="_blank" rel="noopener noreferrer">${t('plainGmgnLink')}</a></div>
       </div>`;
     }
     if (statusMessage) app.innerHTML += `<div class="disabled-note storage-status">${esc(statusMessage)}</div>`;

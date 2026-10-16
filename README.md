@@ -8,7 +8,7 @@
 
 Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet connection or real funds required.
 
-**当前版本 / Current version: 0.3.38**
+**当前版本 / Current version: 0.3.39**
 
 [中文使用指南](#中文使用指南) · [English guide](#english-guide) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 
@@ -203,9 +203,7 @@ Simulated results do not guarantee live performance or model every liquidity con
 
 买卖音效使用 GMGN Handgun / Kaching，播放失败时使用本地合成提示音；图标为 Tango 独立设计。隐私政策可在插件内打开，也可阅读 [中英文政策](PRIVACY.md)。
 
-The optional GMGN referral entry uses X9cuc5jd. The publisher may earn commissions from real GMGN trading fees (publisher-reported rate: 10%; GMGN determines eligibility/rates). No user discount is promised. The interface labels referral actions and offers a plain GMGN link. Paper trading is free and does not require referral attribution. Tango is not affiliated with or endorsed by GMGN. Store submission still requires resolving the affiliate-policy requirement for a direct, transparent user benefit; disclosure alone is not proof of compliance.
 
-可选 GMGN 推广入口使用 X9cuc5jd。发布者可能从真实交易手续费获得返佣（发布者提供比例为10%，以GMGN为准）；不承诺用户折扣。界面标注推广并提供普通入口，免费模拟交易不要求推荐关系。Tango不是GMGN官方产品。保留邀请码的商店提交仍需确认直接、透明的用户利益，披露本身不代表满足该项政策。
 
 ### Account and valuation details
 
