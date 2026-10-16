@@ -2,7 +2,7 @@
 
 更新日期 / Last updated: 2026-10-16
 
-适用产品 / Product: Tango Paper Trader Chrome extension, version 0.3.39 and later unless replaced by a newer policy.
+适用产品 / Product: Tango Paper Trader Chrome extension, version 0.3.43 and later unless replaced by a newer policy.
 
 维护者与联系 / Maintainer and contact: Tango Paper Trader project maintainers. https://github.com/nopapername/tango-paper-trader/issues
 
@@ -26,13 +26,13 @@ Tango 是独立于 GMGN 的免费模拟交易练习工具，不连接钱包、�
 - 网络服务提供方通常能看到请求 IP、时间及必要的网络元数据；Tango 不控制第三方日志保留。插件不会在这些行情请求中附带模拟余额、仓位、成交历史、设置、钱包凭据或个人联系方式。
 - 买入/卖出音效从 GMGN 请求 Handgun.mp3 / Kaching.mp3；服务方可见请求 IP、时间及必要的连接信息，不发送模拟账户数据。音频加载失败时使用本地合成提示音。
 
-第三方政策可查看 https://www.coingecko.com/en/privacy 、https://dexscreener.com/privacy-policy ，以及 GMGN 网站提供的政策。使用外部网站适用该网站的条款。
+第三方政策可查看 https://www.coingecko.com/en/privacy 、https://dexscreener.com/privacy-policy ，以及 GMGN 网站提供的政策。使用外部网站适用该网站的条款。教程入口由用户点击后打开外部文章链接（t.co 跳转至文章网站），不附带模拟账户数据；外部网站适用其自身政策。
 
 ### 3. 可选推广链接
 
-“GMGN · 推广链接”及首次设置的“保存设置并打开 GMGN 推广链接”使用邀请码 X9cuc5jd。点击后浏览器访问 https://gmgn.ai/r/X9cuc5jd?chain=bsc ，GMGN 可按其规则建立推荐关系。
+“打开 GMGN”按钮使用邀请码 X9cuc5jd。点击后浏览器访问 https://gmgn.ai/r/X9cuc5jd?chain=bsc ，GMGN 可按其规则建立推荐关系。
 
-本插件不承诺用户手续费折扣。推广关系不改变模拟交易费用、不产生模拟返现，也不是使用免费模拟功能的条件。界面提供不带邀请码的普通 GMGN 链接；插件不在后台给用户正在浏览的页面追加或替换推荐码，不读取推广结算数据。
+本插件不承诺用户手续费折扣。推广关系不改变模拟交易费用、不产生模拟返现，也不是使用免费模拟功能的条件。插件不在后台给用户正在浏览的页面追加或替换推荐码，不读取推广结算数据。
 
 ### 4. 本地存储、导出与删除
 
@@ -68,13 +68,13 @@ Paper principal, presets, fees, language/settings, balances, positions, fills, d
 - Network providers normally receive the request IP, time and necessary connection metadata. Tango does not control third-party log retention. Market requests do not include paper balances, positions, fills, settings, wallet credentials or personal contact details.
 - Buy/sell cues request Handgun.mp3 / Kaching.mp3 from GMGN. The provider receives the request IP, time and necessary connection information, without paper-account data. A locally synthesized cue is used if audio playback fails.
 
-Provider policies: https://www.coingecko.com/en/privacy and https://dexscreener.com/privacy-policy ; consult GMGN's site for its policies. External websites have their own terms.
+Provider policies: https://www.coingecko.com/en/privacy and https://dexscreener.com/privacy-policy ; consult GMGN's site for its policies. External websites have their own terms. The tutorial opens an external article link via t.co only when clicked and does not attach paper-account data. External websites have their own policies.
 
 ### 3. Optional referral links
 
-The labeled GMGN referral button and the first-run “Save setup & open GMGN referral link” action use code X9cuc5jd. Clicking opens https://gmgn.ai/r/X9cuc5jd?chain=bsc . GMGN may bind the referral under its rules.
+The “Open GMGN” buttons use code X9cuc5jd. Clicking opens https://gmgn.ai/r/X9cuc5jd?chain=bsc . GMGN may bind the referral under its rules.
 
-No user fee discount is promised. Referral attribution does not change paper-trading fees, generate paper cashback or condition access to free simulation. The interface offers a plain GMGN link. Tango does not append/replace referral codes on pages in the background or read referral-settlement data.
+No user fee discount is promised. Referral attribution does not change paper-trading fees, generate paper cashback or condition access to free simulation. Tango does not append/replace referral codes on pages in the background or read referral-settlement data.
 
 ### 4. Retention, exports and deletion
 

@@ -110,3 +110,25 @@ button:disabled { cursor:default;opacity:.45; }button:focus-visible { outline:2p
 :root[data-theme="light"] .button.primary{color:#fff}
 
 .privacy-links{font-size:12px;line-height:1.6;margin-bottom:12px}.privacy-links a{color:inherit;text-decoration:underline;text-underline-offset:3px}
+
+/* Keep page navigation and data rendering unchanged; refine spacing and contrast. */
+body { font-size:13px; line-height:1.5; font-variant-numeric:tabular-nums; }
+.topbar { gap:16px; }
+.topbar-actions { flex-wrap:wrap; }
+.button,.input,.select,.chain-select select { border-radius:10px; min-height:38px; }
+.card { box-shadow:0 8px 28px rgba(0,0,0,.12); }
+.panel-header { gap:12px; flex-wrap:wrap; }
+.stat span { font-size:12px; }
+.stat strong { font-size:22px; line-height:1.25; overflow-wrap:anywhere; }
+.filters { flex-wrap:wrap; }
+.calendar-grid { grid-template-columns:repeat(7,minmax(0,1fr)); }
+.calendar-day { min-width:0; }
+.calendar-day .day-pnl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.field label { font-size:12px; }
+.nav button:focus-visible,a:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+:root[data-theme="light"] { --bg:#f5f7f2; --panel2:#f0f4ec; --line:rgba(35,55,28,.14); --text:#1d281b; --muted:#5c6658; }
+@media(max-width:480px) { .calendar-grid { gap:3px; } .calendar-day { min-height:58px; padding:5px 3px; aspect-ratio:auto; } .calendar-day .day-pnl { font-size:10px; } }
+
+.native-price-missing { display:block; margin-top:3px; overflow-wrap:anywhere; }
+.price-status > small { flex:1; min-width:0; }
+.price-status [aria-busy="true"] { white-space:normal; }

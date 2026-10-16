@@ -66,3 +66,18 @@ body{background:var(--bg);color:var(--text);margin:0;width:360px}
 .button.secondary,:root[data-theme="light"] .button.secondary{color:var(--text)}
 
 .privacy-links{font-size:12px;line-height:1.6;margin-bottom:12px}.privacy-links a{color:inherit;text-decoration:underline;text-underline-offset:3px}
+
+.tango-tutorial-link { display:block; margin:10px 0; font-size:12px; line-height:1.5; text-align:center; overflow-wrap:anywhere; color:var(--text); text-underline-offset:3px; }
+
+/* Match the trading panel without changing control ordering. */
+body { font-size:12px; line-height:1.5; }
+.popup { padding:16px; }
+.stat,.setup-card,.chain-positions,.account-settings { border-radius:12px; }
+.stat strong { font-size:16px; font-variant-numeric:tabular-nums; }
+.stat span,.chain-selector span { font-size:11px; }
+.button { min-height:38px; border-radius:10px; line-height:1.4; }
+.tango-tutorial-link { border:1px solid var(--line); border-radius:10px; padding:9px 12px; margin:8px 0; color:var(--text); text-decoration:none; font-weight:600; }
+.tango-tutorial-link:hover { border-color:var(--brand); background:rgba(198,250,116,.08); }
+.tango-tutorial-link:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+.master-switch:focus-within i { outline:2px solid var(--brand); outline-offset:3px; }
+:root[data-theme="light"] { --bg:#f5f7f2; --line:rgba(35,55,28,.15); --text:#1d281b; --muted:#5c6658; }

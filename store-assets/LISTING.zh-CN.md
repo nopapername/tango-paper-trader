@@ -1,6 +1,6 @@
 # Tango Paper Trader 中文上架文案
 
-版本 0.3.39
+版本 0.3.43
 
 名称：Tango Paper Trader
 

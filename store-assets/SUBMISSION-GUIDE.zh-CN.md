@@ -1,6 +1,6 @@
 # Tango Paper Trader 谷歌商店后台填写教程
 
-适用安装包：0.3.39。资料日期：2026-10-16。以下是准备好的填写内容，不表示已获 Google 审核批准。后台字段可能随账号、地区和界面版本变化；身份、地址、邮箱及经营身份必须填写发布者自己的真实信息。
+适用安装包：0.3.43。资料日期：2026-10-16。以下是准备好的填写内容，不表示已获 Google 审核批准。后台字段可能随账号、地区和界面版本变化；身份、地址、邮箱及经营身份必须填写发布者自己的真实信息。
 
 ## 1 注册与账号设置
 
@@ -18,7 +18,7 @@
 
 ## 2 上传软件包
 
-点击 Add new item，上传同目录 tango-paper-trader-0.3.39.zip。打开 Package，确认名称 Tango Paper Trader、版本0.3.39、Manifest V3。
+点击 Add new item，上传同目录 tango-paper-trader-0.3.43.zip。打开 Package，确认名称 Tango Paper Trader、版本0.3.43、Manifest V3。
 
 ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上传整个 GitHub 仓库 ZIP，不要把 store-assets、用户 JSON 备份和测试日志一起上传。
 
@@ -36,7 +36,7 @@ ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上�
 | Official URL / Verified publisher | 没有验证自己域名时留空；不要把 GitHub 仓库链接冒充已验证域名 |
 | Promotional video | 没有视频时留空，不填写无关视频 |
 
-安装包内部的中英文切换使用项目自己的语言模块；0.3.39未加入 Chrome 的 _locales 元数据。独立中英文商店页面需以后新增 _locales 配置并上传更高版本，不能假设当前后台可直接切换两个商店语言。中英文文案已分别保存于 LISTING.zh-CN.md 和 LISTING.en.md。
+安装包内部的中英文切换使用项目自己的语言模块；0.3.43未加入 Chrome 的 _locales 元数据。独立中英文商店页面需以后新增 _locales 配置并上传更高版本，不能假设当前后台可直接切换两个商店语言。中英文文案已分别保存于 LISTING.zh-CN.md 和 LISTING.en.md。
 
 ## 4 图像上传
 
@@ -51,7 +51,7 @@ ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上�
 | Screenshot 5 | screenshot-03-chart-refresh.jpg |
 | Marquee 1400×560 | 未制作，非必需项可留空 |
 
-五张截图均为1280×800 JPEG，来自实际0.3.38页面；0.3.39未更改其中的交易或复盘界面。上传后检查裁切、排序和清晰度。推广图和截图都不上传到 Package 页。
+五张截图均为1280×800 JPEG，来自实际0.3.38页面；0.3.43保留这些功能，但精修了字号、间距和颜色。上传后检查裁切、排序和清晰度。推广图和截图都不上传到 Package 页。
 
 ## 5 隐私规范 Privacy practices
 
@@ -89,7 +89,7 @@ All extension application logic is packaged locally. For a persistently empty id
 
 ### 数据类型 Data usage
 
-本地处理也必须披露。下面是根据0.3.39行为的填写建议，按后台具体定义核对：
+本地处理也必须披露。下面是根据0.3.43行为的填写建议，按后台具体定义核对：
 
 | 数据类别 | 当前填写建议及范围 |
 | --- | --- |
@@ -113,19 +113,19 @@ Limited Use 三项声明：仅在核对与实际行为一致后勾选“不出�
 
 https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 
-0.3.39隐私政策与本轮上架资料一并同步至远端主分支。提交前请在未登录GitHub的窗口验证该链接公开可访问。
+0.3.43隐私政策与本轮上架资料一并同步至远端主分支。提交前请在未登录GitHub的窗口验证该链接公开可访问。
 
 ## 6 测试说明 Test instructions
 
 可直接复制：
 
 1. Install the submitted extension in standard desktop Chrome. No Tango login, wallet or real funds are required.
-2. Complete initial simulated-capital setup. Choose the setup-only action if navigation is not needed.
+2. Complete initial simulated-capital setup. Click Open GMGN to save setup and open GMGN.
 3. Open https://gmgn.ai/?chain=sol or https://gmgn.ai/?chain=bsc and locate controls labeled Tango/Paper. Do not use GMGN real-trading controls.
 4. Paper-buy a small amount, wait for settlement, then sell 25% and the remainder. Check the ledger, account balance and PnL. Simulated fees/slippage can create an immediate loss.
 5. Open token trade replay, inspect points and fill details. Dashed fill-to-fill lines are not historical market candles. Compatible native charts show paper-entry/exit lines.
 6. Open the extension dashboard in standard Chrome. Check Overview, Positions, History, Calendar and CSV/JSON/PNG export. Do not reset or overwrite another user's data.
-7. Verify sound toggle, master switch, plain GMGN navigation and privacy link. No credentials are supplied or required by Tango. GMGN website availability is controlled by that service.
+7. Verify sound toggle, master switch, GMGN navigation and privacy link. No credentials are supplied or required by Tango. GMGN website availability is controlled by that service.
 8. Embedded Codex/Owl can block extension-created internal pages; use standard Chrome for the dashboard test.
 
 ## 7 分发 Distribution
@@ -136,7 +136,7 @@ https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 
 ## 8 最后检查与提交
 
-确认版本0.3.39、安装ZIP含41文件、图标及5张截图、长描述、支持入口、公开隐私政策、权限理由、数据声明与测试说明都已填写。发布者已重载0.3.39并确认弹窗和数据面板正常；提交前再核对后台预览。
+确认版本0.3.43、安装ZIP含41文件、图标及5张截图、长描述、支持入口、公开隐私政策、权限理由、数据声明与测试说明都已填写。0.3.43已重载并完成验收，报价加载提示会自动消失，六链美元金额正常；提交前再核对后台预览。
 
 建议选择审核通过后手动发布，避免未经最终检查自动上线。保存所有资料；具体字段和提示以你账号的实际后台为准。本文不代替实际审核结果。
 
@@ -148,3 +148,7 @@ https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 - https://developer.chrome.com/docs/webstore/program-policies/user-data-faq
 - https://developer.chrome.com/docs/webstore/cws-dashboard-distribution
 - https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements
+
+## 0.3.43 界面调整
+
+GMGN入口统一为“打开 GMGN / Open GMGN”，无邀请入口及仅保存设置按钮已移除。首次点击会保存设置并打开原有GMGN地址。盈亏日历保留“当前链交易记录”，底部改为新人扫链教程；扩展弹窗也有教程入口，详情交易面板不显示教程。教程链接：https://t.co/H2RSVQV4sX 。

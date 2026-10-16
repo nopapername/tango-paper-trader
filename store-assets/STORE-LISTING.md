@@ -1,6 +1,6 @@
 # Tango Paper Trader Chrome Web Store submission draft
 
-Version: 0.3.39. Submission materials; Google review has not been performed.
+Version: 0.3.43. Submission materials; Google review has not been performed.
 
 ## 中文商店文案
 
@@ -68,13 +68,13 @@ Regression coverage: healthy/disabled/unrelated frame preservation; one recovery
 ## Reviewer test instructions
 
 1. Install the unpacked package or uploaded ZIP in standard Chrome. No Tango account, key or real wallet is required. GMGN availability may depend on region/site access.
-2. Open first-run setup, select language and capital. Use “Save setup only (no referral)” to avoid referral navigation, then manually visit https://gmgn.ai/?chain=sol .
+2. Open first-run setup, select language and capital. Click “Open GMGN” to save setup and open the existing GMGN destination.
 3. Confirm the Tango master switch, paper balance and clearly marked paper controls. Never click GMGN's real trading controls.
 4. Select a token with available public quotes; paper-buy a small amount, then use 25% and 100% paper-sell. Confirm fills and sounds; no real funds move. A pending operation must settle before the next independent action.
 5. Repeat on BSC; switching chains keeps separate accounts. Existing data must not be reset for ordinary testing.
 6. Open View trades after closing; inspect points/ledger and explanatory labels. Missing chart/candle data can legitimately limit plotted points.
 7. Open the dashboard in standard Chrome. Check tabs, search, calendar daily reports, PNG/CSV/JSON export. Do not import/reset a user's account.
-8. Review the labeled optional referral action and the ordinary link, packaged privacy page and support URL. No background referral-code replacement occurs.
+8. Review the Open GMGN action, packaged privacy page, tutorial link and support URL. No background referral-code replacement occurs.
 9. Toggle sounds and the master switch. Verify visual confirmations still work when browser audio is blocked.
 
 Embedded Codex/Owl can block extension-created internal tabs; that is a browser restriction and standard Chrome should be used for store review. No automated test proves Google policy approval.
@@ -84,7 +84,7 @@ Embedded Codex/Owl can block extension-created internal tabs; that is a browser 
 - Packaged icons: assets/icons/icon-16.png, icon-32.png, icon-48.png, icon-128.png.
 - Audio: GMGN Handgun / Kaching requested at runtime; synthesized local fallback. The publisher states there is no authorization issue; no independent license verification is claimed. See assets/NOTICE.txt and privacy policy.
 - Store promo: promo-440x280.png in this directory (outside the uploaded extension ZIP).
-- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Trading and replay interfaces are unchanged in 0.3.39. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
+- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Core trading and replay functions are unchanged; 0.3.43 refines styling. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
 - ZIP must contain manifest.json directly at root, not an extra wrapper directory.
 - Register/verify publisher account and contact information; select distribution and accurate content rating; accept applicable agreements personally.
 - User/developer must submit for review. This preparation does not submit, register, pay a fee or accept agreements.

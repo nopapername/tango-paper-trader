@@ -1,6 +1,6 @@
 # Tango Paper Trader English listing
 
-Version 0.3.39
+Version 0.3.43
 
 Name: Tango Paper Trader
 

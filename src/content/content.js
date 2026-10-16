@@ -2405,6 +2405,10 @@
     return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
+  function renderTutorialLink() {
+    return '<a class="tango-button tango-tutorial-link" href="https://t.co/H2RSVQV4sX" target="_blank" rel="noopener noreferrer">' + esc(t('chainTutorial')) + '</a>';
+  }
+
   function renderPnlCalendar() {
     if (!runtime.calendarOpen) return '';
     const chain = activeChain();
@@ -2436,7 +2440,7 @@
       <div class="tango-calendar-grid">${labels.map((label) => `<span class="tango-calendar-label">${esc(label)}</span>`).join('')}${cells.join('')}</div>
       <div class="tango-calendar-actions">
         <button class="tango-button tango-calendar-dashboard" data-action="dashboard-history">${t('currentChainTrades')} ↗</button>
-        <button class="tango-button tango-calendar-dashboard" data-action="dashboard-calendar">${t('openDashboard')} · ${t('pnlCalendar')} ↗</button>
+        ${renderTutorialLink()}
       </div>
     </div>`;
   }

@@ -217,7 +217,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 :host([data-theme="light"]) .tango-token-logo { color: #fff; }
 :host([data-theme="light"]) .tango-warning,
 :host([data-theme="light"]) .tango-breakeven-link { color: #835300; }
-:host([data-theme="light"]) .tango-paper-badge { color: #5936a2; }
+:host([data-theme="light"]) .tango-paper-badge { color: var(--brand); }
 :host([data-theme="light"]) .tango-preset.buy-preset { color: var(--green); }
 :host([data-theme="light"]) .tango-preset.sell-preset { color: var(--red); }
 :host([data-theme="light"]) .tango-toast.success { background: #e2f5eb; }
@@ -227,7 +227,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 :host([data-theme="light"]) .tango-position-total span,
 :host([data-theme="light"]) .tango-paper-balance-summary span,
 :host([data-theme="light"]) .tango-calendar-dashboard,
-:host([data-theme="light"]) .tango-edit-all { color: #5936a2; }
+:host([data-theme="light"]) .tango-edit-all { color: var(--brand); }
 :host([data-theme="light"]) .tango-position-total strong,
 :host([data-theme="light"]) .tango-paper-balance-summary strong,
 :host([data-theme="light"]) .buy-title .tango-title-balance,
@@ -240,7 +240,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 :host([data-theme="light"]) .tango-preset-editor.sell { color: var(--red); }
 :host([data-theme="light"]) .tango-position-note { color: #835300; }
 :host([data-theme="light"]) .tango-bar-hint,
-:host([data-theme="light"]) .tango-bar-main:hover .tango-bar-hint { color: #5936a2; }
+:host([data-theme="light"]) .tango-bar-main:hover .tango-bar-hint { color: var(--brand); }
 :host([data-theme="light"]) .tango-position-fallback { color: #fff; }
 :host([data-theme="light"]) .tango-button.sell { background: linear-gradient(135deg,#b52c44,#92243b); }
 
@@ -358,7 +358,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 .tango-close-all:hover { background: rgba(255,100,124,.12); border-color: rgba(255,100,124,.7); }
 .tango-close-all:disabled { cursor: not-allowed; opacity: .45; }
 .tango-position-total { align-items: end; background: linear-gradient(135deg,rgba(198,250,116,.16),rgba(62,230,160,.07)); border: 1px solid rgba(198,250,116,.32); border-radius: 11px; display: grid; grid-template-columns: 1fr auto; margin-bottom: 12px; padding: 11px 12px; }
-.tango-position-total span { color: #cbbfff; font-size: 10px; font-weight: 800; grid-column: 1; }
+.tango-position-total span { color: var(--brand); font-size: 10px; font-weight: 800; grid-column: 1; }
 .tango-position-total strong { color: #72f0bd; font-size: 19px; font-weight: 900; grid-column: 1; }
 .tango-position-total small { color: var(--muted); font-size: 10px; grid-column: 2; grid-row: 1 / span 2; }
 .tango-position { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; margin: 9px 0; padding: 11px; }
@@ -439,7 +439,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 .tango-summary-item span { color: var(--muted); display: block; font-size: 10px; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tango-summary-item strong { display: block; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; white-space: normal; }
 .tango-paper-balance-summary { background: linear-gradient(135deg,rgba(198,250,116,.18),rgba(62,230,160,.08)); border: 1px solid rgba(198,250,116,.42); border-radius: 8px; margin: -5px 2px; padding: 5px 4px; }
-.tango-paper-balance-summary span { color: #cbbfff; font-size: 11px; font-weight: 750; margin-bottom: 3px; }
+.tango-paper-balance-summary span { color: var(--brand); font-size: 11px; font-weight: 750; margin-bottom: 3px; }
 .tango-paper-balance-summary strong { color: #72f0bd; font-size: 15px; font-weight: 900; text-shadow: 0 0 12px rgba(62,230,160,.18); }
 .buy-title .tango-title-balance { color: #72f0bd; font-size: 14px; font-weight: 900; max-width: 175px; text-shadow: 0 0 12px rgba(62,230,160,.18); }
 .tango-bottom-details { color: var(--muted); display: grid; font-size: 9px; gap: 5px; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 1px 2px 4px; text-align: center; }
@@ -467,7 +467,7 @@ html.tango-paper-quick-buy-active [data-testid="quickbuy"] {
 .tango-calendar-day.loss { background: rgba(255,100,124,.08); border-color: rgba(255,100,124,.25); }
 .tango-calendar-day.today { box-shadow: inset 0 0 0 1px var(--brand); }
 .tango-calendar-actions { display: grid; gap: 7px; margin-top: 11px; }
-.tango-calendar-dashboard { border-color: rgba(198,250,116,.38); color: #cbbfff; font-weight: 800; width: 100%; }
+.tango-calendar-dashboard { border-color: rgba(198,250,116,.38); color: var(--brand); font-weight: 800; width: 100%; }
 @media (max-width: 760px) {
   .tango-panel { right: 8px; width: min(396px,calc(100vw - 16px)); }
   .tango-bar .tango-stat.optional { display: none; }
@@ -483,3 +483,27 @@ button.tango-calendar-day:focus-visible { outline:2px solid var(--brand); outlin
 :host([data-theme="light"]) .tango-button.primary {color:#fff;}
 
 .tango-token-logo{color:#172010}:host([data-theme="light"]) .tango-shell{--button-start:#48721d;--button-end:#355811}:host([data-theme="light"]) .tango-token-logo{color:#fff}
+
+.tango-tutorial-link { display:block; width:100%; box-sizing:border-box; margin-top:8px; padding:10px 12px; font-size:12px; line-height:1.5; text-align:center; white-space:normal; overflow-wrap:anywhere; text-decoration:none; color:var(--brand); }
+.tango-tutorial-link:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+
+/* Shared visual rhythm; native GMGN controls and chart canvases are untouched. */
+.tango-shell { font-variant-numeric:tabular-nums; }
+.tango-panel { border-radius:14px; }
+.tango-header { gap:8px; padding:10px 12px; }
+.tango-trade-body { padding:0 14px 12px; }
+.tango-trade-block { padding:11px 0; }
+.tango-trade-title { font-size:12px; margin-bottom:8px; }
+.tango-preset-grid { gap:6px; }
+.tango-panel .tango-preset { border-radius:9px; font-size:12px; min-height:34px; }
+.tango-panel .tango-trade-meta { line-height:1.5; }
+.tango-summary-grid { border-radius:10px; }
+.tango-summary-grid strong,.tango-position-meta { font-variant-numeric:tabular-nums; }
+.tango-button:focus-visible,.tango-icon-button:focus-visible,.tango-preset:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+.tango-calendar { border-radius:14px; }
+.tango-calendar-summary strong { font-size:18px; }
+.tango-calendar-label,.tango-calendar-day > span { font-size:10px; }
+.tango-calendar-actions .tango-button { min-height:36px; border-radius:9px; font-size:12px; font-weight:600; line-height:1.5; }
+.tango-calendar-actions .tango-tutorial-link { margin-top:0; color:var(--text); }
+:host([data-theme="light"]) .tango-shell { --bg:#f5f7f2; --panel-2:#f0f4ec; --line:rgba(35,55,28,.16); --muted:#5c6658; --text:#1d281b; }
+@media(max-width:480px) { .tango-panel { width:min(396px,calc(100vw - 16px)); } .tango-header-actions { gap:4px; } }

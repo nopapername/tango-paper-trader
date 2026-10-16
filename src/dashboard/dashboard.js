@@ -76,12 +76,12 @@
       if (!hasSelectionIntent) runtime.selectedChain = startupChain
         || Tango.Chains.get(data.settings.selectedChain)?.id || 'sol';
       runtime.startupChainApplied = true;
-      render();
       if (!runtime.nativePricesRequested && runtime.state.initialized) {
         runtime.nativePricesRequested = true;
         refreshNativePrices();
         scheduleNativePriceRefresh();
       }
+      render();
       return data;
     } catch {
       runtime.loadError = 'storageLoadFailed';
@@ -102,7 +102,8 @@
   }
 
   async function refreshNativePrices() {
-    return Promise.all(Tango.Chains.all().map((chain) => refreshNativePrice(chain)));
+    const requests = Tango.Chains.all().map((chain) => refreshNativePrice(chain));
+    return Promise.all(requests);
   }
 
   function renderPriceUpdate() {
@@ -136,7 +137,7 @@
       let timer;
       try {
         const observation = await Promise.race([
-          global.chrome?.runtime?.sendMessage({ type: 'TANGO_GET_NATIVE_PRICE', chain: chain.id }),
+          Promise.resolve().then(() => global.chrome?.runtime?.sendMessage({ type: 'TANGO_GET_NATIVE_PRICE', chain: chain.id })),
           new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('nativePriceTimeout')), NATIVE_PRICE_TIMEOUT_MS); })
         ]);
         const price = Number(observation?.price);
@@ -172,9 +173,12 @@
     const times = Tango.Chains.all().filter((chain) => prices[chain.id] > 0)
       .map((chain) => runtime.nativePriceObservedAt[chain.id]);
     const complete = times.length === Tango.Chains.all().length;
-    return `<div class="price-status"><small class="${complete ? 'muted' : 'partial-data'}">${complete ? '' : t('nativePriceStale')}
-      ${times.length ? esc(t('nativePricesUpdated', { time: new Date(Math.min(...times)).toLocaleTimeString(lang()) })) : ''}</small>
-      <button class="button" data-action="refresh-native-prices">${t('nativePriceRefresh')}</button></div>`;
+    const pending = Object.keys(runtime.nativePriceRequests).length > 0;
+    const missing = Tango.Chains.all().filter((chain) => !(prices[chain.id] > 0)).map((chain) => chain.name).join(', ');
+    return `<div class="price-status"><small class="${complete || pending ? 'muted' : 'partial-data'}">${complete || pending ? '' : t('nativePriceStale')}
+      ${times.length ? esc(t('nativePricesUpdated', { time: new Date(Math.min(...times)).toLocaleTimeString(lang()) })) : ''}
+      ${pending ? esc(t('nativePriceRefreshing')) : ''}${missing && !pending ? `<span class="native-price-missing">${esc(t('nativePriceMissingChains', { chains: missing }))}</span>` : ''}</small>
+      <button class="button" data-action="refresh-native-prices" ${pending ? 'disabled aria-busy="true"' : ''}>${t(pending ? 'nativePriceRefreshing' : 'nativePriceRefresh')}</button></div>`;
   }
 
   function queueSettingsMutation(patch, selectionRevision = 0, submittedForm = null) {
@@ -335,7 +339,7 @@
     </aside><main class="main"><div class="topbar"><div><h1>${titles[runtime.tab]}</h1><p>${t('welcome')}</p></div>
       <div class="topbar-actions"><label class="chain-select"><span>${label('Selected chain', '已选链')}</span><select id="dashboard-chain">${chainOptions}</select></label>
       <button class="button primary" data-action="open-gmgn">${t('referralLink')} ↗</button></div></div>
-      <div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a> · <a href="https://gmgn.ai/" target="_blank" rel="noopener noreferrer">${t('plainGmgnLink')}</a></div>${nativePriceStatus()}${renderTab(view)}
+      <div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a></div>${nativePriceStatus()}${renderTab(view)}
     </main></div>${runtime.dailyReport ? Tango.DailyReport.dialog(runtime.dailyReport,runtime.reportCurrency,lang(),runtime.reportBusy) : ''}${runtime.toast ? `<div class="toast">${esc(runtime.toast)}</div>` : ''}`;
     const template = document.createElement('template');
     if (template.content) template.innerHTML = markup;
@@ -372,7 +376,7 @@
       <label class="field onboarding-field"><span>${t('language')}</span><select class="select" id="onboarding-language" value="${esc(onboardingLanguage)}"><option value="zh-CN" ${onboardingLanguage === 'zh-CN' ? 'selected' : ''}>${t('chinese')}</option><option value="en" ${onboardingLanguage === 'en' ? 'selected' : ''}>${t('english')}</option></select></label>
       <label class="field onboarding-field"><span>${t('commonCapital')}</span><input class="input custom-balance" id="onboarding-balance" type="number" min="0" max="1000000000000000" step="any" value="${esc(onboardingBalance)}"></label>
       <p class="onboarding-capital-note" id="onboarding-capital-note">${esc(Tango.I18n.t('onboardingCapitalAllocation', onboardingLanguage, { amount: onboardingBalance }))}</p>
-      <button class="button primary onboarding-submit" id="complete-onboarding">${t('startWithReferral')}</button><button class="button secondary" id="complete-onboarding-local">${t('saveWithoutReferral')}</button><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a> · <a href="https://gmgn.ai/" target="_blank" rel="noopener noreferrer">${t('plainGmgnLink')}</a></div>
+      <button class="button primary onboarding-submit" id="complete-onboarding">${t('startWithReferral')}</button><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a></div>
       ${runtime.onboardingStatus ? `<p class="onboarding-status">${esc(t(runtime.onboardingStatus))}</p>` : ''}
     </section></div>`;
     const updateCapitalNote = () => {
@@ -390,7 +394,6 @@
       updateCapitalNote();
     });
     app.querySelector('#complete-onboarding')?.addEventListener('click', () => completeOnboarding(true));
-    app.querySelector('#complete-onboarding-local')?.addEventListener('click', () => completeOnboarding(false));
   }
 
   function renderOnboardingComplete() {
@@ -659,7 +662,11 @@
   };
 
   async function action(name) {
-    if (name === 'refresh-native-prices') return refreshNativePrices();
+    if (name === 'refresh-native-prices') {
+      const pending = refreshNativePrices();
+      renderPriceUpdate();
+      return pending;
+    }
     if (name === 'export-json') return download(`tango-backup-${dateStamp()}.json`, JSON.stringify(await Tango.Store.exportData(), null, 2), 'application/json');
     if (name === 'import-json') return fileInput.click();
     if (name === 'reset-all') {
@@ -890,7 +897,10 @@
     if (runtime.settings?.theme === 'auto') renderPriceUpdate();
   });
   document.addEventListener?.('visibilitychange', () => {
-    if (!document.hidden && runtime.state && runtime.settings) renderPriceUpdate();
+    if (!document.hidden && runtime.state && runtime.settings) {
+      if (runtime.state.initialized && Object.values(freshNativePrices()).some((price) => !(price > 0))) refreshNativePrices();
+      renderPriceUpdate();
+    }
   });
   Tango.Store.subscribe(load);load();
 })(globalThis);

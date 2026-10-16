@@ -3,15 +3,16 @@
 
   const messages = {
     en: {
-      referralLink: 'GMGN · referral link', plainGmgnLink: 'GMGN without referral', privacyPolicy: 'Privacy / 隐私',
+      referralLink: 'Open GMGN', plainGmgnLink: 'Open GMGN', privacyPolicy: 'Privacy / 隐私',
       saveWithoutReferral: 'Save setup only (no referral)',
-      startWithReferral: 'Save setup & open GMGN referral link',
+      startWithReferral: 'Open GMGN', chainTutorial: 'Beginner on-chain guide: from 0 to A7',
       extensionReloadRequired: 'Tango was reloaded or updated. Refresh this GMGN page before paper trading again.',
       importTooManyRecords: 'Backup exceeds the 10,000 trade or calibration record limit. Import was rejected; nothing was changed.',
       paperTradingDisabled: 'Tango is off. Enable it before paper trading.',
       invalidSettingsField: '{field}: {reason}', invalidPresetList: 'Enter 1–12 comma-separated finite values greater than zero{limit}.',
       invalidNumericValue: 'Enter a finite number from {min} to {max}; the field cannot be empty.',
       nativePriceStale: 'Native/USD prices are missing or expired; USD totals are incomplete.',
+      nativePriceRefreshing: 'Refreshing USD prices…', nativePriceMissingChains: 'Missing or expired: {chains}',
       nativePriceRefresh: 'Refresh USD prices', nativePricesUpdated: 'Prices as of {time}',
       retainedHistoryStats: 'Trade count, win rate, and best/worst use retained SELL records. Monthly PnL includes all daily totals.',
       retainedOverviewStats: 'Trade count, win rate, and profit factor use retained history.',
@@ -91,15 +92,16 @@
       closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
-      referralLink: 'GMGN · 推广链接', plainGmgnLink: '不带邀请码打开 GMGN', privacyPolicy: '隐私 / Privacy',
+      referralLink: '打开 GMGN', plainGmgnLink: '打开 GMGN', privacyPolicy: '隐私 / Privacy',
       saveWithoutReferral: '仅保存设置（不使用推广）',
-      startWithReferral: '保存设置并打开 GMGN 推广链接',
+      startWithReferral: '打开 GMGN', chainTutorial: '从0到单币A7的新人扫链教程',
       extensionReloadRequired: 'Tango 已重新加载或更新，请刷新当前 GMGN 页面后再进行模拟交易。',
       importTooManyRecords: '备份的成交或校准记录超过 10,000 条上限，已拒绝导入，现有数据未更改。',
       paperTradingDisabled: 'Tango 已关闭，请先启用后再进行模拟交易。',
       invalidSettingsField: '{field}：{reason}', invalidPresetList: '请输入 1–12 个逗号分隔、大于零的有限数值{limit}。',
       invalidNumericValue: '请输入 {min} 到 {max} 之间的有限数值，不能留空。',
       nativePriceStale: '原生币美元报价缺失或已过期，美元汇总不完整。',
+      nativePriceRefreshing: '正在刷新美元报价…', nativePriceMissingChains: '缺失或过期：{chains}',
       nativePriceRefresh: '刷新美元报价', nativePricesUpdated: '报价截至 {time}',
       retainedHistoryStats: '交易次数、胜率及最佳/最差按保留的卖出记录统计；月盈亏包含全部日汇总。',
       retainedOverviewStats: '交易次数、胜率和盈亏比按保留的历史记录统计。',
