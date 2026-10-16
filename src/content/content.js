@@ -1944,6 +1944,9 @@
       if (!(order.amountNative > 0)) throw new Error('invalidAmount');
       if (order.amountNative > Number(activeAccount()?.cashBalanceNative || 0)) throw new Error('insufficientBalance');
       order.quote = resolvePaperTradeQuote(context?.token, context?.quote);
+      if (requiresConfirmation() && routeMatchesDetailToken(order.token)) {
+        order.quote = resolveCommitPaperTradeQuote(order, null, routeCapture);
+      }
       if (!order.quote) throw new Error('invalidQuote');
       refreshPaperQuoteInBackground(order.token);
       const orderKey = `${order.token.chain}:${order.token.address || ''}:${order.amountNative}`;

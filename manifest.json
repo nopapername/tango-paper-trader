@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tango Paper Trader",
-  "version": "0.3.36",
+  "version": "0.3.37",
   "description": "Paper trade tokens across six GMGN chains with local, bilingual portfolio analytics.",
   "permissions": [
     "storage"
