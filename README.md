@@ -14,6 +14,8 @@ Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet c
 
 ## 中文使用指南
 
+[官方网站](https://tango-paper-lab.quirkylily.chatgpt.site/) · [详细使用教程](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
+
 ### 能做什么
 
 - **模拟买卖**：战壕卡片快捷买入、详情页金额预设、按比例卖出、一键回本，以及持仓抽屉中的卖出操作。
@@ -107,6 +109,8 @@ Tango **完全免费，仅用于模拟交易与练习**。不连接钱包，不�
 模拟结果不保证真实交易表现，也不能反映全部流动性、税费、MEV、成交失败或市场冲击。
 
 ## English guide
+
+[Official website](https://tango-paper-lab.quirkylily.chatgpt.site/) · [Detailed tutorial (Chinese)](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
 
 ### What you can do
 
