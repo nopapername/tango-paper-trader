@@ -1,6 +1,6 @@
 # Tango Paper Trader English listing
 
-Version 0.3.46
+Version 0.3.47
 
 Name: Tango Paper Trader
 
@@ -20,3 +20,5 @@ Paper data stays in the current browser. Tango reads public GMGN market observat
 Alongside token quantity, the detail trading panel displays the holding value in the chain native asset (such as SOL or BNB). Unavailable valuations show a placeholder; execution calculations are unchanged.
 
 The bottom Today PnL bar shows realized net PnL from sells on the current chain for the browser's local date. It starts a new daily total at midnight, excludes unrealized PnL, and preserves balances, positions and historical calendar records.
+
+Drag an edge or corner to resize the bottom PnL bar and detail trading panel proportionally (75%–150%). Text and controls scale together; each surface remembers its size. Click ↺ to restore the default size. Resizing does not change trading, quotes, PnL calculations, balances or positions.

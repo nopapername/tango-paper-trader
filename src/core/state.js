@@ -189,6 +189,8 @@
       throw new Error('invalidSettings');
     }
 
+    if (['barScale', 'panelScale'].some(field => !optional(source, field, value => finiteBetween(value, .75, 1.5)))) throw new Error('invalidSettings');
+
     const rawChains = source.chains ?? source.chainSettings;
     const chainAliases = ['chains', 'chainSettings'].filter((field) => hasOwn(source, field));
     if (chainAliases.length) {
@@ -405,7 +407,10 @@
       initialBalanceSol: defaultInitialBalanceSol, ...defaultGlobalSettings
     } = Tango.DEFAULT_SETTINGS;
     const selectedChain = Tango.Chains.get(globalSettings.selectedChain)?.id || 'sol';
-    return { ...defaultGlobalSettings, ...globalSettings, selectedChain, chains };
+    return { ...defaultGlobalSettings, ...globalSettings, selectedChain, chains,
+      barScale: finiteBetween(source.barScale, .75, 1.5) ? source.barScale : 1,
+      panelScale: finiteBetween(source.panelScale, .75, 1.5) ? source.panelScale : 1
+    };
   }
 
   function normalizeAccount(raw, fallback, strict) {

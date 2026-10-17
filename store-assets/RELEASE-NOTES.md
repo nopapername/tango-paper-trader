@@ -2,18 +2,22 @@
 
 [官方网站](https://tango-paper-lab.quirkylily.chatgpt.site/) · [详细使用教程](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
 
-### 0.3.46 更新
+### 0.3.47 更新
 
-- 战壕页底部改为“今日盈亏”：按浏览器本地日期，统计当前链今日卖出的已实现净盈亏，跨天自动从新一天开始。
-- 未平仓浮盈浮亏不计入底部今日金额；其他总盈亏视图保持原统计口径。
-- 不重置余额、持仓或日历历史，不改变买卖、报价和结算逻辑。
-- 更新中英文说明、商店资料、安装 ZIP 与逐文件 SHA-256 清单。
+- 底部盈亏框和详情快捷交易面板可拖动边框、四角，按 **75%–150%** 等比例缩放，字号和按钮同步变化。
+- 两个面板分别记住尺寸，刷新后保留；点击 **↺** 恢复默认大小。原有拖动位置与收起功能保留。
+- 修复长代币名与大金额的布局溢出；限制窗口边界，小窗口保留滚动访问。
+- 防止缩放松手时误触交易按钮；兼容行情刷新、切页、总开关关闭及扩展连接失效的中断。
+- 本次仅为 UI 和布局偏好更新，不修改报价、成交、盈亏计算、余额或持仓；今日盈亏与日历历史继续保留。
+- 更新中英文文档、商店资料、ZIP 及校验文件。
 
-### 安装与更新
+### 验证与安装
 
-解压下方 `tango-paper-trader-0.3.46.zip`，在 `chrome://extensions` 开启开发者模式，选择“加载已解压的扩展程序”，选中直接包含 `manifest.json` 的目录。已有用户请替换原目录文件后重新加载扩展，并刷新全部 GMGN 标签页；不要删除重装，以免丢失本地数据。更新前建议导出 JSON 备份。
+**1,332 项本地测试通过**；独立本地 Chrome 布局测试覆盖两种窗口、三档缩放、长名称、大金额和完整按钮。用户已在 GMGN 手动确认缩放、尺寸记忆和恢复默认正常。本次未新增交易或重置账户。
 
-本地1,319项测试通过；发布者已手动确认今日金额、余额、持仓、日历历史正常。跨天行为通过可控时间回归验证。只用于模拟练习，不涉及真实资金。旧版商店截图保留，未标为本版本新截图。
+下载下方 `tango-paper-trader-0.3.47.zip`，解压后选择直接包含 `manifest.json` 的目录安装。已有用户请在原目录替换文件、重新加载 Tango，并刷新所有 GMGN 页面；不要删除重装，以免丢失浏览器本地数据。更新前建议导出 JSON 备份。
+
+商店资料随仓库更新；现有截图仍注明原拍摄版本，不冒充本次新截图。本次未向 Google 提交审核。
 
 ## English
 
@@ -21,19 +25,20 @@
 
 ### Changes
 
-- The bottom bar now shows current-chain **Today PnL**, using realized net PnL from sells on the browser's local date. A new date starts a new total automatically.
-- Unrealized PnL is excluded from that daily bar; other cumulative PnL views retain their existing basis.
-- Balances, positions and historical calendar records are preserved. Trading, quoting, settlement and permissions are unchanged.
-- Bilingual documentation, store materials, the extension ZIP and per-file SHA-256 manifest are updated.
+- Resize the bottom PnL bar and detail trading panel by dragging any edge or corner, with **75%–150% proportional scaling** of text, spacing and controls.
+- Each surface remembers its size across refreshes. Click **↺** to restore its default size; existing movement and collapse controls remain available.
+- Improve long-symbol and large-amount wrapping and keep surfaces within the viewport, with scrolling for constrained windows.
+- Guard resize-release clicks against accidental trading and cancel gestures cleanly on navigation, disablement or invalidated extension contexts.
+- This is a UI/layout-preferences update. Quotes, execution, PnL calculations, balances, positions, Today PnL and calendar history retain their existing behavior.
+
+Validation: **1,332 local tests passed**. Isolated local Chrome fixtures covered two viewport sizes and three scales; the publisher manually confirmed the live GMGN resize/persistence/reset controls. No test trades, imports or account resets were performed for this update.
 
 ### Install / update
 
-Extract the plugin ZIP below and load the folder containing `manifest.json` through Chrome's developer mode. Existing users should replace files in the same folder, reload Tango, then refresh every GMGN tab. Do not uninstall/reinstall; export a JSON backup before updating.
+Use the plugin ZIP asset below, rather than GitHub's auto-generated source archive. Extract it and load the folder containing `manifest.json`. Existing users should update the same directory, reload the extension and refresh all GMGN tabs; do not uninstall/reinstall. Export a JSON backup before updating.
 
-Validation: 1,319 local tests passed. The publisher manually confirmed today's amount and preservation of balances, positions and calendar history; rollover was verified with controlled-clock tests. Existing store screenshots are historical captures, not newly captured for this version.
+The ZIP has 43 runtime files at its root and excludes store materials. Store screenshots retain their historical capture-version disclosure. No Chrome Web Store submission is performed by this release.
 
 ### SHA-256
 
-`c02dfd6e75a07de5e54ff562df451b7eec8e779bd3671201c312142b680c5c0a`  `tango-paper-trader-0.3.46.zip`
-
-Use the plugin ZIP asset below, rather than GitHub's auto-generated source archive. The ZIP contains 43 install files with `manifest.json` directly at the root; store materials are excluded.
+`df0896b066ed30d1e7e4dd2c9f2ee790e2eb3ac1c942decee3948c82aa2829ac`  `tango-paper-trader-0.3.47.zip`

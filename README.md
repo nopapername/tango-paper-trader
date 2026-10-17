@@ -8,11 +8,13 @@
 
 Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet connection or real funds required.
 
-**当前版本 / Current version: 0.3.46**
+**当前版本 / Current version: 0.3.47**
 
 [中文使用指南](#中文使用指南) · [English guide](#english-guide) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 
 ## 中文使用指南
+
+底部盈亏框与详情交易面板支持拖动边框、四角等比例缩放（75%–150%），字号和按钮同步调整，两个尺寸分别记忆。点击“↺”恢复默认大小；小窗口下内容可滚动查看，缩放不改变账户和交易计算。
 
 [官方网站](https://tango-paper-lab.quirkylily.chatgpt.site/) · [详细使用教程](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
 
@@ -111,6 +113,8 @@ Tango **完全免费，仅用于模拟交易与练习**。不连接钱包，不�
 模拟结果不保证真实交易表现，也不能反映全部流动性、税费、MEV、成交失败或市场冲击。
 
 ## English guide
+
+Resize the bottom PnL bar and detail trading panel by dragging an edge or corner (75%–150% proportional scaling). Text and controls scale together; each surface remembers its size. Use ↺ to restore the default size. Small windows retain scrolling access; account data and trade calculations are unaffected.
 
 [Official website](https://tango-paper-lab.quirkylily.chatgpt.site/) · [Detailed tutorial (Chinese)](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
 

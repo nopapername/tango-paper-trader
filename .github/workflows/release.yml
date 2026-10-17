@@ -75,7 +75,7 @@ jobs:
               if error.code != 404: raise
               release = json.loads(request(api_root + '/releases', {
                   'tag_name': tag, 'target_commitish': revision,
-                  'name': 'Tango Paper Trader ' + tag + ' | 今日盈亏 / Today PnL',
+                  'name': 'Tango Paper Trader ' + tag,
                   'body': notes, 'draft': True, 'prerelease': False
               }, method='POST'))
           release_url = api_root + '/releases/' + str(release['id'])

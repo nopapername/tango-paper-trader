@@ -25,3 +25,7 @@ Alongside token quantity, the detail trading panel displays the holding value in
 底部“今日盈亏”仅统计当前链在浏览器本地日期内卖出后的已实现净盈亏，跨天自动从新一天开始统计；不含未平仓浮盈浮亏，不重置余额、持仓或盈亏日历历史。
 
 The bottom Today PnL bar shows realized net PnL from sells on the current chain for the browser's local date. It starts a new daily total at midnight, excludes unrealized PnL, and preserves balances, positions and historical calendar records.
+
+底部盈亏框和详情交易面板支持拖动边框、四角等比例缩放（75%–150%），字号和按钮同步调整，分别记住尺寸，点击“↺”恢复默认大小。缩放不改变交易、报价、盈亏计算、余额或持仓。
+
+Drag an edge or corner to resize the bottom PnL bar and detail trading panel proportionally (75%–150%). Text and controls scale together; each surface remembers its size. Click ↺ to restore the default size. Resizing does not change trading, quotes, PnL calculations, balances or positions.

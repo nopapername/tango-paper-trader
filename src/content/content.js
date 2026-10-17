@@ -13,7 +13,7 @@
     gmgnQuotes: new Map(), persistentGmgnQuotes: new Map(),
     quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
-    refreshRetryTimer: null, refreshRetryDelay: 500,
+    refreshRetryTimer: null, refreshRetryDelay: 500, floatingGesture: false, cancelFloatingResize: null,
     pnlDateKey: null, calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     renderedMarkup: null, markerPayloads: new WeakMap(), markerFrameListeners: new WeakSet(),
     chartFrameRoutes: new WeakMap(), chartFrameReadyBeforeLoad: new WeakSet(),
@@ -87,6 +87,7 @@
   function noteInvalidatedContext(error) {
     if (!/extension context invalidated|^extensionReloadRequired$/i.test(String(error?.message || ''))) return false;
     runtime.extensionInvalidated = true;
+    runtime.cancelFloatingResize?.();
     if (runtime.quoteTimer !== null) clearInterval(runtime.quoteTimer);
     runtime.quoteTimer = null;
     if (runtime.refreshRetryTimer !== null) clearTimeout(runtime.refreshRetryTimer);
@@ -2435,14 +2436,16 @@
     // Use the same native/USD formatting as the calendar's day cells.
     const pnl = Number(Tango.ChainView.daily(runtime.state, activeChain()?.id)[key]?.native || 0);
     const pnlMoney = accountMoney(pnl, true);
-    return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)} ${collapsed ? 'collapsed' : ''}" style="${floatingStyle(runtime.settings.barPosition)}">
+    return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)} ${collapsed ? 'collapsed' : ''}" style="${floatingLayoutStyle('bar')}">
       <div class="tango-bar-main" data-action="toggle-drawer">
         ${collapsed ? `<strong class="${pnlClass(pnl)}">${pnlMoney}</strong>` : `
           <span class="tango-paper-badge tango-bar-paper">${t('paper')}</span>
           <div class="tango-stat tango-pnl-hero"><strong class="${pnlClass(pnl)}">${pnlMoney}</strong><span>${t('todayPnl')}</span></div>`}
         <span class="tango-bar-hint">${t('clickForPositions')} · ${summary.positionCount}</span>
       </div>
+      <button class="tango-icon-button" data-action="reset-bar-size" title="${t('resetSize')}" aria-label="${t('resetSize')}">↺</button>
       <button class="tango-icon-button" data-action="collapse-bar">${collapsed ? '＋' : '－'}</button>
+      ${floatingResizeHandles('bar')}
     </div>`;
   }
 
@@ -2705,7 +2708,7 @@
     return `<div class="tango-panel tango-card ${runtime.settings.panelCollapsed ? 'collapsed' : ''}" style="${panelStyle()}">
       <div class="tango-header" data-drag-handle>
         <div class="tango-token-strip"><span class="tango-paper-logo">T</span><strong>TANGO</strong><span class="tango-paper-badge">${t('paper')}</span><span>${esc(symbol)}</span></div>
-        <div class="tango-header-actions"><button class="tango-icon-button tango-edit-all" data-action="${runtime.presetEditing === 'all' ? 'save-presets' : 'edit-presets'}" title="${t(runtime.presetEditing === 'all' ? 'savePresets' : 'editPresets')}">${runtime.presetEditing === 'all' ? '✓' : '✎'}</button>${runtime.presetEditing === 'all' ? `<button class="tango-icon-button" data-action="cancel-presets" title="${t('cancel')}">↶</button>` : ''}<button class="tango-icon-button" data-action="toggle-sound" title="${t('sound')}">${runtime.settings.soundEnabled ? '🔊' : '🔇'}</button><button class="tango-icon-button" data-action="dashboard">⚙</button><button class="tango-icon-button" data-action="collapse-panel">${runtime.settings.panelCollapsed ? '＋' : '×'}</button></div>
+        <div class="tango-header-actions"><button class="tango-icon-button" data-action="reset-panel-size" title="${t('resetSize')}" aria-label="${t('resetSize')}">↺</button><button class="tango-icon-button tango-edit-all" data-action="${runtime.presetEditing === 'all' ? 'save-presets' : 'edit-presets'}" title="${t(runtime.presetEditing === 'all' ? 'savePresets' : 'editPresets')}">${runtime.presetEditing === 'all' ? '✓' : '✎'}</button>${runtime.presetEditing === 'all' ? `<button class="tango-icon-button" data-action="cancel-presets" title="${t('cancel')}">↶</button>` : ''}<button class="tango-icon-button" data-action="toggle-sound" title="${t('sound')}">${runtime.settings.soundEnabled ? '🔊' : '🔇'}</button><button class="tango-icon-button" data-action="dashboard">⚙</button><button class="tango-icon-button" data-action="collapse-panel">${runtime.settings.panelCollapsed ? '＋' : '×'}</button></div>
       </div>
       ${runtime.settings.panelCollapsed ? '' : `<div class="tango-trade-body">
         <section class="tango-trade-block">
@@ -2735,14 +2738,45 @@
           ? `<div class="tango-warning">${t('provisionalQuote')}</div>`
           : quoteValid ? '' : `<div class="tango-warning">${t('quoteLoading')}</div>`}
       </div>`}
+      ${floatingResizeHandles('panel')}
     </div>`;
   }
 
-  function panelStyle() {
-    const pos = runtime.settings.panelPosition;
-    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return '';
-    return `left:${Math.max(0,pos.x)}px;top:${Math.max(0,pos.y)}px;right:auto;transform:none;`;
+  function floatingScale(kind) {
+    const value = runtime.settings?.[`${kind}Scale`];
+    return typeof value === 'number' && Number.isFinite(value) ? Math.min(1.5, Math.max(.75, value)) : 1;
   }
+
+  function floatingResizeHandles(kind) {
+    return ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'].map(edge =>
+      `<span class="tango-resize-handle tango-resize-${edge}" data-resize-kind="${kind}" data-resize-edge="${edge}" aria-hidden="true"></span>`).join('');
+  }
+
+  function floatingLayoutStyle(kind) {
+    const scale = floatingScale(kind);
+    const position = runtime.settings?.[`${kind}Position`];
+    const maxWidth = Math.max(1, innerWidth - 16) / scale;
+    const maxHeight = Math.max(1, innerHeight - (kind === 'panel' ? 40 : 16)) / scale;
+    const positionStyle = position && Number.isFinite(position.x) && Number.isFinite(position.y)
+      ? `left:${Math.max(0, position.x) / scale}px;top:${Math.max(0, position.y) / scale}px;right:auto;bottom:auto;transform:none;` : '';
+    const minWidth = kind === 'bar' ? `min-width:${Math.min(runtime.settings?.barCollapsed ? 220 : 268, maxWidth)}px;` : '';
+    return `${positionStyle}zoom:${scale};max-width:${maxWidth}px;max-height:${maxHeight}px;${minWidth}`;
+  }
+
+  function applyFloatingLayout(element, kind) {
+    const scale = floatingScale(kind);
+    element.style.zoom = String(scale);
+    element.style.maxWidth = `${Math.max(1, innerWidth - 16) / scale}px`;
+    element.style.maxHeight = `${Math.max(1, innerHeight - (kind === 'panel' ? 40 : 16)) / scale}px`;
+    if (kind === 'bar') element.style.minWidth = `${Math.min(runtime.settings?.barCollapsed ? 220 : 268, Math.max(1, innerWidth - 16) / scale)}px`;
+  }
+
+  async function resetFloatingScale(kind) {
+    if (!['bar', 'panel'].includes(kind)) return;
+    await patchRuntimeSettings({ [`${kind}Scale`]: 1 });
+  }
+
+  function panelStyle() { return floatingLayoutStyle('panel'); }
 
   function floatingStyle(position) {
     if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return '';
@@ -2755,18 +2789,19 @@
     for (const [selector, settingKey] of [
       ['.tango-bar', 'barPosition'], ['.tango-panel', 'panelPosition'], ['.tango-drawer', 'drawerPosition']
     ]) {
+      const kind = selector === '.tango-bar' ? 'bar' : selector === '.tango-panel' ? 'panel' : null;
+      const element = shadow.querySelector(selector);
       const position = runtime.settings[settingKey];
       if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
-      const element = shadow.querySelector(selector);
       if (!element?.getBoundingClientRect) continue;
       const rect = element.getBoundingClientRect();
       if (!(rect.width > 0) || !(rect.height > 0)) continue;
-      measurements.push({ element, position, rect });
+      measurements.push({ element, position, rect, scale: kind ? floatingScale(kind) : 1 });
     }
-    for (const { element, position, rect } of measurements) {
+    for (const { element, position, rect, scale } of measurements) {
       const styles = {
-        left: `${Math.min(Math.max(0, innerWidth - rect.width), Math.max(0, position.x))}px`,
-        top: `${Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, position.y))}px`,
+        left: `${Math.min(Math.max(0, innerWidth - rect.width), Math.max(0, position.x)) / scale}px`,
+        top: `${Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, position.y)) / scale}px`,
         right: 'auto', bottom: 'auto', transform: 'none'
       };
       for (const [key, value] of Object.entries(styles)) {
@@ -2774,7 +2809,7 @@
       }
     }
   }
-  window.addEventListener('resize', constrainFloatingElements);
+  window.addEventListener('resize', () => { runtime.cancelFloatingResize?.(); queueRender(); constrainFloatingElements(); });
   stylesheet.addEventListener('load', constrainFloatingElements);
 
   function renderDrawer(summary) {
@@ -3178,6 +3213,8 @@
   }
 
   function render() {
+    if (runtime.cancelFloatingResize && (!runtime.settings?.enabled || runtime.extensionInvalidated || !activeChain())) runtime.cancelFloatingResize();
+    if (runtime.floatingGesture) return;
     capturePresetDraft();
     const chain = activeChain();
     const chartRecoveryActive = String(Boolean(chain && runtime.settings?.enabled && runtime.state?.initialized));
@@ -3256,6 +3293,8 @@
         const barCollapsed = !runtime.settings.barCollapsed;
         await patchRuntimeSettings({ barCollapsed });
       }
+      if (action === 'reset-bar-size') await resetFloatingScale('bar');
+      if (action === 'reset-panel-size') await resetFloatingScale('panel');
       if (action === 'collapse-panel') {
         const panelCollapsed = !runtime.settings.panelCollapsed;
         await patchRuntimeSettings({ panelCollapsed });
@@ -3331,6 +3370,8 @@
     bindDraggable('[data-drag-handle]', '.tango-panel', 'panelPosition');
     bindDraggable('[data-drawer-drag]', '.tango-drawer', 'drawerPosition');
     bindDraggable('.tango-bar', '.tango-bar', 'barPosition');
+    bindResizable('bar');
+    bindResizable('panel');
   }
 
   function bindDraggable(handleSelector, elementSelector, settingKey) {
@@ -3338,7 +3379,7 @@
     const element = shadow.querySelector(elementSelector);
     if (!handle || !element) return;
     handle.addEventListener('pointerdown', (event) => {
-      if (!requireTrustedUserEvent(event) || event.target.closest('button')) return;
+      if (!requireTrustedUserEvent(event) || runtime.floatingGesture || event.target.closest('button, [data-resize-edge]')) return;
       const rect = element.getBoundingClientRect();
       const startX = event.clientX; const startY = event.clientY;
       const fallbackSettings = { ...runtime.settings, [settingKey]: runtime.settings[settingKey] };
@@ -3353,8 +3394,9 @@
           y: Math.min(Math.max(0, innerHeight - rect.height), Math.max(0, rect.top + move.clientY - startY))
         };
         runtime.settings = { ...runtime.settings, [settingKey]: position };
-        element.style.left = `${position.x}px`;
-        element.style.top = `${position.y}px`;
+        const scale = settingKey === 'panelPosition' ? floatingScale('panel') : settingKey === 'barPosition' ? floatingScale('bar') : 1;
+        element.style.left = `${position.x / scale}px`;
+        element.style.top = `${position.y / scale}px`;
         element.style.right = 'auto'; element.style.bottom = 'auto'; element.style.transform = 'none';
       };
       const onUp = async (up) => {
@@ -3370,8 +3412,85 @@
     });
   }
 
+  function bindResizable(kind) {
+    const element = shadow.querySelector(`.tango-${kind}`);
+    if (!element) return;
+    shadow.querySelectorAll(`[data-resize-kind="${kind}"]`).forEach(handle => {
+      handle.addEventListener('pointerdown', event => {
+        if (!requireTrustedUserEvent(event) || runtime.floatingGesture || runtime.extensionInvalidated
+          || !runtime.settings?.enabled || event.isPrimary === false || (event.button != null && event.button !== 0)) return;
+        const edge = handle.dataset.resizeEdge;
+        if (!['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'].includes(edge)) return;
+        const rect = element.getBoundingClientRect();
+        if (!(rect.width > 0) || !(rect.height > 0)) return;
+        event.preventDefault(); event.stopPropagation();
+        const scaleKey = `${kind}Scale`, positionKey = `${kind}Position`;
+        const original = { [scaleKey]: runtime.settings[scaleKey] ?? 1, [positionKey]: runtime.settings[positionKey] ?? null };
+        const startScale = floatingScale(kind), startX = event.clientX, startY = event.clientY;
+        const baseWidth = rect.width / startScale, baseHeight = rect.height / startScale;
+        let moved = false;
+        runtime.floatingGesture = true;
+        const samePointer = e => e?.isTrusted === true && (event.pointerId == null || e.pointerId === event.pointerId);
+        const suppressResizeClick = click => { click.preventDefault(); click.stopImmediatePropagation(); };
+        const cleanup = (keepClickGuard = false) => {
+          if (!keepClickGuard) global.removeEventListener('click', suppressResizeClick, true);
+          global.removeEventListener('pointermove', onMove); global.removeEventListener('pointerup', onUp);
+          global.removeEventListener('pointercancel', onCancel); global.removeEventListener('blur', onCancel);
+          runtime.floatingGesture = false; runtime.cancelFloatingResize = null;
+        };
+        const cancel = () => {
+          cleanup();
+          runtime.settings = { ...runtime.settings, ...original };
+          applyFloatingLayout(element, kind);
+          queueRender();
+        };
+        const onCancel = e => { if (e?.type === 'blur' || samePointer(e)) cancel(); };
+        const onMove = move => {
+          if (!samePointer(move)) return;
+          const dx = move.clientX - startX, dy = move.clientY - startY;
+          if (!moved && Math.hypot(dx, dy) < 3) return;
+          move.preventDefault(); moved = true;
+          const horizontal = /[ew]/.test(edge), vertical = /[ns]/.test(edge);
+          const wDelta = horizontal ? (edge.includes('w') ? -dx : dx) : 0;
+          const hDelta = vertical ? (edge.includes('n') ? -dy : dy) : 0;
+          const ratio = 1 + (wDelta * rect.width + hDelta * rect.height)
+            / ((horizontal ? rect.width ** 2 : 0) + (vertical ? rect.height ** 2 : 0));
+          const maxWidth = edge.includes('w') ? rect.right : innerWidth - rect.left;
+          const maxHeight = edge.includes('n') ? rect.bottom : innerHeight - rect.top;
+          const limit = Math.max(.75, Math.min(1.5, maxWidth / baseWidth, maxHeight / baseHeight));
+          const scale = Math.round(Math.min(limit, Math.max(.75, startScale * ratio)) * 1000) / 1000;
+          const width = baseWidth * scale, height = baseHeight * scale;
+          const position = {
+            x: Math.max(0, Math.min(Math.max(0, innerWidth - width), edge.includes('w') ? rect.right - width : rect.left)),
+            y: Math.max(0, Math.min(Math.max(0, innerHeight - height), edge.includes('n') ? rect.bottom - height : rect.top))
+          };
+          runtime.settings = { ...runtime.settings, [scaleKey]: scale, [positionKey]: position };
+          applyFloatingLayout(element, kind);
+          element.style.left = `${position.x / scale}px`; element.style.top = `${position.y / scale}px`;
+          element.style.right = 'auto'; element.style.bottom = 'auto'; element.style.transform = 'none';
+        };
+        const onUp = async up => {
+          if (!samePointer(up)) return;
+          cleanup(true);
+          // Keep the release click inside the UI gesture even if a quote/settings
+          // update replaces this node before the browser dispatches that click.
+          setTimeout(() => global.removeEventListener('click', suppressResizeClick, true), 0);
+          if (moved) {
+            await patchRuntimeSettings({ [scaleKey]: runtime.settings[scaleKey], [positionKey]: runtime.settings[positionKey] }, { ...runtime.settings, ...original });
+          }
+          queueRender();
+        };
+        runtime.cancelFloatingResize = cancel;
+        global.addEventListener('click', suppressResizeClick, true);
+        global.addEventListener('pointermove', onMove); global.addEventListener('pointerup', onUp);
+        global.addEventListener('pointercancel', onCancel); global.addEventListener('blur', onCancel);
+      });
+    });
+  }
+
   function handleRouteChange() {
     if (location.href === runtime.lastUrl) return;
+    runtime.cancelFloatingResize?.();
     const previousRouteIdentity = runtime.routeIdentity ?? currentRouteIdentity(runtime.lastUrl);
     runtime.lastUrl = location.href;
     advanceRouteEpoch();

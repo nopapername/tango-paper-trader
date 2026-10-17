@@ -3,6 +3,7 @@
 
   const messages = {
     en: {
+      resetSize: 'Restore default size',
       referralLink: 'Open GMGN', plainGmgnLink: 'Open GMGN', privacyPolicy: 'Privacy / 隐私',
       saveWithoutReferral: 'Save setup only (no referral)',
       startWithReferral: 'Open GMGN', chainTutorial: 'Beginner on-chain guide: from 0 to A7',
@@ -92,6 +93,7 @@
       closeAllSuccess: 'All paper positions closed', calendarClearedOnReset: 'Resetting principal also clears the PnL calendar'
     },
     'zh-CN': {
+      resetSize: '恢复默认大小',
       referralLink: '打开 GMGN', plainGmgnLink: '打开 GMGN', privacyPolicy: '隐私 / Privacy',
       saveWithoutReferral: '仅保存设置（不使用推广）',
       startWithReferral: '打开 GMGN', chainTutorial: '从0到单币A7的新人扫链教程',

@@ -1,9 +1,9 @@
 {
-  "version": "0.3.46",
+  "version": "0.3.47",
   "fileCount": 43,
   "files": {
     "PRIVACY.md": "915107a8eb0665a79b5ecd1616cfc792df8f3bf1df5aeac0672c93a702a48e84",
-    "README.md": "758bf581e80a6ee99d8257b69c733914d8b25792a91ee620964d3fc52d80fa82",
+    "README.md": "b901c0d3c443626ad9f8a450fbf69175d7323557fbca8042c7102cc525932498",
     "SECURITY.md": "757ad723d8b37fc548e64b7073570f35cb9eab2dc9c649ee3401495334fa82c4",
     "_locales/en/messages.json": "8765b92e76e5027bc12855665daaf88196e4f4b235f843d74e3a9b2f7a20ff18",
     "_locales/zh_CN/messages.json": "e5f281371837757d7800253e5278dea0e0bdd9b7427c16b593574d8bbd228521",
@@ -14,7 +14,7 @@
     "assets/icons/icon-48.png": "feaa5e82e100f9d50d17aab70ee5247fdea91f4d0bd2e49b351dd5d722ff8ba4",
     "dashboard.html": "3eaa7d0071f4e782d42bab2da1727ccdc5e285a6e9e9a3a2c1e876e15535c5b7",
     "docs/multichain-smoke-test.md": "a97c96c0c02e7566bd7e6ee7edd69cd6776468b958e92df041286e2b8a6afa36",
-    "manifest.json": "3f3cc6728d0d320af9e3fcd2b4495b3c1488dbf66f244f9b728feb9f636ad1e3",
+    "manifest.json": "2f07a6b3d19d07a3e5ebab56cf0ee884dc91b6a08f5498c1b14afcd74091eb09",
     "popup.html": "55b2cd57ca9803340b18844a83aa5156bfccded8a8ab53e2de996baa3417bec2",
     "privacy.html": "b228752c7fc83edd515d8bdd2bd7a56aed60f76564f1a230bb5def8eb42eb9fb",
     "src/adapters/gmgn-quotes.js": "42fffcc3b59fd1a32dcf185b4b6efbe126463efc20c0a21732801ea7966ba5d0",
@@ -22,8 +22,8 @@
     "src/background.js": "7b6e1b5734537be2fe29efb8f3a27941576ca6a3a9ee70d1c20e9a63ff82a04f",
     "src/content/chain-view.js": "010818f13a369e84c4375dc41c9a6b19f0606e58cb30e389bc2d888e17c6f5da",
     "src/content/chart-main.js": "3bc22a6f4f6a51a04461fc4351ae0f3c1dfb4f2716d11ca95b376633c2c956b8",
-    "src/content/content.css": "6b8eea37a5e1a08d1afd74023e44a866d24945de5ac99e931ae4c844e85efa56",
-    "src/content/content.js": "9616072919d25e7ff0bbbf29f41928dc7f08c2ffa977e92337be364c1dc27b0c",
+    "src/content/content.css": "6e39a09570fc1b22dd519134a79dd865d1d099776178b970016ab51d0148bf1c",
+    "src/content/content.js": "74c89368b76a9b447d58f1fb66bee453b62114576e3d699720f7440510dbd058",
     "src/content/markers.js": "3c823c84a4514b470a571d1f1206eb5f2352368ca9f544fbb041959454884d42",
     "src/content/native-quick-buy-guard.js": "efe51bfd202addd0d4c1124ff7976d088e79ba221fe600869e616e0c2f54d6bd",
     "src/content/page-main.js": "7c4b3eab7563fd0753997cf28e9ec934e06ef09fe90c202139638d537c51d351",
@@ -31,7 +31,7 @@
     "src/core/chains.js": "fa63d17930cf3194838b9a5605991865e940cc172715381ff920e11fd77146a4",
     "src/core/engine.js": "7da3b370ac020c40266f520c62617acb2087267ade1a57e7f0693cdaff9d6328",
     "src/core/state-coordinator.js": "6b73c53da7105968ed6efde8d6c335c5499dcb2070490efbf432336504d139d5",
-    "src/core/state.js": "59a953596d8641a8b9c8544b381a2fb730be902171ea8b91d7f1a4d7acac0fea",
+    "src/core/state.js": "747e0577d80bfc1cd71d6bf663f0a73821d39354430265b6ad0056d97c047a58",
     "src/core/storage.js": "7e31cf6098099eb8ab280a9706590d00722f5d177fe9f2de5e07d773a8b98a83",
     "src/core/supply.js": "2f947c2cbef384626e29b95528e9a1d37488abe184998a3cfe160815162c6d73",
     "src/dashboard/dashboard.css": "e0f6827a289ed5b3444deaed428d0698f06b10aa98f4055b740453bd88253329",
@@ -40,10 +40,10 @@
     "src/popup/model.js": "3e2c27a2d04c0bce8a959f7b218f83ad480fe35fbd23cc95c6dcafae2c85ebb0",
     "src/popup/popup.css": "7a9fdc9cb41c1d91639de4615aff1bc9d8ea326d545be5a3899e9ed8fcdf916f",
     "src/popup/popup.js": "992b09d8b9622cc20510ae53236af2ac367a8f93c4f074eac76ac85c56cb709b",
-    "src/shared/constants.js": "dd8eee859c88b0073e03ff02edeedea2ec1486e716837132d2d62dcfa308937d",
+    "src/shared/constants.js": "d67ae30b8d66312ce8db599147822f4c3b83afb42c7ad4f6d36738a3c8e7d999",
     "src/shared/daily-report.js": "47f5be9b368f8e2c83be7dc14b1b2242918a1159ae48d1f4e86260a5ab321cbe",
     "src/shared/format.js": "67bb903c6470bd9fefd0165a3305c2d60c73f92c71018a0125508430dad5acdc",
-    "src/shared/i18n.js": "c5d277c6db8f63dfff1a7133addf206eb00e828e1291fdedb37b574fc28d047a",
+    "src/shared/i18n.js": "3084894401a783b707dc4d347b48ba717f248e76fbadf82b26d326b03c39f33f",
     "src/shared/trade-replay.js": "4565a74e0d6ec230a2258c7e02ffec1a2ac21f854ca0859c0f98ad97f755e011"
   }
 }

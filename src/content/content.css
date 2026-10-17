@@ -510,3 +510,24 @@ button.tango-calendar-day:focus-visible { outline:2px solid var(--brand); outlin
 .tango-calendar-actions .tango-tutorial-link { margin-top:0; color:var(--text); }
 :host([data-theme="light"]) .tango-shell { --bg:#f5f7f2; --panel-2:#f0f4ec; --line:rgba(35,55,28,.16); --muted:#5c6658; --text:#1d281b; }
 @media(max-width:480px) { .tango-panel { width:min(396px,calc(100vw - 16px)); } .tango-header-actions { gap:4px; } }
+
+/* Resizing affects only Tango floating UI; controls and amounts share one zoom. */
+.tango-bar { overflow: auto; }
+.tango-resize-handle { position:absolute; z-index:4; touch-action:none; user-select:none; }
+.tango-resize-n,.tango-resize-s { left:10px; right:10px; height:6px; cursor:ns-resize; }
+.tango-resize-n { top:0; } .tango-resize-s { bottom:0; }
+.tango-resize-e,.tango-resize-w { top:10px; bottom:10px; width:6px; cursor:ew-resize; }
+.tango-resize-e { right:0; } .tango-resize-w { left:0; }
+.tango-resize-ne,.tango-resize-nw,.tango-resize-se,.tango-resize-sw { width:10px; height:10px; }
+.tango-resize-ne,.tango-resize-nw { top:0; } .tango-resize-se,.tango-resize-sw { bottom:0; }
+.tango-resize-ne,.tango-resize-se { right:0; } .tango-resize-nw,.tango-resize-sw { left:0; }
+.tango-resize-ne,.tango-resize-sw { cursor:nesw-resize; }
+.tango-resize-nw,.tango-resize-se { cursor:nwse-resize; }
+.tango-resize-handle:hover { background:rgba(198,250,116,.2); border-radius:4px; }
+.tango-header-actions { gap:4px; }
+.tango-header-actions .tango-icon-button { padding:0 6px; }
+
+.tango-token-strip { flex:1; overflow:hidden; }
+.tango-token-strip > :last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.tango-bottom-details > span { min-width:0; max-width:100%; overflow-wrap:anywhere; white-space:normal; }

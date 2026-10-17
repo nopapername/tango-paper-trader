@@ -1,7 +1,7 @@
 (function initConstants(global) {
   const Tango = global.Tango = global.Tango || {};
 
-  Tango.VERSION = '0.3.46';
+  Tango.VERSION = '0.3.47';
   Tango.STORAGE_KEY = 'tangoPaperTraderStateV1';
   Tango.SETTINGS_KEY = 'tangoPaperTraderSettingsV1';
   Tango.QUOTE_STALE_MS = 15_000;
@@ -28,7 +28,7 @@
     panelPosition: null,
     drawerPosition: null,
     barPosition: null,
-    barCollapsed: false,
+    barScale: 1, panelScale: 1, barCollapsed: false,
     panelCollapsed: false,
     initialBalanceSol: 100
   });

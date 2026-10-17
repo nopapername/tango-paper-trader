@@ -1,6 +1,6 @@
 # Tango Paper Trader Chrome Web Store submission draft
 
-Version: 0.3.46. Submission materials; Google review has not been performed.
+Version: 0.3.47. Submission materials; Google review has not been performed.
 
 ## 中文商店文案
 
@@ -84,7 +84,7 @@ Embedded Codex/Owl can block extension-created internal tabs; that is a browser 
 - Packaged icons: assets/icons/icon-16.png, icon-32.png, icon-48.png, icon-128.png.
 - Audio: GMGN Handgun / Kaching requested at runtime; synthesized local fallback. The publisher states there is no authorization issue; no independent license verification is claimed. See assets/NOTICE.txt and privacy policy.
 - Store promo: promo-440x280.png in this directory (outside the uploaded extension ZIP).
-- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Core trading and replay functions are unchanged; 0.3.46 refines styling. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
+- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Core trading and replay functions are unchanged; 0.3.47 refines styling. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
 - ZIP must contain manifest.json directly at root, not an extra wrapper directory.
 - Register/verify publisher account and contact information; select distribution and accurate content rating; accept applicable agreements personally.
 - User/developer must submit for review. This preparation does not submit, register, pay a fee or accept agreements.
@@ -95,3 +95,7 @@ Alongside token quantity, the detail trading panel displays the holding value in
 底部“今日盈亏”仅统计当前链在浏览器本地日期内卖出后的已实现净盈亏，跨天自动从新一天开始统计；不含未平仓浮盈浮亏，不重置余额、持仓或盈亏日历历史。
 
 The bottom Today PnL bar shows realized net PnL from sells on the current chain for the browser's local date. It starts a new daily total at midnight, excludes unrealized PnL, and preserves balances, positions and historical calendar records.
+
+底部盈亏框和详情交易面板支持拖动边框、四角等比例缩放（75%–150%），字号和按钮同步调整，分别记住尺寸，点击“↺”恢复默认大小。缩放不改变交易、报价、盈亏计算、余额或持仓。
+
+Drag an edge or corner to resize the bottom PnL bar and detail trading panel proportionally (75%–150%). Text and controls scale together; each surface remembers its size. Click ↺ to restore the default size. Resizing does not change trading, quotes, PnL calculations, balances or positions.
