@@ -14,7 +14,7 @@
     quickBuyLocks: new Map(), lastUrl: location.href, routeTimer: null,
     markerTimer: null, interactionUntil: 0, renderDeferralTimer: null, tradePending: false,
     refreshRetryTimer: null, refreshRetryDelay: 500,
-    calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    pnlDateKey: null, calendarOpen: false, calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     renderedMarkup: null, markerPayloads: new WeakMap(), markerFrameListeners: new WeakSet(),
     chartFrameRoutes: new WeakMap(), chartFrameReadyBeforeLoad: new WeakSet(),
     chartFrameAwaitingReady: new WeakSet(), chartFrameProbeIds: new WeakMap(), chartProbeSequence: 0,
@@ -2414,16 +2414,32 @@
     } catch { /* Audio can be blocked by browser policy; the visual confirmation remains. */ }
   }
 
+  function currentPnlDateKey() {
+    const date = new Date();
+    return calendarDateKey(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function refreshDailyPnl() {
+    if (runtime.extensionInvalidated || !runtime.settings?.enabled || !runtime.state?.initialized) return;
+    const key = currentPnlDateKey();
+    if (runtime.pnlDateKey === key) return;
+    runtime.pnlDateKey = key;
+    queueRender();
+  }
+
   function renderBar(summary) {
     const collapsed = runtime.settings.barCollapsed;
-    const usdSummary = canonicalUsdSummary();
-    const pnl = usdSummary ? usdSummary.pnlUsd : summary.totalPnlNative;
-    const pnlMoney = usdSummary ? usdMoney(pnl, true) : accountMoney(pnl, true);
+    const key = currentPnlDateKey();
+    runtime.pnlDateKey = key;
+    // Read the durable daily ledger directly: cached portfolio totals can span midnight.
+    // Use the same native/USD formatting as the calendar's day cells.
+    const pnl = Number(Tango.ChainView.daily(runtime.state, activeChain()?.id)[key]?.native || 0);
+    const pnlMoney = accountMoney(pnl, true);
     return `<div class="tango-bar tango-card ${esc(runtime.settings.pnlBarPosition)} ${collapsed ? 'collapsed' : ''}" style="${floatingStyle(runtime.settings.barPosition)}">
       <div class="tango-bar-main" data-action="toggle-drawer">
         ${collapsed ? `<strong class="${pnlClass(pnl)}">${pnlMoney}</strong>` : `
           <span class="tango-paper-badge tango-bar-paper">${t('paper')}</span>
-          <div class="tango-stat tango-pnl-hero"><strong class="${pnlClass(pnl)}">${pnlMoney}</strong><span>${t('pnl')}</span></div>`}
+          <div class="tango-stat tango-pnl-hero"><strong class="${pnlClass(pnl)}">${pnlMoney}</strong><span>${t('todayPnl')}</span></div>`}
         <span class="tango-bar-hint">${t('clickForPositions')} · ${summary.positionCount}</span>
       </div>
       <button class="tango-icon-button" data-action="collapse-bar">${collapsed ? '＋' : '－'}</button>
@@ -3515,8 +3531,8 @@
     document.addEventListener('change', handleQuickBuyAmountChange, true);
     await tickQuote();
     if (!runtime.extensionInvalidated) runtime.quoteTimer = setInterval(tickQuote, 3000);
-    runtime.markerTimer = setInterval(() => { if (!document.hidden) syncChartMarkers(); }, 1000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncChartMarkers(); });
+    runtime.markerTimer = setInterval(() => { if (!document.hidden) { refreshDailyPnl(); syncChartMarkers(); } }, 1000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { refreshDailyPnl(); syncChartMarkers(); } });
     runtime.routeTimer = setInterval(handleRouteChange, 150);
     runtime.quickBuyProbeTimer = setInterval(probeQuickBuyHealth, 750);
   }

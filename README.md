@@ -8,13 +8,15 @@
 
 Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet connection or real funds required.
 
-**当前版本 / Current version: 0.3.45**
+**当前版本 / Current version: 0.3.46**
 
 [中文使用指南](#中文使用指南) · [English guide](#english-guide) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 
 ## 中文使用指南
 
 [官方网站](https://tango-paper-lab.quirkylily.chatgpt.site/) · [详细使用教程](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
+
+底部“今日盈亏”按浏览器本地日期统计当前链今日卖出的已实现净盈亏，跨天自动从新一天开始统计；不包含未平仓浮盈浮亏，不重置余额、持仓或历史日历。
 
 ### 能做什么
 
@@ -111,6 +113,8 @@ Tango **完全免费，仅用于模拟交易与练习**。不连接钱包，不�
 ## English guide
 
 [Official website](https://tango-paper-lab.quirkylily.chatgpt.site/) · [Detailed tutorial (Chinese)](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
+
+The bottom Today PnL bar shows realized net PnL from sells on the current chain for the browser's local date. A new day starts a new daily total without resetting balances, positions, or calendar history; unrealized PnL is excluded.
 
 ### What you can do
 

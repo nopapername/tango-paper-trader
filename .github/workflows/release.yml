@@ -1,0 +1,100 @@
+name: Publish verified extension release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify package and publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REVISION: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: python
+        run: |
+          import hashlib, io, json, os, time, urllib.error, urllib.parse, urllib.request, zipfile
+          repo = os.environ['REPOSITORY']
+          revision = os.environ['REVISION']
+          tag = os.environ['RELEASE_TAG']
+          version = tag.removeprefix('v')
+          token = os.environ['GH_TOKEN']
+          assert tag == 'v' + version and all(c.isdigit() or c == '.' for c in version)
+          api_root = 'https://api.github.com/repos/' + repo
+
+          def request(url, data=None, method='GET', content_type='application/json', authenticated=True):
+              headers = {'User-Agent': 'Tango-release-workflow'}
+              if authenticated:
+                  assert urllib.parse.urlparse(url).hostname in ('api.github.com', 'uploads.github.com')
+                  headers.update({'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28'})
+              if data is not None:
+                  headers['Content-Type'] = content_type
+                  if isinstance(data, dict): data = json.dumps(data).encode()
+              req = urllib.request.Request(url, data=data, headers=headers, method=method)
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  return response.read()
+
+          def source(path):
+              url = 'https://raw.githubusercontent.com/' + repo + '/' + revision + '/' + path
+              for attempt in range(5):
+                  try: return request(url, authenticated=False)
+                  except urllib.error.HTTPError as error:
+                      if error.code != 404 or attempt == 4: raise
+                      time.sleep(3)
+
+          filename = 'tango-paper-trader-' + version + '.zip'
+          package = source('store-assets/' + filename)
+          checksum = source('store-assets/' + filename + '.sha256')
+          expected = checksum.decode().split()[0]
+          assert hashlib.sha256(package).hexdigest() == expected, 'ZIP checksum mismatch'
+          manifest = json.loads(source('store-assets/PACKAGE-SHA256.json'))
+          assert manifest['version'] == version
+          with zipfile.ZipFile(io.BytesIO(package)) as archive:
+              assert sorted(archive.namelist()) == sorted(manifest['files']), 'Unexpected ZIP file set'
+              assert len(archive.namelist()) == manifest['fileCount']
+              for name, digest in manifest['files'].items():
+                  assert hashlib.sha256(archive.read(name)).hexdigest() == digest, name
+              assert json.loads(archive.read('manifest.json'))['version'] == version
+          notes = source('store-assets/RELEASE-NOTES.md').decode()
+          assert filename in notes
+          try:
+              release = json.loads(request(api_root + '/releases/tags/' + urllib.parse.quote(tag)))
+          except urllib.error.HTTPError as error:
+              if error.code != 404: raise
+              release = json.loads(request(api_root + '/releases', {
+                  'tag_name': tag, 'target_commitish': revision,
+                  'name': 'Tango Paper Trader ' + tag + ' | 今日盈亏 / Today PnL',
+                  'body': notes, 'draft': True, 'prerelease': False
+              }, method='POST'))
+          release_url = api_root + '/releases/' + str(release['id'])
+          assets = {asset['name']: asset for asset in release['assets']}
+          uploads = [(filename, package, 'application/zip'),
+                     (filename + '.sha256', checksum, 'text/plain'),
+                     ('PACKAGE-SHA256.json', json.dumps(manifest, indent=2).encode() + b'\n', 'application/json')]
+          for name, data, kind in uploads:
+              digest = 'sha256:' + hashlib.sha256(data).hexdigest()
+              if name in assets:
+                  assert assets[name].get('digest') == digest, 'Existing asset differs: ' + name
+                  continue
+              upload_url = release['upload_url'].split('{')[0] + '?name=' + urllib.parse.quote(name)
+              asset = json.loads(request(upload_url, data, method='POST', content_type=kind))
+              assert asset['size'] == len(data), name
+              if asset.get('digest'): assert asset['digest'] == digest, name
+          published = json.loads(request(release_url, {
+              'body': notes, 'draft': False, 'prerelease': False, 'make_latest': 'true'
+          }, method='PATCH'))
+          assert not published['draft']
+          print('Published verified release:', published['html_url'])
+          print('ZIP SHA-256:', expected)

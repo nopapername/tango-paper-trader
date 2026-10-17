@@ -1,11 +1,13 @@
-# 0.3.45 verification
+# 0.3.46 verification / 验收记录
 
-- Fresh release verification: 1,315 tests passed; manifest validation passed. Build and independent read-only review passed during implementation.
-- Runtime messaging contains synchronous context-invalidated throws and asynchronous rejections. Confirmed dead contexts stop background quote requests and the quote interval; startup does not recreate that interval. Transient failures can recover, and unrelated programming errors are not silently suppressed.
-- Detail holdings retain token quantity and display the existing mark value in the current chain native asset, independently of the USD display preference. Unavailable valuation displays a dash; existing trade controls remain unchanged.
-- Six-chain native/USD display, quantity-change and missing-price tests passed. Real Chrome light/dark layout tests passed at 200/280/360 pixel widths with long symbols.
-- Read-only IAB acceptance passed on existing SOL and BSC holdings: native amounts match the panel valuation basis; all eight sell presets remain; measured holding text has no overflow. No page-level errors observed in that session.
-- Publisher confirmed the isolated extension-reload check: after opening a fresh 0.3.45 GMGN page, clearing old errors and reloading Tango without refreshing that page, no new error was added.
-- No test transactions, imports, resets or position cleanup were performed for this release. Existing positions were retained.
-- 43 installed runtime files match the candidate build and ZIP entry-by-entry by SHA-256. ZIP SHA-256: 7796416373b76befdcf85de58009371d758b2f3ad32d760259728e07f3197dc3.
-- Main synchronization is recorded in Git history. GitHub Release: https://github.com/nopapername/tango-paper-trader/releases/tag/v0.3.45 . Chrome Web Store approval is not claimed.
+- 2026-10-17: full local regression: 1,319 tests passed, zero failures; manifest validation passed.
+- The bottom bar reads the current chain's complete daily realized-PnL ledger for the browser's local date, rather than a cached cumulative portfolio summary. Native/USD formatting matches calendar day cells.
+- Midnight rollover is checked on the existing visible-page timer and when the page becomes visible. No additional polling timer or account writes were introduced.
+- Controlled-clock tests cover midnight, empty days, all six chain ledgers, negative/collapsed/USD display, and unchanged state. Actual overnight browser waiting was not performed.
+- Publisher manually confirmed that the displayed Today PnL matches today's calendar value, balances and holdings remain unchanged, and historical calendar days remain available. The agent lacked browser controls for this acceptance; this is publisher-reported verification.
+- Other cumulative account/PnL views and trading calculations are unchanged. No trades, imports, resets or cleanup were performed for this change.
+- ZIP contains 43 runtime files at its root. Each ZIP entry matches PACKAGE-SHA256.json and the publishing files by SHA-256.
+- ZIP SHA-256: c02dfd6e75a07de5e54ff562df451b7eec8e779bd3671201c312142b680c5c0a
+- Store screenshots remain historical captures from 0.3.38; they are not new 0.3.46 screenshots.
+- Permissions and privacy behavior are unchanged. Chrome Web Store submission/review is not performed by this synchronization.
+- Release: https://github.com/nopapername/tango-paper-trader/releases/tag/v0.3.46

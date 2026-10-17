@@ -1,6 +1,6 @@
 # Tango Paper Trader English listing
 
-Version 0.3.45
+Version 0.3.46
 
 Name: Tango Paper Trader
 
@@ -18,3 +18,5 @@ Review recorded buy/sell points from History or token detail pages. A dashed fil
 Paper data stays in the current browser. Tango reads public GMGN market observations and may request reference quotes from CoinGecko and DEX Screener. Simulated results do not guarantee live performance. Site changes and missing quotes can limit compatibility.
 
 Alongside token quantity, the detail trading panel displays the holding value in the chain native asset (such as SOL or BNB). Unavailable valuations show a placeholder; execution calculations are unchanged.
+
+The bottom Today PnL bar shows realized net PnL from sells on the current chain for the browser's local date. It starts a new daily total at midnight, excludes unrealized PnL, and preserves balances, positions and historical calendar records.
