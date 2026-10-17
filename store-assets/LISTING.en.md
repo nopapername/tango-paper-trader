@@ -1,6 +1,6 @@
 # Tango Paper Trader English listing
 
-Version 0.3.49
+Version 0.3.50
 
 Name: Tango Paper Trader
 
@@ -24,3 +24,5 @@ The bottom Today PnL bar shows realized net PnL from sells on the current chain 
 Drag an edge or corner to resize the bottom PnL bar and detail trading panel proportionally (75%–150%). Text and controls scale together; each surface remembers its size. Click ↺ to restore the default size. Resizing does not change trading, quotes, PnL calculations, balances or positions.
 
 In single-chain trenches, the primary paper button follows the explicit GMGN column amount and the secondary button follows its current native preset. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action. Combined cards use Tango native-coin buy presets 1 and 2 for their own chain, without converting GMGN mixed-column amounts.
+
+The popup includes the detailed plugin guide and author @oooooyoung X profile next to Privacy. External pages open only when clicked.

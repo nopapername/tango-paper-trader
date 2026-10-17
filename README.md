@@ -8,7 +8,11 @@
 
 Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet connection or real funds required.
 
-**当前版本 / Current version: 0.3.49**
+**当前版本 / Current version: 0.3.50**
+
+0.3.50：扩展弹窗新增插件使用教程和作者 @oooooyoung 入口；保留隐私与新人扫链教程，交易及账户逻辑不变。
+
+0.3.50 adds the official plugin guide and author @oooooyoung links to the popup, retaining privacy and beginner-guide links. Trading and account behavior are unchanged.
 
 [中文使用指南](#中文使用指南) · [English guide](#english-guide) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 

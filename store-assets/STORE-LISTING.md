@@ -1,6 +1,6 @@
 # Tango Paper Trader Chrome Web Store submission draft
 
-Version: 0.3.49. Submission materials; Google review has not been performed.
+Version: 0.3.50. Submission materials; Google review has not been performed.
 
 ## 中文商店文案
 
@@ -104,3 +104,7 @@ Drag an edge or corner to resize the bottom PnL bar and detail trading panel pro
 单链时，主快买跟随 GMGN 对应列的明确金额，2 号按钮跟随 GMGN 当前原生预设；留空保留正数模拟兜底，明确为 0 或无效值时禁用。组合链时，两按钮分别使用卡片所属链的 Tango 第 1、2 个原生币买入预设，不换算 GMGN 组合栏金额。
 
 In single-chain trenches, the primary paper button follows the explicit GMGN column amount and the secondary button follows its current native preset. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action. Combined cards use Tango native-coin buy presets 1 and 2 for their own chain, without converting GMGN mixed-column amounts.
+
+扩展弹窗提供插件详细使用教程，并在隐私入口旁显示作者 @oooooyoung 的 X 主页链接；仅在点击后打开外部页面。
+
+The popup includes the detailed plugin guide and author @oooooyoung X profile next to Privacy. External pages open only when clicked.

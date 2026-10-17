@@ -1,6 +1,6 @@
 # Tango Paper Trader 谷歌商店后台填写教程
 
-适用安装包：0.3.49。资料日期：2026-10-17。以下是准备好的填写内容，不表示已获 Google 审核批准。后台字段可能随账号、地区和界面版本变化；身份、地址、邮箱及经营身份必须填写发布者自己的真实信息。
+适用安装包：0.3.50。资料日期：2026-10-17。以下是准备好的填写内容，不表示已获 Google 审核批准。后台字段可能随账号、地区和界面版本变化；身份、地址、邮箱及经营身份必须填写发布者自己的真实信息。
 
 ## 1 注册与账号设置
 
@@ -18,7 +18,7 @@
 
 ## 2 上传软件包
 
-点击 Add new item，上传同目录 tango-paper-trader-0.3.49.zip。打开 Package，确认名称 Tango Paper Trader、版本0.3.49、Manifest V3。
+点击 Add new item，上传同目录 tango-paper-trader-0.3.50.zip。打开 Package，确认名称 Tango Paper Trader、版本0.3.50、Manifest V3。
 
 ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上传整个 GitHub 仓库 ZIP，不要把 store-assets、用户 JSON 备份和测试日志一起上传。
 
@@ -51,7 +51,7 @@ ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上�
 | Screenshot 5 | screenshot-03-chart-refresh.jpg |
 | Marquee 1400×560 | 未制作，非必需项可留空 |
 
-五张截图均为1280×800 JPEG，来自实际0.3.38页面；0.3.49保留这些功能，但精修了字号、间距和颜色。上传后检查裁切、排序和清晰度。推广图和截图都不上传到 Package 页。
+五张截图均为1280×800 JPEG，来自实际0.3.38页面；0.3.50保留这些功能，但精修了字号、间距和颜色。上传后检查裁切、排序和清晰度。推广图和截图都不上传到 Package 页。
 
 ## 5 隐私规范 Privacy practices
 
@@ -89,7 +89,7 @@ All extension application logic is packaged locally. For a persistently empty id
 
 ### 数据类型 Data usage
 
-本地处理也必须披露。下面是根据0.3.49行为的填写建议，按后台具体定义核对：
+本地处理也必须披露。下面是根据0.3.50行为的填写建议，按后台具体定义核对：
 
 | 数据类别 | 当前填写建议及范围 |
 | --- | --- |
@@ -113,7 +113,7 @@ Limited Use 三项声明：仅在核对与实际行为一致后勾选“不出�
 
 https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 
-0.3.49隐私政策与本轮上架资料随此版本一并发布。提交前请在未登录GitHub的窗口验证该链接公开可访问。
+0.3.50隐私政策与本轮上架资料随此版本一并发布。提交前请在未登录GitHub的窗口验证该链接公开可访问。
 
 ## 6 测试说明 Test instructions
 
@@ -136,7 +136,7 @@ https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 
 ## 8 最后检查与提交
 
-确认版本0.3.49、安装ZIP含43文件、图标及5张截图、长描述、支持入口、公开隐私政策、权限理由、数据声明与测试说明都已填写。0.3.49已通过1,348项本地回归，完成六链及组合链的小额模拟交易和金额预设验收；提交前再核对后台预览。
+确认版本0.3.50、安装ZIP含43文件、图标及5张截图、长描述、支持入口、公开隐私政策、权限理由、数据声明与测试说明都已填写。0.3.50运行完整回归测试，并由用户确认弹窗教程与作者入口显示及跳转正常；六链交易验收记录属于此前0.3.49。本轮未新增交易，提交前再核对后台预览。
 
 建议选择审核通过后手动发布，避免未经最终检查自动上线。保存所有资料；具体字段和提示以你账号的实际后台为准。本文不代替实际审核结果。
 
@@ -158,12 +158,8 @@ GMGN入口统一为“打开 GMGN / Open GMGN”，无邀请入口及仅保存�
 简体中文为默认扩展元数据，同时保留英文；插件内语言偏好不变。英文隐私政策使用当前按钮名称“Open GMGN”。
 
 
-## 0.3.49 本次变更
+## 0.3.50 本次变更
 
-单链时，主快买跟随 GMGN 对应列的明确金额，2 号按钮跟随 GMGN 当前原生预设；留空保留正数模拟兜底，明确为 0 或无效值时禁用。组合链时，两按钮分别使用卡片所属链的 Tango 第 1、2 个原生币买入预设，不换算 GMGN 组合栏金额。
+扩展弹窗新增“插件使用教程 / Plugin user guide”，打开 https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/ 。隐私入口旁新增“作者：@oooooyoung”，打开 https://x.com/oooooyoung 。两个入口均由用户点击后在新标签打开，不嵌入远程组件、不新增权限，保留原有隐私入口与新人扫链教程。
 
-修复组合控件延迟挂载但地址不变时的快买无响应；组合账户窗口继续保留所查看的单链账户并显示链标识。权限、隐私政策、邀请码和核心记账逻辑不变。
-
-验证：1,348项测试通过；本轮在线确认12笔买入、14笔卖出，测试余仓已平，原有仓位未操作。数据面板内部页本轮无法自动访问，声音无法由工具听觉确认，未将这两项列作本轮在线通过。
-
-In single-chain trenches, the primary paper button follows the explicit GMGN column amount and the secondary button follows its current native preset. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action. Combined cards use Tango native-coin buy presets 1 and 2 for their own chain, without converting GMGN mixed-column amounts.
+用户已确认入口显示和跳转正常；完整回归结果与安装包哈希见 VERIFICATION.md。交易、报价、盈亏、账户存储、权限、隐私政策及邀请码行为不变。本轮没有新增模拟交易，也没有向 Chrome Web Store 提交。

@@ -247,7 +247,7 @@
           <small class="reset-note">${t('resetWarning')}</small>
           <button class="button secondary" id="reset-all-button">${allChainsLabel()} · ${t('resetAccount')}</button>
         </details>
-        <button class="button" id="dashboard">${t('openDashboard')}</button><button class="button secondary" id="gmgn">${t('referralLink')} →</button><a class="tango-tutorial-link" href="https://t.co/H2RSVQV4sX" target="_blank" rel="noopener noreferrer">${t('chainTutorial')}</a><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a></div>
+        <button class="button" id="dashboard">${t('openDashboard')}</button><button class="button secondary" id="gmgn">${t('referralLink')} →</button><a class="tango-tutorial-link" href="https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/" target="_blank" rel="noopener noreferrer">${language() === 'zh-CN' ? '插件使用教程' : 'Plugin user guide'}</a><a class="tango-tutorial-link" href="https://t.co/H2RSVQV4sX" target="_blank" rel="noopener noreferrer">${t('chainTutorial')}</a><div class="privacy-links"><a href="privacy.html" target="_blank" rel="noopener noreferrer">${t('privacyPolicy')}</a><span aria-hidden="true">·</span><a href="https://x.com/oooooyoung" target="_blank" rel="noopener noreferrer">作者：@oooooyoung</a></div>
       </div>`;
     }
     if (statusMessage) app.innerHTML += `<div class="disabled-note storage-status">${esc(statusMessage)}</div>`;

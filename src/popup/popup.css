@@ -65,7 +65,7 @@ body{background:var(--bg);color:var(--text);margin:0;width:360px}
 
 .button.secondary,:root[data-theme="light"] .button.secondary{color:var(--text)}
 
-.privacy-links{font-size:12px;line-height:1.6;margin-bottom:12px}.privacy-links a{color:inherit;text-decoration:underline;text-underline-offset:3px}
+.privacy-links{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12px;line-height:1.6;margin-bottom:12px}.privacy-links a{white-space:nowrap}.privacy-links a{color:inherit;text-decoration:underline;text-underline-offset:3px}
 
 .tango-tutorial-link { display:block; margin:10px 0; font-size:12px; line-height:1.5; text-align:center; overflow-wrap:anywhere; color:var(--text); text-underline-offset:3px; }
 
