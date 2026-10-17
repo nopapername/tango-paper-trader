@@ -1,6 +1,6 @@
 # Tango Paper Trader 谷歌商店后台填写教程
 
-适用安装包：0.3.47。资料日期：2026-10-17。以下是准备好的填写内容，不表示已获 Google 审核批准。后台字段可能随账号、地区和界面版本变化；身份、地址、邮箱及经营身份必须填写发布者自己的真实信息。
+适用安装包：0.3.49。资料日期：2026-10-17。以下是准备好的填写内容，不表示已获 Google 审核批准。后台字段可能随账号、地区和界面版本变化；身份、地址、邮箱及经营身份必须填写发布者自己的真实信息。
 
 ## 1 注册与账号设置
 
@@ -18,7 +18,7 @@
 
 ## 2 上传软件包
 
-点击 Add new item，上传同目录 tango-paper-trader-0.3.47.zip。打开 Package，确认名称 Tango Paper Trader、版本0.3.47、Manifest V3。
+点击 Add new item，上传同目录 tango-paper-trader-0.3.49.zip。打开 Package，确认名称 Tango Paper Trader、版本0.3.49、Manifest V3。
 
 ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上传整个 GitHub 仓库 ZIP，不要把 store-assets、用户 JSON 备份和测试日志一起上传。
 
@@ -36,7 +36,7 @@ ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上�
 | Official URL / Verified publisher | 没有验证自己域名时留空；不要把 GitHub 仓库链接冒充已验证域名 |
 | Promotional video | 没有视频时留空，不填写无关视频 |
 
-0.3.47 已加入 _locales/zh_CN 和 _locales/en，并设置 default_locale 为 zh_CN。上传新版后核对后台简体中文默认语言与英文语言页；名称和简短说明由 manifest 本地化消息提供，长描述分别粘贴。浏览器显示名称会跟随其语言选择。插件内语言偏好仍由原有设置控制，不会重置。
+安装包包含 _locales/zh_CN 和 _locales/en，并设置 default_locale 为 zh_CN。上传新版后核对后台简体中文默认语言与英文语言页；名称和简短说明由 manifest 本地化消息提供，长描述分别粘贴。浏览器显示名称会跟随其语言选择。插件内语言偏好仍由原有设置控制，不会重置。
 
 ## 4 图像上传
 
@@ -51,7 +51,7 @@ ZIP 根目录直接是 manifest.json、src、assets 等安装文件。不要上�
 | Screenshot 5 | screenshot-03-chart-refresh.jpg |
 | Marquee 1400×560 | 未制作，非必需项可留空 |
 
-五张截图均为1280×800 JPEG，来自实际0.3.38页面；0.3.47保留这些功能，但精修了字号、间距和颜色。上传后检查裁切、排序和清晰度。推广图和截图都不上传到 Package 页。
+五张截图均为1280×800 JPEG，来自实际0.3.38页面；0.3.49保留这些功能，但精修了字号、间距和颜色。上传后检查裁切、排序和清晰度。推广图和截图都不上传到 Package 页。
 
 ## 5 隐私规范 Privacy practices
 
@@ -89,7 +89,7 @@ All extension application logic is packaged locally. For a persistently empty id
 
 ### 数据类型 Data usage
 
-本地处理也必须披露。下面是根据0.3.47行为的填写建议，按后台具体定义核对：
+本地处理也必须披露。下面是根据0.3.49行为的填写建议，按后台具体定义核对：
 
 | 数据类别 | 当前填写建议及范围 |
 | --- | --- |
@@ -113,7 +113,7 @@ Limited Use 三项声明：仅在核对与实际行为一致后勾选“不出�
 
 https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 
-0.3.47隐私政策与本轮上架资料随此版本一并发布。提交前请在未登录GitHub的窗口验证该链接公开可访问。
+0.3.49隐私政策与本轮上架资料随此版本一并发布。提交前请在未登录GitHub的窗口验证该链接公开可访问。
 
 ## 6 测试说明 Test instructions
 
@@ -136,7 +136,7 @@ https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md
 
 ## 8 最后检查与提交
 
-确认版本0.3.47、安装ZIP含43文件、图标及5张截图、长描述、支持入口、公开隐私政策、权限理由、数据声明与测试说明都已填写。0.3.47已通过本地回归、SOL/BSC持仓原生币显示验收及扩展重载无新增报错的人工对照；提交前再核对后台预览。
+确认版本0.3.49、安装ZIP含43文件、图标及5张截图、长描述、支持入口、公开隐私政策、权限理由、数据声明与测试说明都已填写。0.3.49已通过1,348项本地回归，完成六链及组合链的小额模拟交易和金额预设验收；提交前再核对后台预览。
 
 建议选择审核通过后手动发布，避免未经最终检查自动上线。保存所有资料；具体字段和提示以你账号的实际后台为准。本文不代替实际审核结果。
 
@@ -158,10 +158,12 @@ GMGN入口统一为“打开 GMGN / Open GMGN”，无邀请入口及仅保存�
 简体中文为默认扩展元数据，同时保留英文；插件内语言偏好不变。英文隐私政策使用当前按钮名称“Open GMGN”。
 
 
-## 0.3.47 本次变更
+## 0.3.49 本次变更
 
-底部盈亏框和详情交易面板支持拖动边框、四角等比例缩放（75%–150%），字号和按钮同步调整，分别记住尺寸，点击“↺”恢复默认大小。缩放不改变交易、报价、盈亏计算、余额或持仓。
+单链时，主快买跟随 GMGN 对应列的明确金额，2 号按钮跟随 GMGN 当前原生预设；留空保留正数模拟兜底，明确为 0 或无效值时禁用。组合链时，两按钮分别使用卡片所属链的 Tango 第 1、2 个原生币买入预设，不换算 GMGN 组合栏金额。
 
-验证：1,332项本地测试通过。独立本地Chrome布局夹具覆盖长代币名、大金额、全部交易按钮和三档缩放；用户已在GMGN确认缩放、尺寸记忆与恢复默认正常。本次未新增模拟交易，不改变历史账户。
+修复组合控件延迟挂载但地址不变时的快买无响应；组合账户窗口继续保留所查看的单链账户并显示链标识。权限、隐私政策、邀请码和核心记账逻辑不变。
 
-底部今日盈亏继续按当前链、本地日期统计已实现净盈亏；日历历史、余额和持仓不重置。
+验证：1,348项测试通过；本轮在线确认12笔买入、14笔卖出，测试余仓已平，原有仓位未操作。数据面板内部页本轮无法自动访问，声音无法由工具听觉确认，未将这两项列作本轮在线通过。
+
+In single-chain trenches, the primary paper button follows the explicit GMGN column amount and the secondary button follows its current native preset. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action. Combined cards use Tango native-coin buy presets 1 and 2 for their own chain, without converting GMGN mixed-column amounts.

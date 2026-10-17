@@ -29,3 +29,7 @@ The bottom Today PnL bar shows realized net PnL from sells on the current chain 
 底部盈亏框和详情交易面板支持拖动边框、四角等比例缩放（75%–150%），字号和按钮同步调整，分别记住尺寸，点击“↺”恢复默认大小。缩放不改变交易、报价、盈亏计算、余额或持仓。
 
 Drag an edge or corner to resize the bottom PnL bar and detail trading panel proportionally (75%–150%). Text and controls scale together; each surface remembers its size. Click ↺ to restore the default size. Resizing does not change trading, quotes, PnL calculations, balances or positions.
+
+单链时，主快买跟随 GMGN 对应列的明确金额，2 号按钮跟随 GMGN 当前原生预设；留空保留正数模拟兜底，明确为 0 或无效值时禁用。组合链时，两按钮分别使用卡片所属链的 Tango 第 1、2 个原生币买入预设，不换算 GMGN 组合栏金额。
+
+In single-chain trenches, the primary paper button follows the explicit GMGN column amount and the secondary button follows its current native preset. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action. Combined cards use Tango native-coin buy presets 1 and 2 for their own chain, without converting GMGN mixed-column amounts.

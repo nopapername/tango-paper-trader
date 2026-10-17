@@ -8,11 +8,17 @@
 
 Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet connection or real funds required.
 
-**当前版本 / Current version: 0.3.47**
+**当前版本 / Current version: 0.3.49**
 
 [中文使用指南](#中文使用指南) · [English guide](#english-guide) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 
 ## 中文使用指南
+
+0.3.49 修复了组合页刷新后控件延迟出现、URL 未变化时快买无响应的问题。
+
+单链时，主快买跟随 GMGN 对应列的明确金额，2 号按钮跟随 GMGN 当前原生预设；留空保留正数模拟兜底，明确为 0 或无效值时禁用。组合链时，两按钮分别使用卡片所属链的 Tango 第 1、2 个原生币买入预设，不换算 GMGN 组合栏金额。
+
+组合战壕中，Tango 根据每张卡片所属链显示模拟快买：主按钮使用该链第一个买入预设，第二按钮使用第二个预设，金额始终标明该链原生币。GMGN 组合栏的跨链计价金额不会转换或作为 Tango 下单金额使用。余额、今日盈亏、持仓抽屉和日历继续查看最近单链账户（首次进入时使用已选账户），并显示链标识；点击其他链的卡片只操作卡片所属链账户，不改变当前查看账户。单链页面的金额读取与操作保持原样。
 
 底部盈亏框与详情交易面板支持拖动边框、四角等比例缩放（75%–150%），字号和按钮同步调整，两个尺寸分别记忆。点击“↺”恢复默认大小；小窗口下内容可滚动查看，缩放不改变账户和交易计算。
 
@@ -113,6 +119,12 @@ Tango **完全免费，仅用于模拟交易与练习**。不连接钱包，不�
 模拟结果不保证真实交易表现，也不能反映全部流动性、税费、MEV、成交失败或市场冲击。
 
 ## English guide
+
+Version 0.3.49 fixes unresponsive paper quick buys when combined controls mount after a page reload without a URL change.
+
+In single-chain trenches, the primary paper button follows the explicit GMGN column amount and the secondary button follows its current native preset. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action. Combined cards use Tango native-coin buy presets 1 and 2 for their own chain, without converting GMGN mixed-column amounts.
+
+In combined trenches, each card uses its own chain account and native-coin buy presets: the primary button uses preset 1 and the secondary button uses preset 2. GMGN cross-chain column amounts are not converted or used as Tango order amounts. Existing balance, daily PnL, positions and calendar windows retain the most recently viewed single-chain account (or the selected account on first entry), with a visible chain label. Buying a card on another chain does not switch the viewed account. Single-chain amount inputs and workflows remain unchanged.
 
 Resize the bottom PnL bar and detail trading panel by dragging an edge or corner (75%–150% proportional scaling). Text and controls scale together; each surface remembers its size. Use ↺ to restore the default size. Small windows retain scrolling access; account data and trade calculations are unaffected.
 
@@ -219,7 +231,7 @@ Simulated results do not guarantee live performance or model every liquidity con
 
 ### Account and valuation details
 
-- Trading and chain-scoped portfolio operations are current-chain-only. Only the active chain supplies the balance, positions, history, and header asset. JSON import and export form a full six-chain backup.
+- Each paper order uses the token card's own chain account. Account windows show the active single chain, or retain the most recently viewed single-chain account in combined trenches; they never merge native balances across chains. JSON import and export form a full six-chain backup.
 - Changing common capital requires explicit confirmation and atomically resets every chain: balances, positions, trades, PnL/analytics, and calibrations, while preserving other settings.
 - Buy presets and network fee are per-chain; common capital is shared across all six independent chain accounts numerically, not converted. Sell presets, slippage, platform fee, confirmation, fast mode, sound, language, theme, enabled state, and selected chain are global.
 - First-run onboarding lets the user choose language and one common paper-capital amount, defaulting to 10. All six independent chain accounts receive that chosen numeric amount in their own native asset. First install opens the onboarding dashboard once; extension updates do not reopen onboarding.

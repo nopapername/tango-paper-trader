@@ -1,44 +1,43 @@
 ## 中文
 
-[官方网站](https://tango-paper-lab.quirkylily.chatgpt.site/) · [详细使用教程](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
+[官方网站](https://tango-paper-lab.quirkylily.chatgpt.site/) · [详细教程](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/) · [Chrome 商店](https://chromewebstore.google.com/detail/geajcgajdpbiaenjjneccjddbbmipdae)
 
-### 0.3.47 更新
+### 0.3.49 更新
 
-- 底部盈亏框和详情快捷交易面板可拖动边框、四角，按 **75%–150%** 等比例缩放，字号和按钮同步变化。
-- 两个面板分别记住尺寸，刷新后保留；点击 **↺** 恢复默认大小。原有拖动位置与收起功能保留。
-- 修复长代币名与大金额的布局溢出；限制窗口边界，小窗口保留滚动访问。
-- 防止缩放松手时误触交易按钮；兼容行情刷新、切页、总开关关闭及扩展连接失效的中断。
-- 本次仅为 UI 和布局偏好更新，不修改报价、成交、盈亏计算、余额或持仓；今日盈亏与日历历史继续保留。
-- 更新中英文文档、商店资料、ZIP 及校验文件。
+- 兼容 GMGN 新版组合战壕：按每张卡片所属链复用独立模拟账户，按钮明确显示 SOL、BNB、ETH 或 OKB。
+- 组合模式主按钮使用该链 Tango 第一个买入预设，2号按钮使用第二个预设；GMGN 组合栏金额不会跨链换算或改写模拟订单。
+- 修复刷新组合页后控件延迟挂载、URL不变时快买点击无响应的问题；稳定页面不会反复清理当前操作。
+- 组合页余额、今日盈亏、持仓抽屉和日历保留最近查看的单链账户并标注链；买其他链卡片不会混合余额。
+- 单链继续跟随 GMGN 的明确列金额与2号原生预设。留空保留正数模拟兜底，明确0或无效值禁用。
+- 保留面板缩放、历史日历、买卖复盘、横线、音效与导出。核心记账、权限、隐私政策和邀请码不变。
 
-### 验证与安装
+### 验证与更新
 
-**1,332 项本地测试通过**；独立本地 Chrome 布局测试覆盖两种窗口、三档缩放、长名称、大金额和完整按钮。用户已在 GMGN 手动确认缩放、尺寸记忆和恢复默认正常。本次未新增交易或重置账户。
+1,348项完整测试通过，35项金额/预设/组合链定向测试通过，独立复核通过。六链随机账本复算覆盖150次事件及最终平仓；本轮在线验收累计12笔买入、14笔卖出，测试余仓已清理，原有仓位未操作。修复后已验证组合页冷启动快买、各链金额、估值/盈亏、复盘、日历日报、PNG及横线刷新补画/隐藏。扩展内部数据面板与实际扬声器声音不属于本轮自动通过范围。
 
-下载下方 `tango-paper-trader-0.3.47.zip`，解压后选择直接包含 `manifest.json` 的目录安装。已有用户请在原目录替换文件、重新加载 Tango，并刷新所有 GMGN 页面；不要删除重装，以免丢失浏览器本地数据。更新前建议导出 JSON 备份。
+下载下面的 `tango-paper-trader-0.3.49.zip`，解压后加载直接包含 `manifest.json` 的目录。已有用户在原目录替换文件、重新加载扩展并刷新GMGN；不要删除重装。ZIP只包含43个安装文件，不含商店资料、日志或账户备份。建议更新前导出JSON备份。
 
-商店资料随仓库更新；现有截图仍注明原拍摄版本，不冒充本次新截图。本次未向 Google 提交审核。
+中英文上架资料已更新。商店截图仍保留0.3.38真实拍摄版本说明，不标为0.3.49截图；本次没有向Chrome Web Store上传或提交审核。
 
 ## English
 
-[Official website](https://tango-paper-lab.quirkylily.chatgpt.site/) · [Detailed tutorial (Chinese)](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/)
+[Official website](https://tango-paper-lab.quirkylily.chatgpt.site/) · [Detailed tutorial (Chinese)](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/) · [Chrome Web Store](https://chromewebstore.google.com/detail/geajcgajdpbiaenjjneccjddbbmipdae)
 
 ### Changes
 
-- Resize the bottom PnL bar and detail trading panel by dragging any edge or corner, with **75%–150% proportional scaling** of text, spacing and controls.
-- Each surface remembers its size across refreshes. Click **↺** to restore its default size; existing movement and collapse controls remain available.
-- Improve long-symbol and large-amount wrapping and keep surfaces within the viewport, with scrolling for constrained windows.
-- Guard resize-release clicks against accidental trading and cancel gestures cleanly on navigation, disablement or invalidated extension contexts.
-- This is a UI/layout-preferences update. Quotes, execution, PnL calculations, balances, positions, Today PnL and calendar history retain their existing behavior.
+- Support GMGN combined trenches with each card bound to its own supported chain, account and native denomination.
+- Combined primary/secondary paper buttons use that chain's Tango buy presets 1/2. Mixed-column GMGN amounts are not converted into paper-order amounts.
+- Fix unresponsive quick buys when combined controls mount after a reload without changing the URL. Stable routes do not repeatedly invalidate actions.
+- Balance, Today PnL, calendar and positions windows retain the most recently viewed single-chain account and label it. Other-chain card buys never merge balances.
+- Preserve single-chain explicit GMGN amounts and native secondary presets. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action.
+- Preserve resizing, history, replay, chart lines, sounds and exports. Core accounting, permissions, privacy policy and existing invitation code are unchanged.
 
-Validation: **1,332 local tests passed**. Isolated local Chrome fixtures covered two viewport sizes and three scales; the publisher manually confirmed the live GMGN resize/persistence/reset controls. No test trades, imports or account resets were performed for this update.
+Validation: 1,348 full regression tests and 35 targeted amount/preset/combined tests passed; independent code review completed. A separate six-chain oracle covers 150 seeded random events and final exits. The live audit confirmed 12 paper buys and 14 sells, closed its test positions and did not operate pre-existing holdings. Live checks include post-reload combined quick buys, chain-specific amounts, valuation/PnL, replay, daily-report PNG, and chart-line refresh/hide. Extension-internal dashboard pages and audible speaker output were not automatically revalidated this round.
 
-### Install / update
+Use the plugin ZIP below, not GitHub's source archive. Extract and load the directory containing manifest.json. Existing users should replace files in the same location, reload Tango and refresh GMGN; do not uninstall/reinstall. The package contains 43 runtime files and excludes store materials and user data. Export a JSON backup before updating.
 
-Use the plugin ZIP asset below, rather than GitHub's auto-generated source archive. Extract it and load the folder containing `manifest.json`. Existing users should update the same directory, reload the extension and refresh all GMGN tabs; do not uninstall/reinstall. Export a JSON backup before updating.
-
-The ZIP has 43 runtime files at its root and excludes store materials. Store screenshots retain their historical capture-version disclosure. No Chrome Web Store submission is performed by this release.
+Bilingual store materials are updated. Existing screenshots retain their actual 0.3.38 capture-version disclosure. This release does not upload or submit an update to the Chrome Web Store.
 
 ### SHA-256
 
-`df0896b066ed30d1e7e4dd2c9f2ee790e2eb3ac1c942decee3948c82aa2829ac`  `tango-paper-trader-0.3.47.zip`
+`d55e21549d064d7509fcd9b92e98878782b318f61092d5b3856e1d21ae41470e`  `tango-paper-trader-0.3.49.zip`

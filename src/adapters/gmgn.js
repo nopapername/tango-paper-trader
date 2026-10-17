@@ -819,12 +819,42 @@
     };
   }
 
+  function isCombinedTrenchPage(url = global.location?.href || '') {
+    let parsed;
+    try { parsed = new URL(url); } catch { return false; }
+    return parsed.hostname === 'gmgn.ai'
+      && (parsed.pathname === '/' || /^\/r\/[^/]+\/?$/.test(parsed.pathname))
+      && !parsed.searchParams.has('chain')
+      && Boolean(document.querySelector?.('[data-sentry-component="MixBuyAmount"]'));
+  }
+
+  function cardChain(card) {
+    const pageChain = chainFromUrl();
+    if (pageChain) return pageChain;
+    if (!isCombinedTrenchPage()) return null;
+    const declared = String(card?.getAttribute?.('data-trenches-token-chain') || '').toLowerCase();
+    const rawHref = card?.getAttribute?.('href');
+    let href;
+    try { href = new URL(rawHref || '', global.location?.origin || 'https://gmgn.ai'); } catch { return null; }
+    const linked = href.hostname === 'gmgn.ai' && isTokenDetailPage(href.href) ? chainFromUrl(href.href) : null;
+    if (!linked || (declared && declared !== linked)) return null;
+    const declaredAddress = card?.getAttribute?.('data-trenches-token-address');
+    if (declaredAddress && (!Tango.Chains.validateAddress(linked, declaredAddress)
+      || Tango.Chains.normalizeAddress(linked, declaredAddress)
+        !== Tango.Chains.normalizeAddress(linked, tokenAddressFromUrl(href.href)))) return null;
+    return linked;
+  }
+
+  function quickBuyChainAllowed(card, chain) {
+    return Boolean(chain && isTrenchPage() && cardChain(card) === chain);
+  }
+
   function isTrenchPage(url = global.location?.href || '') {
     const parsed = new URL(url);
     const chain = Tango.Chains.fromUrl(url);
     const trenchRoute = parsed.pathname === '' || parsed.pathname === '/'
       || /^\/r\/[^/]+\/?$/.test(parsed.pathname);
-    return parsed.hostname === 'gmgn.ai' && trenchRoute && Boolean(chain?.capabilities.trench);
+    return parsed.hostname === 'gmgn.ai' && trenchRoute && (Boolean(chain?.capabilities.trench) || isCombinedTrenchPage(url));
   }
 
   function isTokenDetailPage(url = global.location?.href || '') {
@@ -1526,10 +1556,12 @@
       || slot.__tangoQuickBuyCard !== card
       || slot.matches?.('.BuyButton-continer') !== true
       || slot.closest?.('[class~="group/a"]') !== card
-      || !isTrenchPage() || chainFromUrl() !== binding.chain
+      || !quickBuyChainAllowed(card, binding.chain)
       || cardGeneration(card) !== binding.generation
       || (binding.tradeAction?.key || 'BUY') !== quickBuyTradeAction(slot).key) return false;
-    if (Number(cardQuickBuyAmount(card, nativeQuickBuyControl(slot), slot, binding.amountNative)) !== Number(binding.amountNative)) return false;
+    const liveControl = nativeQuickBuyControl(slot);
+    if (Number(cardQuickBuyAmount(card, liveControl, slot, binding.amountNative)) !== Number(binding.amountNative)
+      || quickBuyAmountChain(card, liveControl, slot, binding.chain) !== (binding.amountChain || binding.chain)) return false;
     if (binding.state === 'resolving-identity') {
       return !binding.birth || quickBuyBirthMatchesBinding(binding.birth, binding);
     }
@@ -1558,7 +1590,7 @@
       && binding.policyKey === intent.policyKey
       && quickBuyBirthMatchesBinding(binding.birth, binding)
       && global.location?.href === intent.routeHref
-      && chainFromUrl() === intent.chain
+      && quickBuyChainAllowed(intent.card, intent.chain)
       && now <= intent.createdAt + QUICK_BUY_IDENTITY_INTENT_TTL_MS
       && evidence.href === intent.birth.firstAddressHref
       && intent.root?.isConnected && intent.card?.isConnected && intent.slot?.isConnected);
@@ -1604,7 +1636,7 @@
   }
 
   function applyPaperStateCopy(binding, state) {
-    const nativeSymbol = Tango.Chains.get(binding.chain)?.nativeSymbol || '';
+    const nativeSymbol = Tango.Chains.get(binding.amountChain || binding.chain)?.nativeSymbol || '';
     const tradeAction = binding.tradeAction || { side: 'BUY' };
     const readyCopy = tradeAction.side === 'SELL'
       ? `Tango Paper Sell ${tradeAction.breakeven ? 'Recover Cost' : tradeAction.valid ? tradeAction.sellPercent + '%' : 'unavailable'}`
@@ -1614,8 +1646,13 @@
       : (state === 'in-flight'
         ? 'Tango paper order is processing'
         : readyCopy);
-    binding.replacement.title = copy;
-    binding.replacement.setAttribute?.('aria-label', copy);
+    const presetNote = isCombinedTrenchPage() && tradeAction.side === 'BUY'
+      ? (binding.paperLabel === '模拟盘'
+        ? ' · 使用 Tango ' + Tango.Chains.get(binding.chain).name + ' 原生币买入预设'
+        : ' · Tango ' + Tango.Chains.get(binding.chain).name + ' native preset')
+      : '';
+    binding.replacement.title = copy + presetNote;
+    binding.replacement.setAttribute?.('aria-label', copy + presetNote);
   }
 
   function setPaperState(slot, binding, state) {
@@ -1833,9 +1870,29 @@
     return { side: 'SELL', key: valid ? `SELL:${sellPercent}` : 'SELL:UNSUPPORTED', sellPercent, breakeven: false, valid };
   }
 
+  // Combination mode reuses each target chain's own Tango native-coin
+  // presets. GMGN's cross-chain input currency is deliberately not an order unit.
+  let combinedBuyPresets = () => null;
+  function quickBuyAmountChain(_card, _nativeControl, _slot, targetChain) {
+    return targetChain;
+  }
+
+  function quickBuyAmountSymbol(card, slot, chain, control = nativeQuickBuyControl(slot)) {
+    return Tango.Chains.get(quickBuyAmountChain(card, control, slot, chain))?.nativeSymbol || '—';
+  }
+
   function cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol) {
     const action = quickBuyTradeAction(slot);
     if (action.side === 'SELL') return action.valid ? action.sellPercent || 1 : 0;
+    if (isCombinedTrenchPage()) {
+      const chain = cardChain(card);
+      if (!chain) return 0;
+      const slots = Array.from(card?.querySelectorAll?.('.BuyButton-continer') || []);
+      const secondary = slots.length > 1 && slots.includes(slot) && slots.at(-1) !== slot;
+      const presets = combinedBuyPresets(chain) || Tango.Chains.get(chain)?.defaultBuyPresets;
+      const value = Number(presets?.[secondary ? 1 : 0] ?? presets?.[0]);
+      return Number.isFinite(value) && value > 0 ? value : 0;
+    }
     const columnInput = trenchColumn(card)?.querySelector('[data-sentry-component="BuyAmountInput"] input');
     // The secondary preset is independent of the primary column input. The
     // current native action can also be the slot itself rather than a child.
@@ -1872,7 +1929,7 @@
     const replacement = document.createElement('button');
     replacement.type = 'button';
     const quickBuyProfile = applyLockedQuickBuyPresentation(replacement, slot);
-    renderQuickBuyContent(replacement, paperLabel, amountNative, chainDefinition.nativeSymbol, quickBuyTradeAction(slot));
+    renderQuickBuyContent(replacement, paperLabel, amountNative, quickBuyAmountSymbol(_card, slot, _chain, _nativeControl), quickBuyTradeAction(slot));
     return { replacement, quickBuyProfile };
   }
 
@@ -1904,11 +1961,11 @@
         return;
       }
       try {
-        if (chainFromUrl() !== chain) return;
+        if (!quickBuyChainAllowed(card, chain)) return;
         const evidence = cardAddressEvidence(card, chain);
         if (!evidence || evidence.address !== address) return;
         const clickMetadata = verifiedCardMetadata(card, address, chain);
-        if (chainFromUrl() !== chain) return;
+        if (!quickBuyChainAllowed(card, chain)) return;
         const token = {
           chain,
           address,
@@ -1925,6 +1982,9 @@
         await onQuickBuy({
           actionId, token: { ...token }, quote: { ...quote },
           amountNative, amountSol: amountNative, sourceUrl: evidence.href,
+          ...(isCombinedTrenchPage() ? { amountChain: binding.amountChain,
+            validate: () => liveQuickBuyIdentityMatches(slot.__tangoQuickBuyBinding)
+              && slot.__tangoQuickBuyBinding?.actionId === actionId } : {}),
           ...(binding.tradeAction?.side === 'SELL' ? {
             side: 'SELL', sellPercent: binding.tradeAction.sellPercent, breakeven: binding.tradeAction.breakeven
           } : {})
@@ -1965,7 +2025,7 @@
     const binding = {
       slot, key: '', chain, address: '', href: '', card, nativeControl: nativeControl || null,
       replacement, actionId, bindingNonce, generation, state: 'resolving-identity',
-      amountNative, paperLabel, policyKey, birth, birthAmountNative: amountNative, pendingOnly: false,
+      amountNative, amountChain: quickBuyAmountChain(card, nativeControl, slot, chain), paperLabel, policyKey, birth, birthAmountNative: amountNative, pendingOnly: false,
       tradeAction: quickBuyTradeAction(slot),
       onQuickBuy, chainDefinition, quickBuyProfile,
       cardGenerationIdentity: cardGenerationIdentity(card),
@@ -2017,7 +2077,7 @@
     });
     const nextBinding = Object.assign({}, binding, {
       slot, key: bindingKey, chain, address, href, card, actionId, bindingNonce, generation,
-      amountNative, paperLabel, state: 'ready', invalidAmount: false,
+      amountNative, amountChain: quickBuyAmountChain(card, nativeControl, slot, chain), paperLabel, state: 'ready', invalidAmount: false,
       tradeAction: quickBuyTradeAction(slot),
       policyKey, onQuickBuy, chainDefinition,
       cardGenerationIdentity: cardGenerationIdentity(card),
@@ -2034,7 +2094,7 @@
       }
       return false;
     }
-    renderQuickBuyContent(replacement, paperLabel, amountNative, chainDefinition.nativeSymbol, nextBinding.tradeAction);
+    renderQuickBuyContent(replacement, paperLabel, amountNative, quickBuyAmountSymbol(card, slot, chain, nativeControl), nextBinding.tradeAction);
     applyPaperStateCopy(nextBinding, 'ready');
     slot.dataset.tangoQuickBuy = '1';
     slot.dataset.tangoTokenAddress = address;
@@ -2129,7 +2189,7 @@
     }
   }
 
-  function quickBuyBindingMatches(slot, binding, chain = chainFromUrl()) {
+  function quickBuyBindingMatches(slot, binding, chain = cardChain(binding?.card)) {
     if (!binding || !slot?.isConnected || !binding.card?.isConnected || chain !== binding.chain) return false;
     if (slot.closest?.('[class~="group/a"]') !== binding.card) return false;
     if (!trenchColumn(binding.card)) return false;
@@ -2138,10 +2198,11 @@
     if (address !== binding.address || binding.key !== `${chain}:${address}`) return false;
     const nativeControl = nativeQuickBuyControl(slot);
     const amountNative = cardQuickBuyAmount(binding.card, nativeControl, slot, binding.amountNative);
-    return Number(amountNative) === Number(binding.amountNative);
+    return Number(amountNative) === Number(binding.amountNative)
+      && quickBuyAmountChain(binding.card, nativeControl, slot, chain) === (binding.amountChain || binding.chain);
   }
 
-  function quickBuyBindingIdentityDrifted(slot, binding, chain = chainFromUrl()) {
+  function quickBuyBindingIdentityDrifted(slot, binding, chain = cardChain(binding?.card)) {
     if (!binding || !slot?.isConnected || !binding.card?.isConnected || chain !== binding.chain) return true;
     if (slot.closest?.('[class~="group/a"]') !== binding.card) return true;
     const href = cardTokenHref(binding.card, chain);
@@ -2227,7 +2288,7 @@
       if (!slot?.isConnected || !binding?.card?.isConnected || !replacement?.isConnected) return true;
       const nativeControl = nativeQuickBuyControl(slot);
       if (nativeControl) return true;
-      if (binding.chain !== chain || slot.closest?.('[class~="group/a"]') !== binding.card) return true;
+      if (!quickBuyChainAllowed(binding.card, binding.chain) || slot.closest?.('[class~="group/a"]') !== binding.card) return true;
       if (replacement.dataset?.tangoPublished !== '1'
         || !Tango.NativeQuickBuyGuard?.isPaperActionTrusted?.(
           replacement, paperGuardIdentity(binding)
@@ -2264,24 +2325,28 @@
       const probe = probeSlots[(start + offset) % probeSlots.length];
       if (probe.kind === 'identity') {
         const binding = probe.slot?.__tangoQuickBuyBinding;
-        if (quickBuyBindingIdentityDrifted(probe.slot, binding, chain)) return true;
+        if (quickBuyBindingIdentityDrifted(probe.slot, binding, cardChain(binding?.card))
+          || quickBuyAmountChain(binding.card, probe.nativeControl, probe.slot, binding.chain) !== (binding.amountChain || binding.chain)
+          || (isCombinedTrenchPage() && Number(cardQuickBuyAmount(binding.card, probe.nativeControl, probe.slot, binding.amountNative)) !== Number(binding.amountNative))) return true;
         continue;
       }
       const nativeControl = probe.nativeControl || nativeQuickBuyControl(probe.slot);
       if (probe.kind === 'pending'
-        ? pendingQuickBuyReady(probe.slot, chain, nativeControl)
-        : unboundQuickBuySlotEligible(probe.slot, chain, nativeControl)) return true;
+        ? pendingQuickBuyReady(probe.slot, cardChain(probe.slot?.closest?.('[class~="group/a"]')), nativeControl)
+        : unboundQuickBuySlotEligible(probe.slot, cardChain(probe.slot?.closest?.('[class~="group/a"]')), nativeControl)) return true;
     }
     return false;
   }
 
   function discoverTokenCards(
     onQuickBuy, defaultAmountSol = 0.1, paperLabel = 'PAPER', roots,
-    { fast = false, addedRoots = [], removedRoots = [], hrefMutations = [], policyKey = '' } = {}
+    { fast = false, addedRoots = [], removedRoots = [], hrefMutations = [], policyKey = '', onChain = () => {}, readChainPresets = () => null } = {}
   ) {
     pruneExpiredQuickBuyIdentityIntents();
+    combinedBuyPresets = readChainPresets;
     const incremental = Array.isArray(roots) && roots.length > 0;
-    const chain = chainFromUrl();
+    const pageChain = chainFromUrl();
+    const chain = pageChain;
     const ineligibleBirthRoots = tokenItemRootsInMutationRoots(removedRoots);
     const hrefDiscontinuityRoots = hrefDiscontinuityTokenRoots(hrefMutations, chain);
     hrefDiscontinuityRoots.forEach((root) => {
@@ -2295,8 +2360,7 @@
       if (!incremental) clearQuickBuy(false);
       return 0;
     }
-    const chainDefinition = Tango.Chains.get(chain);
-    if (!chainDefinition) return 0;
+    if (!pageChain && !isCombinedTrenchPage()) return 0;
     const births = recordQuickBuyCardBirths(addedRoots, chain, Date.now(), ineligibleBirthRoots);
     const nativeSlots = quickBuySlots(roots, fast ? FAST_QUICK_BUY_SLOT_LIMIT : Infinity);
     if (!incremental) {
@@ -2306,6 +2370,7 @@
       });
     }
     let injected = 0;
+    const warmedChains = new Set();
     for (const slot of nativeSlots) {
       if (!slot?.isConnected) {
         restoreQuickBuySlot(slot, false);
@@ -2321,6 +2386,16 @@
         }
         continue;
       }
+      const chain = cardChain(card);
+      const chainDefinition = Tango.Chains.get(chain);
+      if (!chainDefinition) {
+        if (existingBinding) restoreQuickBuySlot(slot, false);
+        continue;
+      }
+      const amountChain = quickBuyAmountChain(card, nativeControl, slot, chain);
+      if (!pageChain) for (const id of [chain, amountChain].filter(Boolean)) {
+        if (!warmedChains.has(id)) { warmedChains.add(id); onChain(id); }
+      }
       const birth = quickBuyBirthForSlot(births, card, slot, chain);
       if (existingBinding && existingBinding.card !== card) {
         advanceCardGeneration(existingBinding.card);
@@ -2334,7 +2409,7 @@
       }
       const amountSol = cardQuickBuyAmount(card, nativeControl, slot, defaultAmountSol);
       const pendingAmount = amountSol > 0 ? amountSol : (Number(defaultAmountSol) || 0.1);
-      if (!(amountSol > 0) && quickBuyTradeAction(slot).side === 'BUY') {
+      if ((!(amountSol > 0) || !amountChain) && quickBuyTradeAction(slot).side === 'BUY') {
         if (holdQuickBuyPending(slot, existingBinding, nativeControl)
           || createPendingQuickBuy(slot, card, nativeControl, chain, chainDefinition, 0, paperLabel, birth, onQuickBuy, policyKey)) {
           const invalid = slot.__tangoQuickBuyBinding;
@@ -2446,7 +2521,7 @@
         && existingBinding.href === href
         && existingBinding.generation === cardGeneration(card)
         && (existingBinding.tradeAction?.key || 'BUY') === quickBuyTradeAction(slot).key
-        && Number(existingBinding.amountNative) === amountSol && existingBinding.paperLabel === paperLabel
+        && Number(existingBinding.amountNative) === amountSol && existingBinding.amountChain === amountChain && existingBinding.paperLabel === paperLabel
         && existingBinding.policyKey === policyKey
         && existingBinding.card === card) {
         // GMGN can reconcile the original control back into the slot. Remove it again fail-closed.
@@ -2498,7 +2573,7 @@
       const binding = {
         slot, key: bindingKey, chain, address, href, card, nativeControl, replacement,
         actionId, bindingNonce, generation, state: existingOperation ? 'in-flight' : 'ready',
-        amountNative: amountSol, paperLabel, policyKey, onQuickBuy, chainDefinition, quickBuyProfile,
+        amountNative: amountSol, amountChain: quickBuyAmountChain(card, nativeControl, slot, chain), paperLabel, policyKey, onQuickBuy, chainDefinition, quickBuyProfile,
         tradeAction: quickBuyTradeAction(slot),
         pendingOnly: false,
         cardGenerationIdentity: liveCardGenerationIdentity,
@@ -2578,11 +2653,11 @@
     if (!isTrenchPage() || typeof readDisplay !== 'function') return clearPositionBadges();
     const cards = new Map();
     const visited = new Set();
-    const chain = chainFromUrl();
     for (const slot of trackedQuickBuySlots) {
       const binding = slot.__tangoQuickBuyBinding;
       const card = binding?.card;
-      if (!slot.isConnected || !card?.isConnected || visited.has(card) || binding.chain !== chain
+      const chain = cardChain(card);
+      if (!chain || !slot.isConnected || !card?.isConnected || visited.has(card) || binding.chain !== chain
         || slot.closest?.('[class~="group/a"]') !== card || !trenchColumn(card)) continue;
       visited.add(card);
       // Read-only holdings are independent of the quick-buy amount/pending action.
@@ -2688,7 +2763,7 @@
     _quickBuyIntentCount: () => quickBuyIntents.size,
     _markChartFrameReady: markChartFrameReady, _invalidateChartFrame: invalidateChartFrame,
     _clearChartTrust: clearChartTrust, _hasTrustedChart: hasTrustedChart,
-    _isTrenchPage: isTrenchPage,
+    _isTrenchPage: isTrenchPage, _isCombinedTrenchPage: isCombinedTrenchPage,
     _isTokenDetailPage: isTokenDetailPage,
     _clearTrenchSnapshots: () => trenchSnapshots.clear()
   };

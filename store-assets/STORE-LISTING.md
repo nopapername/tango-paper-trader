@@ -1,6 +1,6 @@
 # Tango Paper Trader Chrome Web Store submission draft
 
-Version: 0.3.47. Submission materials; Google review has not been performed.
+Version: 0.3.49. Submission materials; Google review has not been performed.
 
 ## 中文商店文案
 
@@ -49,7 +49,8 @@ Single purpose / 单一用途：Provide local simulated Meme-token trading pract
 Privacy URL after publishing and verifying the updated policy: https://github.com/nopapername/tango-paper-trader/blob/main/PRIVACY.md . The same policy is included in privacy.html and linked inside the extension. Verify the published main-branch policy before entering that URL in a submission.
 
 Support: https://github.com/nopapername/tango-paper-trader/issues
-Homepage: https://github.com/nopapername/tango-paper-trader
+Homepage: https://tango-paper-lab.quirkylily.chatgpt.site/
+Tutorial: https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/
 
 Data-use answers must describe actual behavior, not assume that local-first means no data handling. The extension handles paper activity/settings locally and reads GMGN website content. External quote requests contain public asset identifiers/token contracts and expose ordinary network metadata to providers. No paper-account server upload, advertising analytics, wallet credentials, authentication collection or real financial transactions are implemented. Review the current dashboard's field definitions before selecting categories; do not claim browser-wide history collection or upload of paper balances.
 
@@ -71,7 +72,7 @@ Regression coverage: healthy/disabled/unrelated frame preservation; one recovery
 2. Open first-run setup, select language and capital. Click “Open GMGN” to save setup and open the existing GMGN destination.
 3. Confirm the Tango master switch, paper balance and clearly marked paper controls. Never click GMGN's real trading controls.
 4. Select a token with available public quotes; paper-buy a small amount, then use 25% and 100% paper-sell. Confirm fills and sounds; no real funds move. A pending operation must settle before the next independent action.
-5. Repeat on BSC; switching chains keeps separate accounts. Existing data must not be reset for ordinary testing.
+5. Repeat on BSC, Base, Ethereum, Robinhood Chain and X Layer. In combined trenches, check each card's native preset and chain identity; account windows retain the viewed account. Reload a combined page and confirm the paper button opens its confirmation. Existing data must not be reset for ordinary testing.
 6. Open View trades after closing; inspect points/ledger and explanatory labels. Missing chart/candle data can legitimately limit plotted points.
 7. Open the dashboard in standard Chrome. Check tabs, search, calendar daily reports, PNG/CSV/JSON export. Do not import/reset a user's account.
 8. Review the Open GMGN action, packaged privacy page, tutorial link and support URL. No background referral-code replacement occurs.
@@ -84,7 +85,7 @@ Embedded Codex/Owl can block extension-created internal tabs; that is a browser 
 - Packaged icons: assets/icons/icon-16.png, icon-32.png, icon-48.png, icon-128.png.
 - Audio: GMGN Handgun / Kaching requested at runtime; synthesized local fallback. The publisher states there is no authorization issue; no independent license verification is claimed. See assets/NOTICE.txt and privacy policy.
 - Store promo: promo-440x280.png in this directory (outside the uploaded extension ZIP).
-- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. Core trading and replay functions are unchanged; 0.3.47 refines styling. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
+- Actual feature screenshots: screenshot-01 through screenshot-05 in this directory, JPEG 1280x800; captured from GMGN with Tango 0.3.38. They show previously available features; combined-trench controls and later UI refinements are not demonstrated in these older captures. Screenshots are prior-version captures, not final-style verification. Original captures are retained separately; only empty browser-output margins were removed and dimensions normalized.
 - ZIP must contain manifest.json directly at root, not an extra wrapper directory.
 - Register/verify publisher account and contact information; select distribution and accurate content rating; accept applicable agreements personally.
 - User/developer must submit for review. This preparation does not submit, register, pay a fee or accept agreements.
@@ -99,3 +100,7 @@ The bottom Today PnL bar shows realized net PnL from sells on the current chain 
 底部盈亏框和详情交易面板支持拖动边框、四角等比例缩放（75%–150%），字号和按钮同步调整，分别记住尺寸，点击“↺”恢复默认大小。缩放不改变交易、报价、盈亏计算、余额或持仓。
 
 Drag an edge or corner to resize the bottom PnL bar and detail trading panel proportionally (75%–150%). Text and controls scale together; each surface remembers its size. Click ↺ to restore the default size. Resizing does not change trading, quotes, PnL calculations, balances or positions.
+
+单链时，主快买跟随 GMGN 对应列的明确金额，2 号按钮跟随 GMGN 当前原生预设；留空保留正数模拟兜底，明确为 0 或无效值时禁用。组合链时，两按钮分别使用卡片所属链的 Tango 第 1、2 个原生币买入预设，不换算 GMGN 组合栏金额。
+
+In single-chain trenches, the primary paper button follows the explicit GMGN column amount and the secondary button follows its current native preset. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action. Combined cards use Tango native-coin buy presets 1 and 2 for their own chain, without converting GMGN mixed-column amounts.
