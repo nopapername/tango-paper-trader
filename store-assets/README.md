@@ -38,3 +38,9 @@ The popup includes the detailed plugin guide and author @oooooyoung X profile ne
 详情页内嵌战壕同样支持模拟快买。战壕模拟买入后可跟随已读取的GMGN“买后代币详情”设置：新标签打开、当前页跳转或不打开；单链及组合页首次使用时请打开一次GMGN自定义弹窗同步该选择，未读取时保留不打开行为。
 
 [中英文发布说明](RELEASE-NOTES.md)；完整回归1,378项通过。最终在线验收范围及限制见 VERIFICATION.md。现有截图仍为真实0.3.38旧版截图，未展示代币笔记或当前紧凑入口；请勿将其标注为0.3.57截图。
+
+## 谷歌商店只上传一个ZIP
+
+直接上传 `tango-paper-trader-0.3.57.zip`，无需解压。文案、隐私政策、截图及填写教程以本目录普通文件保留，不打包成第二个ZIP。校验文件不需要上传商店。
+
+Upload only `tango-paper-trader-0.3.57.zip` to the Chrome Web Store. Store text, privacy policies and screenshots remain ordinary files in this folder.

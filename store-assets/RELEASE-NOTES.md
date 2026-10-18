@@ -29,7 +29,11 @@ Validation: 1,378 full tests plus manifest checks passed; 45 runtime files match
 ## Downloads / 下载
 
 - Plugin / 插件: `tango-paper-trader-0.3.57.zip`
-- Store materials / 上架资料: `tango-paper-trader-0.3.57-store-materials.zip`
-- Checksums / 校验: corresponding `.sha256` files and `PACKAGE-SHA256.json`.
+- [中英文文案、隐私政策和截图 / Store materials](https://github.com/nopapername/tango-paper-trader/tree/main/store-assets)：普通文件保留，不再提供第二个ZIP。
+- Checksums / 校验: `tango-paper-trader-0.3.57.zip.sha256` and `PACKAGE-SHA256.json`.
+
+**谷歌商店：直接上传 `tango-paper-trader-0.3.57.zip`，无需解压。本地“加载已解压扩展”才需要解压。**
+
+**Chrome Web Store: upload `tango-paper-trader-0.3.57.zip` directly. Extract only when loading the extension unpacked locally.**
 
 Plugin SHA-256: `d42f55d0ceeea95d96eaffe81b6a901248cef03edc3196e6d7a46d0579b3f63f`
