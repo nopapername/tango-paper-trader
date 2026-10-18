@@ -1,39 +1,35 @@
+# Tango Paper Trader 0.3.57
+
+[官网 / Website](https://tango-paper-lab.quirkylily.chatgpt.site/) · [详细教程 / Guide](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/) · [Chrome 商店 / Store](https://chromewebstore.google.com/detail/geajcgajdpbiaenjjneccjddbbmipdae)
+
 ## 中文
 
-[官网](https://tango-paper-lab.quirkylily.chatgpt.site/) · [详细使用教程](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/) · [Chrome 商店](https://chromewebstore.google.com/detail/geajcgajdpbiaenjjneccjddbbmipdae)
+- 新增本地“代币复盘”：单输入框、明确保存、未保存保护与多标签冲突提示；按链、合约、本地日期隔离，每个代币每天一份。
+- 盈亏日历新增“每日复盘”，按日期和链回看、编辑；笔记随JSON备份导出，不含笔记的旧备份导入会保留已有笔记。
+- 复盘入口采用绿色紧凑图标按钮，位于买入余额上方，支持明暗主题、折叠面板和窄屏。
+- 合并0.3.51–0.3.54的详情内嵌战壕快买、买后详情导航同步，以及卖出失败主动刷新报价、官网链接误判修复；不自动重试卖出。
+- 笔记仅本地保存，不自动上传；每份最多4,000字符、独立总空间1 MiB。权限与邀请码保持现有行为。
 
-### 0.3.50 更新
+下载 **tango-paper-trader-0.3.57.zip**，解压并加载直接包含manifest.json的目录。已有用户请原目录替换文件、仅重新加载扩展并刷新GMGN，不要卸载重装；建议先导出JSON备份。官网ZIP入口指向最新Release。
 
-- 扩展弹窗新增“插件使用教程”，直接打开官网详细教程，保留原有新人扫链教程。
-- 在“隐私 / Privacy”旁新增“作者：@oooooyoung”，点击打开作者 X 主页；保持现有绿色 UI，窄屏可换行。
-- 外链仅在用户点击时打开，不嵌入 X 组件、不新增权限。交易、报价、盈亏、余额、持仓、历史、隐私政策和邀请码行为不变。
-- 官网首页页脚已补充作者链接，继续公开访问。
-
-### 验证与安装
-
-1,348 项完整回归测试通过，Manifest V3 校验通过。用户已重新加载并确认教程和作者入口显示、跳转正常。本轮仅更新 UI 入口，没有新增模拟交易；此前六链交易验收保留在 0.3.49 记录中。
-
-下载下方 `tango-paper-trader-0.3.50.zip`，解压后加载直接包含 manifest.json 的目录。已有用户在原目录替换文件、重新加载扩展、刷新 GMGN 并重开旧弹窗；不要卸载重装。建议先导出 JSON 备份。
-
-ZIP 含 43 个安装文件，逐项匹配本地插件与主分支。中英文 README 和上架资料已更新；现有商店截图仍标注实际拍摄版本 0.3.38，未冒充新版截图。本次不向 Chrome Web Store 自动上传或提交。
+1,378项完整回归与Manifest校验通过。45个运行文件与本地安装目录、主分支及ZIP逐项核对。本轮在线检查BSC/SOL及组合战壕、持仓与历史买卖点、日报和复盘交互，未新增交易；内部数据面板与实际音效未在本轮重测。旧截图仍标注真实拍摄版本0.3.38。资料包含中英文上架文案、填写教程、隐私政策与现有截图；此次不自动提交Chrome商店。
 
 ## English
 
-[Official website](https://tango-paper-lab.quirkylily.chatgpt.site/) · [Detailed guide (Chinese)](https://tango-paper-lab.quirkylily.chatgpt.site/tutorial/) · [Chrome Web Store](https://chromewebstore.google.com/detail/geajcgajdpbiaenjjneccjddbbmipdae)
+- Add a local one-field Token review journal with explicit Save, unsaved-draft protection and conflict detection. Notes are isolated by chain, contract and local date.
+- Add date/chain-filtered Daily review in the PnL calendar. JSON backups include notes; older backups without notes preserve existing notes on import.
+- Place the compact green note-icon entry above the buy balance, with light/dark, narrow-layout and collapsed-panel support.
+- Include embedded-trench paper buys, observed after-buy navigation, active quote refresh after failed sells and token-website identity fixes from 0.3.51–0.3.54. Failed sells are not automatically retried.
+- Notes remain local, with no automatic upload: 4,000 characters each within a separate 1 MiB budget. Existing permissions and invitation behavior are retained.
 
-### Changes in 0.3.50
+Download **tango-paper-trader-0.3.57.zip**, not GitHub's generated source archive. Extract and load the directory containing manifest.json. Existing users should replace files in place, reload Tango and refresh GMGN; do not uninstall. Back up data first.
 
-- Add the official plugin user guide to the popup while retaining the beginner on-chain guide.
-- Add author @oooooyoung next to Privacy, opening https://x.com/oooooyoung when clicked. Reuse the existing styling with wrapping on narrow layouts.
-- No embedded X widget or additional permissions. Trading, quotes, PnL, balances, holdings, history, privacy policy and invitation-code behavior are unchanged.
-- The public homepage footer now also links to the author.
+Validation: 1,378 full tests plus manifest checks passed; 45 runtime files match the local installation, main branch and ZIP. This round covered BSC/SOL/combined UI, held-token replay, daily reports and journal interactions without new fills. Internal dashboard and speaker-level audio were not retested in this round. Existing screenshots remain labeled as actual 0.3.38 captures. Store materials include bilingual copy, submission instructions, privacy policies and existing screenshots; no Chrome Web Store submission is performed.
 
-Validation: 1,348 full regression tests and Manifest V3 checks passed. The user reloaded the plugin and confirmed both links display and navigate correctly. No new trades were executed for this UI-only release; prior six-chain acceptance belongs to 0.3.49.
+## Downloads / 下载
 
-Download `tango-paper-trader-0.3.50.zip` below rather than GitHub's source archive. Extract and load the directory containing manifest.json. Existing users should replace files in place, reload the extension, refresh GMGN and reopen the popup; do not uninstall. Back up your data first.
+- Plugin / 插件: `tango-paper-trader-0.3.57.zip`
+- Store materials / 上架资料: `tango-paper-trader-0.3.57-store-materials.zip`
+- Checksums / 校验: corresponding `.sha256` files and `PACKAGE-SHA256.json`.
 
-The ZIP contains 43 runtime files matching the local installation and main branch. Bilingual materials are updated. Existing store screenshots retain their actual 0.3.38 capture-version labels. This release does not submit an update to the Chrome Web Store.
-
-### SHA-256
-
-`0af772b5c79a6e7ab3f190e4da8a96bbf787fcd8014c2f838549a88c3a8d576c`  `tango-paper-trader-0.3.50.zip`
+Plugin SHA-256: `d42f55d0ceeea95d96eaffe81b6a901248cef03edc3196e6d7a46d0579b3f63f`

@@ -531,3 +531,19 @@ button.tango-calendar-day:focus-visible { outline:2px solid var(--brand); outlin
 .tango-token-strip > :last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 .tango-bottom-details > span { min-width:0; max-width:100%; overflow-wrap:anywhere; white-space:normal; }
+
+.tango-review-entry-row { padding:0; display:flex; justify-content:flex-end; align-items:center; min-width:0; }
+.tango-review-entry { box-sizing:border-box; width:auto; max-width:100%; min-width:0; display:inline-flex; align-items:center; gap:6px; border:1px solid #bce5cc; background:#edf9f1; color:#087846; font-family:inherit; line-height:1.5; font-size:13px; font-weight:700; text-align:left; padding:4px 8px; cursor:pointer; border-radius:7px; }
+.tango-review-entry > * { pointer-events:none; }
+.tango-review-entry-icon { display:flex; align-items:center; justify-content:center; flex:0 0 16px; }
+.tango-review-entry-icon svg { width:16px; height:16px; }
+.tango-review-entry-label { min-width:0; overflow-wrap:anywhere; }
+.tango-review-entry-state { margin-left:auto; min-width:0; max-width:45%; font-size:12px; font-weight:500; text-align:right; overflow-wrap:anywhere; }
+.tango-review-entry:hover { background:#e0f4e8; border-color:#70c995; }
+.tango-review-entry:focus-visible { outline:2px solid #00ad65; outline-offset:2px; }
+:host([data-theme="dark"]) .tango-review-entry { color:#73e4a6; background:#142e23; border-color:#2a6145; }
+:host([data-theme="dark"]) .tango-review-entry:hover { background:#1b3c2c; border-color:#3e9a68; }
+
+.tango-buy-account { margin-left:auto; min-width:0; max-width:calc(100% - 40px); display:flex; flex-direction:column; align-items:flex-end; gap:5px; }
+.tango-trade-title.buy-title { align-items:flex-end; }
+.tango-panel.collapsed > .tango-review-entry-row { padding:0 14px 7px; }

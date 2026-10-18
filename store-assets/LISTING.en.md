@@ -1,6 +1,6 @@
 # Tango Paper Trader English listing
 
-Version 0.3.50
+Version 0.3.57
 
 Name: Tango Paper Trader
 
@@ -26,3 +26,8 @@ Drag an edge or corner to resize the bottom PnL bar and detail trading panel pro
 In single-chain trenches, the primary paper button follows the explicit GMGN column amount and the secondary button follows its current native preset. Empty values retain a positive paper fallback; explicit zero or invalid values disable the affected action. Combined cards use Tango native-coin buy presets 1 and 2 for their own chain, without converting GMGN mixed-column amounts.
 
 The popup includes the detailed plugin guide and author @oooooyoung X profile next to Privacy. External pages open only when clicked.
+
+
+Token review: use the compact note-icon button above the buy balance to write entry ideas, invalidation reminders or a trade summary in one field. One note is saved per chain, contract and browser-local date, including tokens not yet traded or already closed. Daily review in the PnL calendar filters notes by date and chain for reading/editing. Notes stay in this browser and are not automatically uploaded: up to 4,000 characters per note within a separate 1 MiB budget. JSON backups include notes; older backups without notes preserve existing notes on import.
+
+Embedded detail-page trenches also support paper quick buys. After a paper buy, Tango follows the observed GMGN after-buy setting: new tab, same-tab navigation or no opening. Open GMGN Custom once per single-chain/combined view to synchronize this preference; until observed, no navigation occurs.

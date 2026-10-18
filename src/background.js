@@ -5,6 +5,7 @@ if (typeof importScripts === 'function') {
     'shared/constants.js',
     'core/state.js',
     'core/engine.js',
+    'core/review-notes.js',
     'core/state-coordinator.js',
     'shared/trade-replay.js'
   );

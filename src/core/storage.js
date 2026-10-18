@@ -1,6 +1,7 @@
 (function initStorage(global) {
   const Tango = global.Tango = global.Tango || {};
   const listeners = new Set();
+  const reviewListeners = new Set();
 
   async function readRaw(keys) {
     if (global.chrome?.storage?.local) return global.chrome.storage.local.get(keys);
@@ -57,7 +58,13 @@
     const result = usesExtensionCoordinator
       ? await sendCoordinatorMessage({ type: 'TANGO_STORE_MUTATE', command })
       : await coordinator.mutate(command);
-    if (!global.chrome?.storage?.local) notify();
+    if (!global.chrome?.storage?.local) {
+      if (command.type === 'SAVE_REVIEW_NOTE') reviewListeners.forEach(fn=>Promise.resolve().then(fn));
+      else if (!['GET_REVIEW_NOTES','EXPORT'].includes(command.type)) {
+        notify();
+        if(command.type==='IMPORT' && command.payload?.reviewNotes !== undefined) reviewListeners.forEach(fn=>Promise.resolve().then(fn));
+      }
+    }
     return result;
   }
 
@@ -111,9 +118,13 @@
   }
 
   async function exportData() {
-    const data = await getAll();
+    const data = await runMutation({ type:'EXPORT' });
     return { product: 'Tango Paper Trader', version: Tango.VERSION, exportedAt: Date.now(), ...data };
   }
+
+  const getReviewNotes = () => runMutation({ type:'GET_REVIEW_NOTES' });
+  const saveReviewNote = (note) => runMutation({ type:'SAVE_REVIEW_NOTE',note });
+  function subscribeReviews(listener) { reviewListeners.add(listener); return () => reviewListeners.delete(listener); }
 
   async function importData(payload) {
     return runMutation({ type: 'IMPORT', payload });
@@ -137,12 +148,13 @@
 
   if (global.chrome?.storage?.onChanged) {
     global.chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes[Tango.ReviewNotes?.STORAGE_KEY || 'tangoTokenReviewNotesV1']) reviewListeners.forEach(fn=>Promise.resolve().then(fn));
       if (area === 'local' && (changes[Tango.STORAGE_KEY] || changes[Tango.SETTINGS_KEY])) notify();
     });
   }
 
   Tango.Store = {
-    getAll, saveState, saveSettings, patchSettings, initialize, resetChain, resetAll, resetAllWithBalance, reset: resetAll,
+    getReviewNotes, saveReviewNote, subscribeReviews, getAll, saveState, saveSettings, patchSettings, initialize, resetChain, resetAll, resetAllWithBalance, reset: resetAll,
     exportData, importData, executeBuy, executeSell, executeCloseAll,
     updatePositionQuote, updatePositionMetadata, updatePositionMetadataBatch, subscribe
   };

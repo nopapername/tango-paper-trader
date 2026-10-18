@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.50",
+  "version": "0.3.57",
   "description": "__MSG_extensionDescription__",
   "permissions": [
     "storage"
@@ -88,6 +88,7 @@
         "src/shared/i18n.js",
         "src/shared/format.js",
         "src/core/engine.js",
+        "src/core/review-notes.js",
         "src/core/state-coordinator.js",
         "src/core/storage.js",
         "src/shared/daily-report.js",
@@ -96,6 +97,7 @@
         "src/adapters/gmgn.js",
         "src/content/chain-view.js",
         "src/content/markers.js",
+        "src/shared/review-journal.js",
         "src/content/content.js"
       ],
       "run_at": "document_idle"

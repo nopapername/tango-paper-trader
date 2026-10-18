@@ -1,4 +1,5 @@
-* text=auto eol=lf
+# Preserve exact published package bytes across Windows and Linux.
+* -text
 *.png binary
 *.jpg binary
 *.jpeg binary

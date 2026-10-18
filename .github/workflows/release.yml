@@ -83,6 +83,15 @@ jobs:
           uploads = [(filename, package, 'application/zip'),
                      (filename + '.sha256', checksum, 'text/plain'),
                      ('PACKAGE-SHA256.json', json.dumps(manifest, indent=2).encode() + b'\n', 'application/json')]
+          materials_name = 'tango-paper-trader-' + version + '-store-materials.zip'
+          materials = source('store-assets/' + materials_name)
+          materials_checksum = source('store-assets/' + materials_name + '.sha256')
+          assert hashlib.sha256(materials).hexdigest() == materials_checksum.decode().split()[0]
+          with zipfile.ZipFile(io.BytesIO(materials)) as archive:
+              assert 'LISTING.zh-CN.md' in archive.namelist() and 'LISTING.en.md' in archive.namelist()
+              assert 'privacy/PRIVACY.md' in archive.namelist()
+          uploads.extend([(materials_name, materials, 'application/zip'),
+                          (materials_name + '.sha256', materials_checksum, 'text/plain')])
           for name, data, kind in uploads:
               digest = 'sha256:' + hashlib.sha256(data).hexdigest()
               if name in assets:

@@ -1,5 +1,6 @@
 (function initStateCoordinator(global) {
   const Tango = global.Tango = global.Tango || {};
+  const Reviews = Tango.ReviewNotes || (typeof require === 'function' ? require('./review-notes.js') : null);
   const TRUSTED_METADATA_SOURCES = new Set(['GMGN_TRENCH', 'GMGN_DETAIL', 'GMGN_NETWORK']);
 
   const UNKNOWN_FALLBACK_SOURCE = 'UNKNOWN_FALLBACK';
@@ -488,8 +489,16 @@
 
     function mutate(command) {
       // A read requested after any mutation must remain behind that mutation.
-      invalidateReads();
+      if (!['GET_REVIEW_NOTES','SAVE_REVIEW_NOTE'].includes(command?.type)) invalidateReads();
       return serialized(async () => {
+        if (['GET_REVIEW_NOTES','SAVE_REVIEW_NOTE'].includes(command?.type)) {
+          const raw = await readRaw([Reviews.STORAGE_KEY]);
+          const notes = Reviews.normalize(raw[Reviews.STORAGE_KEY]);
+          if (command.type === 'GET_REVIEW_NOTES') return notes;
+          const next = Reviews.upsert(notes,command.note,now());
+          await writeRaw({ [Reviews.STORAGE_KEY]:next });
+          return next.records[Reviews.key(command.note.chain,command.note.address,command.note.date)];
+        }
         const { state, settings, migrationPending } = await readSnapshot({
           persistMigration: false,
           migrateInMemory: true
@@ -562,6 +571,10 @@
           }, nextState);
           return { state: nextState, settings: nextSettings };
         }
+        if (command?.type === 'EXPORT') {
+          const raw = await readRaw([Reviews.STORAGE_KEY]);
+          return { state,settings,reviewNotes:Reviews.normalize(raw[Reviews.STORAGE_KEY]) };
+        }
         if (command?.type === 'IMPORT') {
           const payload = command.payload;
           if (!payload || payload.product !== 'Tango Paper Trader' || !payload.state || !payload.settings
@@ -577,6 +590,14 @@
             migrationNow: payload.exportedAt,
             maximumTimestamp: payload.exportedAt
           });
+          let notesValues = {};
+          if (payload.reviewNotes !== undefined) {
+            const imported = Reviews.normalize(payload.reviewNotes,{ maximumTimestamp:payload.exportedAt });
+            const raw = await readRaw([Reviews.STORAGE_KEY]);
+            const current = Reviews.normalize(raw[Reviews.STORAGE_KEY]);
+            if (!Number.isSafeInteger(current.epoch+1)) throw new Error('invalidJournal');
+            notesValues = { [Reviews.STORAGE_KEY]: { ...imported,epoch:current.epoch+1 } };
+          }
           importedState.initialized = true;
           importedState.stateRevision = storedRevision + 1;
           const measuredBytes = serializedStateBytes(importedState);
@@ -585,7 +606,8 @@
           }
           await writeStored({
             [Tango.STORAGE_KEY]: importedState,
-            [Tango.SETTINGS_KEY]: importedSettings
+            [Tango.SETTINGS_KEY]: importedSettings,
+            ...notesValues
           }, importedState);
           return { state: importedState, settings: importedSettings };
         }

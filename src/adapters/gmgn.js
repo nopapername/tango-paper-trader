@@ -366,9 +366,14 @@
     const linkedAddresses = Array.from(scope.querySelectorAll?.('a[href*="/token/"], a[href*="pump.fun/coin/"]') || [])
       .filter((node) => !isQuoteTokenIdentityNode(node))
       .map((link) => {
-        try { return tokenAddressFromUrl(new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai').href); }
-        catch { return ''; }
+        try { return new URL(link.href || link.getAttribute?.('href') || '', global.location?.origin || 'https://gmgn.ai'); }
+        catch { return null; }
       })
+      // Website URLs can contain /token/ without identifying the current asset.
+      // Only GMGN, supported explorers and Pump can contradict the bound CA.
+      .filter((url) => url && (url.hostname === 'gmgn.ai' || url.hostname === 'pump.fun'
+        || explorerTokenIdentity(url)))
+      .map((url) => explorerTokenIdentity(url)?.address || tokenAddressFromUrl(url.href))
       .filter(Boolean);
     if (linkedAddresses.some((linkedAddress) => !Tango.Chains.validateAddress(chainId, linkedAddress)
       || Tango.Chains.normalizeAddress(chainId, linkedAddress) !== Tango.Chains.normalizeAddress(chainId, address))) return null;
@@ -846,7 +851,7 @@
   }
 
   function quickBuyChainAllowed(card, chain) {
-    return Boolean(chain && isTrenchPage() && cardChain(card) === chain);
+    return Boolean(chain && hasQuickBuyList() && cardChain(card) === chain);
   }
 
   function isTrenchPage(url = global.location?.href || '') {
@@ -855,6 +860,35 @@
     const trenchRoute = parsed.pathname === '' || parsed.pathname === '/'
       || /^\/r\/[^/]+\/?$/.test(parsed.pathname);
     return parsed.hostname === 'gmgn.ai' && trenchRoute && (Boolean(chain?.capabilities.trench) || isCombinedTrenchPage(url));
+  }
+
+  // A detail route may mount the same PumpSubX list alongside its chart.
+  // Keep route identity separate: the page must still be treated as a detail
+  // page for quotes, account selection, markers and trade validation.
+  function hasQuickBuyList() {
+    return isTrenchPage() || Boolean(isTokenDetailPage()
+      && Tango.Chains.get(chainFromUrl())?.capabilities.trench
+      && document.querySelector?.('[data-sentry-component="PumpSubX"] .BuyButton-continer'));
+  }
+
+  function readAfterBuyDetailMode(root = document) {
+    const selector = '[data-sentry-component="SelectButton"]';
+    const rows = root?.matches?.(selector) ? [root] : [...(root?.querySelectorAll?.(selector) || [])];
+    const values = new Map([['打开', 'open'], ['跳转', 'navigate'], ['不打开', 'none'],
+      ['open', 'open'], ['redirect', 'navigate'], ['navigate', 'navigate'],
+      ["don't open", 'none'], ['do not open', 'none']]);
+    for (const row of rows) {
+      const text = String(row.textContent || '');
+      if (!/买后代币详情|token.*details?.*after.*buy|after.*buy.*token/i.test(text)) continue;
+      const radio = row.querySelector?.('[data-sentry-component="BaseRadio"]');
+      const selected = [...(radio?.children || [])].filter(option =>
+        option.classList?.contains('bg-toggle-highlight-200')
+        || option.getAttribute?.('aria-checked') === 'true'
+        || option.getAttribute?.('aria-selected') === 'true');
+      if (selected.length !== 1) return null;
+      return values.get(String(selected[0].textContent || '').trim().toLowerCase()) || null;
+    }
+    return null;
   }
 
   function isTokenDetailPage(url = global.location?.href || '') {
@@ -2118,7 +2152,7 @@
   }
 
   function readVisibleTokenMetadata(addresses) {
-    if (!isTrenchPage()) return [];
+    if (!hasQuickBuyList()) return [];
     const chain = chainFromUrl();
     if (!chain) return [];
     const requested = new Set((addresses || [])
@@ -2279,7 +2313,7 @@
 
   function quickBuyNeedsReconcile() {
     pruneExpiredQuickBuyIdentityIntents();
-    if (!isTrenchPage()) return false;
+    if (!hasQuickBuyList()) return false;
     const chain = chainFromUrl();
     const probeSlots = [];
     for (const slot of trackedQuickBuySlots) {
@@ -2356,7 +2390,7 @@
     invalidateRemovedQuickBuyBirths(removedRoots);
     invalidateQuickBuyBirthsInRoots(roots, chain);
     cleanupDisconnectedQuickBuySlots(roots);
-    if (!isTrenchPage()) {
+    if (!hasQuickBuyList()) {
       if (!incremental) clearQuickBuy(false);
       return 0;
     }
@@ -2650,7 +2684,7 @@
   }
 
   function syncPositionBadges(readDisplay, roots, hasPosition) {
-    if (!isTrenchPage() || typeof readDisplay !== 'function') return clearPositionBadges();
+    if (!hasQuickBuyList() || typeof readDisplay !== 'function') return clearPositionBadges();
     const cards = new Map();
     const visited = new Set();
     for (const slot of trackedQuickBuySlots) {
@@ -2735,7 +2769,8 @@
 
   Tango.GMGN = {
     chainFromUrl, tokenAddressFromUrl, parseMoney, readCurrentToken, readVerifiedCurrentTokenSnapshot, readVisibleTokenMetadata, discoverTokenCards, clearQuickBuy,
-    quickBuyNeedsReconcile, syncPositionBadges, clearPositionBadges,
+    quickBuyNeedsReconcile, syncPositionBadges, clearPositionBadges, readAfterBuyDetailMode,
+    _hasQuickBuyList: hasQuickBuyList,
     _updatePositionBadge: updatePositionBadge,
     rememberTrenchSnapshot, readTrenchSnapshot,
     resolveCurrentTokenRead, needsCurrentTokenRead,

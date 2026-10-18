@@ -4,6 +4,7 @@
 
   const Tango = global.Tango;
   const runtime = {
+    afterBuyDetailModes: {}, afterBuyDetailRevision: 0,
     state: null, settings: null, current: null, drawerOpen: false, modal: null, extensionInvalidated: false,
     toast: null, lastQuoteWriteAt: 0, lastQuoteWriteKey: null, quoteTimer: null, observer: null, renderQueued: false,
     presetEditing: null, presetDraft: null, suppressConfirmForSession: false, audioContext: null, tradeSounds: null,
@@ -29,7 +30,18 @@
     positionCalibrationDirty: new Set()
   };
 
+  const afterBuyDetailPreferenceKey = 'tangoGmgnAfterBuyDetailV1';
   chrome.storage?.onChanged?.addListener?.((changes, areaName) => {
+    if (areaName === 'local') {
+      for (const [key, change] of Object.entries(changes || {})) {
+        if (!key.startsWith(afterBuyDetailPreferenceKey + ':')) continue;
+        const scope = key.slice(afterBuyDetailPreferenceKey.length + 1);
+        if (!afterBuyDetailScopes().includes(scope)) continue;
+        runtime.afterBuyDetailRevision += 1;
+        if (validAfterBuyDetailMode(change?.newValue)) runtime.afterBuyDetailModes[scope] = change.newValue;
+        else delete runtime.afterBuyDetailModes[scope];
+      }
+    }
     const settingsKey = Tango.SETTINGS_KEY || 'tangoPaperTraderSettingsV1';
     if (areaName !== 'local'
       || !Object.prototype.hasOwnProperty.call(changes || {}, settingsKey)) return;
@@ -39,6 +51,7 @@
 
   const host = document.createElement('div');
   host.id = 'tango-paper-trader-host';
+  host.setAttribute('data-tango-version', String(Tango.VERSION || ''));
   host.setAttribute('data-tango-token-open-status', 'idle');
   const shadow = host.attachShadow({ mode: 'open' });
   const stylesheet = document.createElement('link');
@@ -121,6 +134,62 @@
     return pageChain && token?.chain === pageChain.id ? pageChain : null;
   }
   const quickBuyOrderValidators = new WeakMap();
+  const quickBuyDetailIntents = new WeakMap();
+
+  function validAfterBuyDetailMode(mode) { return ['open', 'navigate', 'none'].includes(mode); }
+  function afterBuyDetailScopes() { return [...Tango.Chains.all().map(chain => chain.id), 'combined']; }
+  function afterBuyDetailScope() { return combinedTrench() ? 'combined' : Tango.Chains.fromUrl(location.href)?.id; }
+
+  function synchronizeAfterBuyDetailPreference(root = document) {
+    const scope = afterBuyDetailScope();
+    if (!scope) return null;
+    const mode = Tango.GMGN.readAfterBuyDetailMode?.(root);
+    if (!validAfterBuyDetailMode(mode)) return runtime.afterBuyDetailModes[scope] || null;
+    if (mode !== runtime.afterBuyDetailModes[scope]) {
+      runtime.afterBuyDetailRevision += 1;
+      runtime.afterBuyDetailModes[scope] = mode;
+      // UI preference only: never write the simulated ledger or trading settings.
+      // Keep per-chain and combined-page preferences from leaking across routes.
+      try {
+        Promise.resolve(chrome.storage?.local?.set?.({ [afterBuyDetailPreferenceKey + ':' + scope]: mode }))
+          .catch(noteInvalidatedContext);
+      } catch (error) { noteInvalidatedContext(error); }
+    }
+    return mode;
+  }
+
+  async function loadAfterBuyDetailPreference() {
+    const revision = runtime.afterBuyDetailRevision;
+    const scopes = afterBuyDetailScopes();
+    try {
+      const values = await chrome.storage?.local?.get?.(scopes.map(scope => afterBuyDetailPreferenceKey + ':' + scope));
+      if (revision === runtime.afterBuyDetailRevision) {
+        for (const scope of scopes) {
+          const mode = values?.[afterBuyDetailPreferenceKey + ':' + scope];
+          if (validAfterBuyDetailMode(mode)) runtime.afterBuyDetailModes[scope] = mode;
+        }
+      }
+    } catch (error) { noteInvalidatedContext(error); }
+    synchronizeAfterBuyDetailPreference();
+  }
+
+  async function followQuickBuyDetail(order, routeCapture) {
+    const mode = quickBuyDetailIntents.get(order);
+    quickBuyDetailIntents.delete(order);
+    // Storage notifications briefly mark settings pending after a successful
+    // trade. That execution guard must not cancel an already-settled UI action.
+    if (!routeCaptureIsCurrent(routeCapture) || runtime.extensionInvalidated
+      || runtime.quickBuyAuthoritativelyDisabled || runtime.settings?.enabled !== true
+      || !['open', 'navigate'].includes(mode)) return;
+    const url = Tango.Chains.tokenUrl(order.token.chain, order.token.address);
+    if (mode === 'open') {
+      await openPosition({ chain: order.token.chain, tokenAddress: order.token.address });
+    } else if (!routeMatchesDetailToken(order.token)) {
+      try { location.assign(url); }
+      catch { showToast(t('openTokenFailed'), 'error'); }
+    }
+  }
+
   const combinedQuoteChains = new Set();
   function validateQuickBuyOrder(order) {
     const validate = quickBuyOrderValidators.get(order);
@@ -930,7 +999,7 @@
     if (!routeCaptureIsCurrent(routeCapture)) return;
     // Mutation lanes and the 750ms health probe reconcile new/replaced slots.
     // Retain a full sweep for missed page events without scanning every quote tick.
-    if (runtime.quickBuyMode !== 'active' || !Tango.GMGN._isTrenchPage?.()
+    if (runtime.quickBuyMode !== 'active' || !(Tango.GMGN._hasQuickBuyList?.() ?? Tango.GMGN._isTrenchPage?.())
       || Date.now() - lastQuickBuyFullSyncAt >= 30_000) syncQuickBuyButtons();
     await syncVisiblePositionMetadata(routeCapture);
     if (!routeCaptureIsCurrent(routeCapture)) return;
@@ -1383,6 +1452,15 @@
     Promise.resolve().then(() => ensureNativePrice(context, routeCapture)).catch(() => null);
   }
 
+  function recoverRejectedSellQuote(stage, token, quote, error) {
+    if (!['invalidQuote', 'staleQuote', 'nativePriceUnavailable'].includes(error?.message)) return;
+    // Preserve this attempt separately: background card scans can replace the
+    // general quote diagnostic before the user reports an intermittent failure.
+    recordQuoteRejection(stage + ':' + error.message, token, quote, 'data-tango-sell-rejection');
+    // Recovery is quote-only. Never retry a sell or relax price validation.
+    refreshPaperQuoteInBackground(token);
+  }
+
   function preferObservationDimensions(merged, candidate) {
     if (!merged || !candidate) return merged;
     const preferred = { ...merged };
@@ -1413,7 +1491,7 @@
     return preferred;
   }
 
-  function recordQuoteRejection(stage, token, quote) {
+  function recordQuoteRejection(stage, token, quote, attribute = 'data-tango-quote-rejection') {
     // Keep only the latest public observation, never account or trade data.
     const fields = ['source', 'priceSource', 'marketCapSource', 'supplySource',
       'totalSupplySource', 'priceProvenance', 'valuationMode', 'priceUsd',
@@ -1426,7 +1504,7 @@
       if (typeof value === 'string') observation[field] = value.slice(0, 100);
       else if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) observation[field] = value;
     }
-    host.setAttribute('data-tango-quote-rejection', JSON.stringify({
+    host.setAttribute(attribute, JSON.stringify({
       stage, chain: token?.chain, address: token?.address || token?.tokenAddress,
       launchpad: String(token?.launchpad || '').slice(0, 100), quote: observation
     }));
@@ -1994,7 +2072,8 @@
           ...(clickContext.breakeven === true ? { breakeven: true } : {}) }, routeCapture);
       }
       if (clickContext.side && clickContext.side !== 'BUY') return showToast(t('invalidAmount'), 'error');
-      await buy(amountNative, { ...clickContext, amountNative }, routeCapture);
+      const afterBuyDetailMode = synchronizeAfterBuyDetailPreference();
+      await buy(amountNative, { ...clickContext, amountNative, afterBuyDetailMode }, routeCapture);
     } finally { runtime.quickBuyLocks.delete(lockKey); }
   }
 
@@ -2011,6 +2090,9 @@
       sourceUrl: context?.sourceUrl || location.href
     };
     try {
+      if (validAfterBuyDetailMode(context?.afterBuyDetailMode)) {
+        quickBuyDetailIntents.set(order, context.afterBuyDetailMode);
+      }
       if (typeof context?.validate === 'function') quickBuyOrderValidators.set(order, context.validate);
       validateQuickBuyOrder(order);
       if (!chain || order.token?.chain !== chain.id) throw new Error('unsupportedChain');
@@ -2145,6 +2227,7 @@
     if (paperExecutionDisabled() || !routeCaptureIsCurrent(routeCapture)) return;
     if (runtime.tradePending) return;
     runtime.tradePending = true;
+    let committed = false;
     try {
       if (!routeCaptureIsCurrent(routeCapture) || !executionChain(order.token)) throw new Error('unsupportedChain');
       validateQuickBuyOrder(order);
@@ -2156,12 +2239,17 @@
       const result = await Tango.Store.executeBuy(executableOrder);
       runtime.state = result.state;
       publishChartMarkers(true);
+      committed = true;
       runtime.modal = null;
       playTradeSound('BUY');
       const chain = Tango.Chains.require(order.token.chain);
       showToast(`${t('buySuccess')} · ${Tango.Format.native(order.amountNative, chain.nativeSymbol, language())} ${order.token.symbol}`, 'success');
     } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
     finally { runtime.tradePending = false; }
+    // Navigation failure cannot turn a settled buy into a failed-trade report.
+    if (committed) {
+      followQuickBuyDetail(order, routeCapture).catch(() => showToast(t('openTokenFailed'), 'error'));
+    }
   }
 
   function entryDetailNeedsRead(context) {
@@ -2227,7 +2315,10 @@
         return render();
       }
       await commitSell(order, routeCapture);
-    } catch (error) { showToast(t(error.message), 'error'); }
+    } catch (error) {
+      recoverRejectedSellQuote('sell-preview', order.token, order.quote || context?.quote, error);
+      showToast(t(error.message), 'error');
+    }
   }
 
   async function sellPosition(position, percent) {
@@ -2236,7 +2327,10 @@
     const routeCapture = captureRoute();
     const token = { chain: position.chain, address: position.tokenAddress, symbol: position.symbol };
     const quote = resolveCommitPaperTradeQuote({ token, quote: positionQuote(position) }, position, routeCapture);
-    if (!quote) return showToast(t('invalidQuote'), 'error');
+    if (!quote) {
+      recoverRejectedSellQuote('sell-position', token, positionQuote(position), new Error('invalidQuote'));
+      return showToast(t('invalidQuote'), 'error');
+    }
     refreshPaperQuoteInBackground(token);
     await sell(percent, { token, quote }, routeCapture);
   }
@@ -2262,7 +2356,10 @@
       const displayedPercent = order.breakeven && Number.isFinite(result.executedPercent)
         ? Tango.Format.number(result.executedPercent, language(), 2) : order.percent;
       showToast(`${t('sellSuccess')} · ${displayedPercent}% ${order.token.symbol}`, 'success');
-    } catch (error) { runtime.modal = null; showToast(t(error.message), 'error'); }
+    } catch (error) {
+      recoverRejectedSellQuote('sell-commit', order.token, order.quote, error);
+      runtime.modal = null; showToast(t(error.message), 'error');
+    }
     finally { runtime.tradePending = false; }
   }
 
@@ -2533,6 +2630,7 @@
       <div class="tango-calendar-nav"><button class="tango-icon-button" data-action="calendar-prev">‹</button><strong>${date.toLocaleDateString(language(), { year: 'numeric', month: 'long' })}</strong><button class="tango-icon-button" data-action="calendar-next">›</button></div>
       <div class="tango-calendar-grid">${labels.map((label) => `<span class="tango-calendar-label">${esc(label)}</span>`).join('')}${cells.join('')}</div>
       <div class="tango-calendar-actions">
+        <button type="button" class="tango-button tango-calendar-dashboard" data-action="daily-review">${language()==='zh-CN'?'每日复盘':'Daily review'}</button>
         <button class="tango-button tango-calendar-dashboard" data-action="dashboard-history">${t('currentChainTrades')} ↗</button>
         ${renderTutorialLink()}
       </div>
@@ -2715,6 +2813,18 @@
     return true;
   }
 
+  let reviewJournal = null;
+  function ensureReviewJournal() {
+    if (!reviewJournal && Tango.ReviewJournal && Tango.Store.getReviewNotes) {
+      reviewJournal = Tango.ReviewJournal.create({
+        store:Tango.Store,document,language:()=>language(),theme:()=>host.getAttribute('data-theme'),
+        openToken:note=>openPosition({chain:note.chain,tokenAddress:note.address}),onChange:()=>queueRender()
+      });
+      reviewJournal.refresh().catch(()=>null);
+    }
+    return reviewJournal;
+  }
+
   function renderPanel() {
     if (combinedTrench()) return '';
     if (!runtime.state.initialized || !runtime.settings.enabled) return '';
@@ -2752,14 +2862,17 @@
     const breakevenPercent = breakevenRecovered ? null : Tango.Engine.breakevenSellPercent(position, paperQuote, runtime.settings);
     const breakevenLabel = breakevenRecovered ? t('breakevenRecovered')
       : breakevenPercent ? `${t('breakeven')} ${Tango.Format.number(breakevenPercent, language(), 2)}%` : t('breakeven');
+    const reviewRecorded = ensureReviewJournal()?.status(current.token);
+    const reviewEntry = `<div class="tango-review-entry-row"><button type="button" class="tango-review-entry" data-action="token-review"><span class="tango-review-entry-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-8M8 16l1-4L18 3a2.1 2.1 0 0 1 3 3l-9 9-4 1ZM16 5l3 3"/></svg></span><span class="tango-review-entry-label">${language()==='zh-CN'?'代币复盘':'Token review'}</span><span class="tango-review-entry-state">${reviewRecorded?(language()==='zh-CN'?'已记录':'Recorded'):(language()==='zh-CN'?'写复盘':'Write review')}<span aria-hidden="true"> ›</span></span></button></div>`;
     return `<div class="tango-panel tango-card ${runtime.settings.panelCollapsed ? 'collapsed' : ''}" style="${panelStyle()}">
       <div class="tango-header" data-drag-handle>
         <div class="tango-token-strip"><span class="tango-paper-logo">T</span><strong>TANGO</strong><span class="tango-paper-badge">${t('paper')}</span><span>${esc(symbol)}</span></div>
         <div class="tango-header-actions"><button class="tango-icon-button" data-action="reset-panel-size" title="${t('resetSize')}" aria-label="${t('resetSize')}">↺</button><button class="tango-icon-button tango-edit-all" data-action="${runtime.presetEditing === 'all' ? 'save-presets' : 'edit-presets'}" title="${t(runtime.presetEditing === 'all' ? 'savePresets' : 'editPresets')}">${runtime.presetEditing === 'all' ? '✓' : '✎'}</button>${runtime.presetEditing === 'all' ? `<button class="tango-icon-button" data-action="cancel-presets" title="${t('cancel')}">↶</button>` : ''}<button class="tango-icon-button" data-action="toggle-sound" title="${t('sound')}">${runtime.settings.soundEnabled ? '🔊' : '🔇'}</button><button class="tango-icon-button" data-action="dashboard">⚙</button><button class="tango-icon-button" data-action="collapse-panel">${runtime.settings.panelCollapsed ? '＋' : '×'}</button></div>
       </div>
+      ${runtime.settings.panelCollapsed ? reviewEntry : ''}
       ${runtime.settings.panelCollapsed ? '' : `<div class="tango-trade-body">
         <section class="tango-trade-block">
-          <div class="tango-trade-title buy-title"><span>${t('buy')}</span><span class="tango-title-balance">◎ ${Tango.Format.native(account.cashBalanceNative, chain.nativeSymbol, language())}</span></div>
+          <div class="tango-trade-title buy-title"><span>${t('buy')}</span><div class="tango-buy-account">${reviewEntry}<span class="tango-title-balance">◎ ${Tango.Format.native(account.cashBalanceNative, chain.nativeSymbol, language())}</span></div></div>
           <div class="tango-preset-grid">${renderPresetGrid('buy', settings.buyPresets)}</div>
           <div class="tango-trade-meta"><span>⌁ ${Tango.Format.percent(runtime.settings.slippageBps / 100, language())}</span><span>♜ ${Tango.Format.native(settings.networkFeeNative, chain.nativeSymbol, language())}</span><span>♙ ${feePercent}%</span><span class="safe">${t('entryMc')} ${position ? Tango.Format.usd(position.averageEntryMarketCap, language(), true) : '--'}</span></div>
         </section>
@@ -3150,7 +3263,7 @@
       const anchor = document.createElement('a');
       anchor.href = url;
       anchor.download = `tango-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(anchor);
+      // A detached download link keeps the backup Blob URL out of the page DOM.
       try { anchor.click(); } finally {
         anchor.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -3171,8 +3284,8 @@
       runtime.modal = { type: 'confirm', title: t('importJson'),
         rows: [[t('importJson'), file.name], [t('positions'), Object.keys(payload.state.positions).length]],
         note: language().toLowerCase().startsWith('zh')
-          ? '确认后将替换全部六条链的模拟账户、设置和历史记录。请先导出备份；取消不会更改数据。'
-          : 'Confirmation replaces paper accounts, settings and history on all six chains. Export a backup first; cancel changes nothing.',
+          ? '确认后将替换全部六条链的模拟账户、设置和历史记录；备份含复盘笔记时也会替换笔记，旧备份不含笔记则保留。请先导出备份；取消不会更改数据。'
+          : 'Confirmation replaces paper accounts, settings and history on all six chains, plus review notes if included. Legacy backups without notes preserve existing notes. Export a backup first; cancel changes nothing.',
         action: async () => {
           if (runtime.tradePending) return;
           runtime.tradePending = true;
@@ -3217,7 +3330,7 @@
     if (!runtime.modal) return '';
     if(runtime.modal.type==='daily-report') return Tango.DailyReport.dialog(runtime.modal.report,runtime.modal.currency,language(),runtime.modal.busy);
     if (runtime.modal.type === 'dashboard-error') {
-      return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3><div class="tango-warning">${esc(runtime.modal.note)}</div>${runtime.modal.backupJson?`<p>${language().toLowerCase().startsWith('zh')?'若浏览器未下载，可全选下方 JSON 文本，复制并保存为 .json 文件。':'If the browser did not download, select all JSON below, copy and save as a .json file.'}</p><textarea id="tango-backup-json-fallback" aria-label="JSON backup" readonly style="width:100%;min-height:120px;box-sizing:border-box">${esc(runtime.modal.backupJson)}</textarea>`:''}<div class="tango-modal-actions"><button class="tango-button" data-action="cancel-modal">${t('cancel')}</button><button class="tango-button primary" data-action="export-backup">${t('exportJson')}</button><label>${t('importJson')}<input id="tango-import-backup" type="file" accept=".json,application/json" style="display:block;max-width:100%"></label></div></div></div>`;
+      return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3><div class="tango-warning">${esc(runtime.modal.note)}</div>${runtime.modal.backupJson?`<p>${language().toLowerCase().startsWith('zh')?'若浏览器未下载，可全选下方 JSON 文本，复制并保存为 .json 文件。':'If the browser did not download, select all JSON below, copy and save as a .json file.'}</p><div id="tango-backup-json-fallback" data-readonly="true"></div>`:''}<div class="tango-modal-actions"><button class="tango-button" data-action="cancel-modal">${t('cancel')}</button><button class="tango-button primary" data-action="export-backup">${t('exportJson')}</button><label>${t('importJson')}<input id="tango-import-backup" type="file" accept=".json,application/json" style="display:block;max-width:100%"></label></div></div></div>`;
     }
     return `<div class="tango-modal-backdrop"><div class="tango-modal tango-card"><h3>${esc(runtime.modal.title)}</h3>
       <div class="tango-confirm-list">${runtime.modal.rows.map(([label,value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
@@ -3260,6 +3373,7 @@
   }
 
   function render() {
+    reviewJournal?.setEnabled(Boolean(runtime.settings?.enabled && runtime.state?.initialized));
     if (runtime.cancelFloatingResize && (!runtime.settings?.enabled || runtime.extensionInvalidated || !activeChain())) runtime.cancelFloatingResize();
     if (runtime.floatingGesture) return;
     capturePresetDraft();
@@ -3310,6 +3424,7 @@
   }
 
   function bindEvents() {
+    if(runtime.modal?.backupJson) Tango.ReviewJournal?.privateBackup(shadow.querySelector('#tango-backup-json-fallback'),runtime.modal.backupJson);
     shell.querySelectorAll('[data-report-action]').forEach(button=>button.addEventListener('click',async event=>{if(!requireTrustedUserEvent(event))return;event.stopPropagation();await reportAction(button.dataset.reportAction);}));
     shell.querySelectorAll('[data-buy]').forEach((button) => button.addEventListener('click', (event) => {
       if (!requireTrustedUserEvent(event)) return;
@@ -3354,6 +3469,8 @@
         const soundEnabled = !runtime.settings.soundEnabled;
         await patchRuntimeSettings({ soundEnabled });
       }
+      if (action === 'token-review' && runtime.current?.token) await ensureReviewJournal()?.openEditor({ ...runtime.current.token });
+      if (action === 'daily-review') await ensureReviewJournal()?.openDaily();
       if (action === 'trade-replay' && runtime.current?.token) {
         const token=runtime.current.token;
         await Tango.TradeReplay?.open(shadow,runtime.state,token.chain,token.address,language());
@@ -3565,6 +3682,7 @@
   }
 
   async function start() {
+    loadAfterBuyDetailPreference();
     runtime.routeIdentity = currentRouteIdentity();
     chartFrames().forEach((frame) => registerChartFrame(frame));
     let mutationTimer;
@@ -3585,6 +3703,15 @@
       const detailPending = Tango.GMGN.needsCurrentTokenRead(runtime.current);
       for (const record of records) {
         const target = record.target?.nodeType === 3 ? record.target.parentElement : record.target;
+        const preferenceRow = target?.closest?.('[data-sentry-component="SelectButton"]');
+        if (preferenceRow) synchronizeAfterBuyDetailPreference(preferenceRow);
+        if (record.type === 'childList') {
+          for (const node of record.addedNodes || []) {
+            if (node?.nodeType !== 1 || node.closest?.('[class~="group/a"]') || paperQuickBuyMutationNode(node)) continue;
+            if (node.matches?.('[data-sentry-component="SelectButton"]')
+              || node.querySelector?.('[data-sentry-component="SelectButton"]')) synchronizeAfterBuyDetailPreference(node);
+          }
+        }
         const heldCard = target?.closest?.('[data-icon="MC"]')?.closest?.('[data-tango-position-card="1"]');
         if (heldCard && (record.type === 'characterData' || record.type === 'childList')) heldQuoteRoots.add(heldCard);
         if (detailPage && detailHeaderMutationNode(target)) {

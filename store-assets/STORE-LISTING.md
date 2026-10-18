@@ -1,6 +1,6 @@
 # Tango Paper Trader Chrome Web Store submission draft
 
-Version: 0.3.50. Submission materials; Google review has not been performed.
+Version: 0.3.57. Submission materials; Google review has not been performed.
 
 ## 中文商店文案
 
@@ -108,3 +108,13 @@ In single-chain trenches, the primary paper button follows the explicit GMGN col
 扩展弹窗提供插件详细使用教程，并在隐私入口旁显示作者 @oooooyoung 的 X 主页链接；仅在点击后打开外部页面。
 
 The popup includes the detailed plugin guide and author @oooooyoung X profile next to Privacy. External pages open only when clicked.
+
+## 代币复盘 / Token review
+
+代币复盘：在详情交易面板的买入余额上方点击带笔记图标的“代币复盘”，用一个输入框记录买前想法、认错提醒或交易总结。每条链、每个合约、浏览器本地日期各保存一份；未交易和已清仓代币也可记录。盈亏日历中的“每日复盘”按日期及链回看和编辑。笔记只在当前浏览器本地保存，不自动上传；每份最多4,000字符，独立空间1 MiB。JSON备份包含笔记；导入不含笔记的旧备份会保留现有笔记。
+
+详情页内嵌战壕同样支持模拟快买。战壕模拟买入后可跟随已读取的GMGN“买后代币详情”设置：新标签打开、当前页跳转或不打开；单链及组合页首次使用时请打开一次GMGN自定义弹窗同步该选择，未读取时保留不打开行为。
+
+Token review: use the compact note-icon button above the buy balance to write entry ideas, invalidation reminders or a trade summary in one field. One note is saved per chain, contract and browser-local date, including tokens not yet traded or already closed. Daily review in the PnL calendar filters notes by date and chain for reading/editing. Notes stay in this browser and are not automatically uploaded: up to 4,000 characters per note within a separate 1 MiB budget. JSON backups include notes; older backups without notes preserve existing notes on import.
+
+Embedded detail-page trenches also support paper quick buys. After a paper buy, Tango follows the observed GMGN after-buy setting: new tab, same-tab navigation or no opening. Open GMGN Custom once per single-chain/combined view to synchronize this preference; until observed, no navigation occurs.

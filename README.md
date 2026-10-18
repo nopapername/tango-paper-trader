@@ -8,7 +8,23 @@
 
 Practice entries, scaling, exits and trade reviews directly on GMGN. No wallet connection or real funds required.
 
-**当前版本 / Current version: 0.3.50**
+**当前版本 / Current version: 0.3.57**
+
+0.3.57：将代币复盘入口精简为买入余额上方的紧凑图标按钮，不再占据整行宽度，保留绿色风格、已记录状态及明暗主题适配。仅优化入口外观，复盘及交易逻辑不变。
+
+0.3.55：新增本地代币复盘。详情交易面板顶部点击“代币复盘”，单个输入框记录当天想法；盈亏日历中的“每日复盘”可按日期和链回看、编辑。未交易及已清仓代币都可记录，每个代币每天一份。笔记纳入 JSON 备份，旧备份导入保留现有笔记，多标签冲突不会静默覆盖；不会修改模拟余额、持仓、报价或成交。每份笔记最多 4,000 字符，本地笔记空间为 1 MiB；没有自动上传。
+
+0.3.57 places a compact green Token review button with a note icon above the buy balance, retaining recorded status without a full-width row. Light/dark themes and narrow panels are supported; journal and trading behavior are unchanged.
+
+0.3.55 adds local token-review notes: a single-field editor near the top of the detail trading panel, and a date/chain-filtered Daily review inside the PnL calendar. Notes work before buying and after closing, with one note per token per day. JSON backups include notes; legacy imports preserve existing notes and stale edits cannot silently overwrite them. Trading balances, positions, quotes and fills are unchanged. Each note supports 4,000 characters within a separate 1 MiB local budget; notes are never automatically uploaded.
+
+0.3.52：修复模拟快买成交后的账户同步短暂阻止详情页打开/跳转的问题；交易前的同步保护与总开关检查保持不变。
+
+0.3.52 fixes account-refresh notifications cancelling post-buy detail opening/navigation after a settled paper trade. Pre-trade synchronization guards and the master switch remain unchanged.
+
+0.3.51：详情页内嵌战壕复用模拟快买；战壕模拟买入成功后跟随 GMGN“买后代币详情”的打开新标签、当前页跳转或不打开选择。每个单链及组合页首次使用时，请打开一次 GMGN 自定义弹窗以同步该选择；未读取到设置时保留原来的不打开行为。设置同步不修改余额、持仓、费用或交易预设。
+
+0.3.51 reuses paper quick buys in embedded detail-page trenches. Successful trench paper buys follow GMGN's after-buy detail choice: new tab, same-tab navigation or no opening. Open GMGN Custom once per single-chain/combined view to synchronize its choice; until observed, the previous no-opening behavior remains. Preference synchronization does not modify balances, positions, fees or trading presets.
 
 0.3.50：扩展弹窗新增插件使用教程和作者 @oooooyoung 入口；保留隐私与新人扫链教程，交易及账户逻辑不变。
 

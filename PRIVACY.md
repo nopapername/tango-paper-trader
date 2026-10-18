@@ -16,7 +16,7 @@ Tango 是独立于 GMGN 的免费模拟交易练习工具，不连接钱包、�
 
 在 gmgn.ai 页面中，插件读取公开代币名称、链、合约地址、价格、市值、供应量、图表刻度及与行情有关的页面响应。读取相关页面地址是为了绑定当前链和代币，不采集全浏览器历史。插件的页面脚本会被动检查相关 fetch/XHR 行情响应，并只向插件传递提取的行情字段，不上传整份响应或网站账户资料。
 
-用户输入的模拟本金、预设、费用、语言等设置，以及模拟余额、仓位、成交、盈亏日统计、校准记录保存在当前浏览器的 chrome.storage.local。会话免确认状态使用 chrome.storage.session。复盘使用单独的、有容量限制的本地行情缓存。没有 Tango 云账户或账户同步服务器，不使用广告追踪或统计 SDK。
+用户输入的模拟本金、预设、费用、语言等设置，以及模拟余额、仓位、成交、盈亏日统计、校准记录保存在当前浏览器的 chrome.storage.local。会话免确认状态使用 chrome.storage.session。复盘使用单独的、有容量限制的本地行情缓存。代币复盘笔记（链、合约、日期、留言、更新时间）使用独立的 chrome.storage.local 存储，不上传，不经过网页行情消息通道。没有 Tango 云账户或账户同步服务器，不使用广告追踪或统计 SDK。
 
 ### 2. 对外请求与第三方
 
@@ -36,7 +36,7 @@ Tango 是独立于 GMGN 的免费模拟交易练习工具，不连接钱包、�
 
 ### 4. 本地存储、导出与删除
 
-数据保留在当前浏览器配置文件中，直到用户重置、导入覆盖、清除扩展存储或卸载。历史明细和行情缓存存在容量上限，旧明细可能被裁剪；部分日统计会持续保留。JSON 备份包含全部六链模拟账户及设置，不包括复盘行情缓存。
+数据保留在当前浏览器配置文件中，直到用户重置、导入覆盖、清除扩展存储或卸载。历史明细和行情缓存存在容量上限，旧明细可能被裁剪；部分日统计会持续保留。JSON 备份包含全部六链模拟账户、设置及代币复盘笔记，不包括复盘行情缓存。导入含笔记的新备份会替换笔记；旧备份不含笔记时保留现有笔记。重置模拟账户不会清除笔记。
 
 CSV、JSON 和 PNG 仅在用户操作时保存到下载位置或复制到剪贴板，不会自动上传或发布。下载文件和剪贴板副本不受插件卸载影响，请自行保管或删除。不要在公开 Issues 中上传私人备份、钱包信息或浏览器配置文件。
 
@@ -58,7 +58,7 @@ Tango is a free paper-trading practice tool independent of GMGN. It does not con
 
 On gmgn.ai, it reads public token names, chains, contract addresses, prices, market caps, supply, chart coordinates and relevant market-data responses. The current page URL identifies the chain/token; Tango does not collect browser-wide history. Page scripts passively inspect relevant fetch/XHR market responses and relay extracted market fields locally, not full response bodies or site-account details to a server.
 
-Paper principal, presets, fees, language/settings, balances, positions, fills, daily PnL and calibration records use chrome.storage.local in the current browser profile. Session-level confirmation suppression uses chrome.storage.session. A separate bounded local market cache supports replay. There is no Tango cloud account/sync server, advertising tracker or analytics SDK.
+Paper principal, presets, fees, language/settings, balances, positions, fills, daily PnL and calibration records use chrome.storage.local in the current browser profile. Session-level confirmation suppression uses chrome.storage.session. A separate bounded local market cache supports replay. Token-review notes (chain, contract, local date, text and update time) use separate chrome.storage.local data and are not uploaded or sent through the page market-data bridge. There is no Tango cloud account/sync server, advertising tracker or analytics SDK.
 
 ### 2. External requests and providers
 
@@ -78,7 +78,7 @@ No user fee discount is promised. Referral attribution does not change paper-tra
 
 ### 4. Retention, exports and deletion
 
-Data stays in the current browser profile until reset, import replacement, extension-storage clearing or uninstall. Trade details and market cache have retention/capacity limits; old details may be pruned while some daily aggregates persist. JSON covers six-chain paper accounts/settings, not replay market cache.
+Data stays in the current browser profile until reset, import replacement, extension-storage clearing or uninstall. Trade details and market cache have retention/capacity limits; old details may be pruned while some daily aggregates persist. JSON covers six-chain paper accounts/settings and token-review notes, not replay market cache. Importing a backup with notes replaces existing notes; legacy backups without notes preserve them. Paper-account resets do not erase notes.
 
 CSV, JSON and PNG files are downloaded or copied to the clipboard only on user action; Tango does not automatically upload/publish them. Exported files and clipboard copies survive uninstall and are the user's responsibility to protect/delete. Do not post private backups, wallet information or browser profiles in public Issues.
 
