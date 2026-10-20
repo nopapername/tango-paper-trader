@@ -72,4 +72,6 @@ Codex 浏览器控制工具与 Tango 是两个不同部分：若需要在线验�
 
 ## 6. 新 Codex 聊天可直接发送
 
+完整可复制版本见：[新电脑 Codex 项目交接提示词](docs/development/CODEX-HANDOFF-PROMPT.zh-CN.md)，包含版本、开发进度、自检步骤、功能约束和发布注意事项。以下为简短入口提示。
+
 > 这是 Tango Paper Trader 项目。请先读取 AGENTS.md、DEVELOPMENT.md 和 docs/development/HANDOFF.md，核对当前分支与 manifest 版本，运行测试及静态检查后继续。已发布运行基线为0.3.57；保留原有交易、估值、笔记和账户功能，未经明确要求不发布、不重置账户，不把开发文件或私有备份放进商店ZIP。

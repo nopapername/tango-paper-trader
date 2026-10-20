@@ -2,6 +2,8 @@
 
 更新日期：2026-10-20，Asia/Shanghai。
 
+新电脑可直接复制使用：[完整 Codex 项目交接提示词](CODEX-HANDOFF-PROMPT.zh-CN.md)。环境安装与构建步骤见仓库根目录 `DEVELOPMENT.md`。
+
 ## 可恢复基线
 
 - 已发布并经用户验收的插件版本：**0.3.57**。
