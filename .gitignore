@@ -1,0 +1,24 @@
+# Generated development output (not part of the installed extension package).
+/node_modules/
+/dist/
+/coverage/
+*.log
+/combined-dom-result.html
+/.cache/
+/.DS_Store
+
+# Local account exports, credentials and browser/tool state must remain private.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/tango-backup-*.json
+/backups/
+/browser-profiles/
+/.codex/
+/.agents/
+
+# Only deliberate store release ZIPs belong in version control.
+*.zip
+!/store-assets/tango-paper-trader-*.zip
